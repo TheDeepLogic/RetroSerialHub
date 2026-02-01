@@ -1,3 +1,5 @@
+![Retro Serial Hub](images/retroserialhub_banner.jpg)
+
 # Retro Serial Hub
 
 A multi-port serial hub that bridges vintage computers to modern TCP/IP networks, providing access to bulletin board systems (BBS), file transfers, and other retro computing services through a unified menu interface.
