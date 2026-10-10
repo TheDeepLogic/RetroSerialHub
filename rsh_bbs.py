@@ -11,6 +11,8 @@ the RetroSerialHub system. It handles:
 
 import socket
 import time
+from rsh_terminal import clear_terminal_screen
+from rsh_directory import save_directory
 
 
 def _write(ser, s):
@@ -97,22 +99,254 @@ def two_column_list(items, left_pad=38):
     return lines
 
 
+def _two_column_pages(items, page_lines=19, left_pad=38):
+    if not items:
+        return []
+
+    pages = []
+    page_size = 2 * page_lines
+    for start in range(0, len(items), page_size):
+        page_items = items[start:start + page_size]
+        left_items = page_items[:page_lines]
+        right_items = page_items[page_lines:]
+        lines = []
+
+        for row, left_item in enumerate(left_items):
+            left_number = start + row + 1
+            left_text = f"{left_number:2d}] {left_item}"
+            right_row = row
+            if right_row < len(right_items):
+                right_number = start + page_lines + right_row + 1
+                right_text = f"{right_number:2d}] {right_items[right_row]}"
+                lines.append(f"{left_text:<{left_pad}}{right_text}")
+            else:
+                lines.append(left_text)
+        pages.append(lines)
+
+    return pages
+
+
 def _render_menu(ser, sess, use_ansi=True):
+    clear_terminal_screen(ser, use_ansi)
     items = sess.get('bbss', [])
     if not items:
         _write(ser, "\r\nNo BBS entries configured.\r\n")
-        _write(ser, "\r\nEnter Q to return to the main menu.\r\n")
+        _write(ser, "\r\nM=Manage directory, Q=Main menu\r\n")
         _write(ser, "Command: ")
         return 'DONE'
 
-    if use_ansi:
-        _write(ser, "\x1b[2J\x1b[H")
-    else:
-        _write(ser, "\r\n")
+    pages = _two_column_pages(items, page_lines=19, left_pad=38)
+    for page_index, lines in enumerate(pages):
+        _write(ser, "\r\nAvailable BBS Systems")
+        if len(pages) > 1:
+            _write(ser, " (Page %d/%d)" % (page_index + 1, len(pages)))
+        _write(ser, ":\r\n\r\n")
+        for line in lines:
+            _write(ser, line + "\r\n")
+        if page_index < len(pages) - 1:
+            key = _wait_for_key(ser, quit_msg=True)
+            if key == 'Q':
+                return 'QUIT'
+            clear_terminal_screen(ser, use_ansi)
+    _write(ser, "\r\nM=Manage directory, Q=Main menu\r\n")
+    _write(ser, "Command: ")
+    return 'DONE'
 
-    _write(ser, "\r\nAvailable BBS Systems:\r\n\r\n")
-    lines = two_column_list(items, left_pad=38)
-    return _paginate_lines(ser, lines, page_lines=19, quit_msg=True)
+
+def _render_manager(ser, sess, use_ansi=True, notice=None):
+    clear_terminal_screen(ser, use_ansi)
+    _write(ser, "\r\nManage Bulletin Board Directory\r\n\r\n")
+    lines = [
+        f"{index:2d}] {name[:20]:<20} {host[:36]}:{port}"
+        for index, (name, host, port) in enumerate(
+            zip(sess["bbss"], sess["ips"], sess["ports"]), start=1
+        )
+    ]
+    pages = [
+        lines[start:start + 19]
+        for start in range(0, len(lines), 19)
+    ]
+    for page_index, page in enumerate(pages):
+        if len(pages) > 1:
+            _write(ser, f"Page {page_index + 1}/{len(pages)}\r\n")
+        for line in page:
+            _write(ser, line + "\r\n")
+        if page_index < len(pages) - 1:
+            if _wait_for_key(ser, quit_msg=True) == "Q":
+                break
+            clear_terminal_screen(ser, use_ansi)
+    if notice:
+        _write(ser, f"\r\n*** {notice} ***\r\n")
+    _write(
+        ser,
+        "\r\nA=Add, E=Edit, D=Delete, Q=Return to directory\r\n",
+    )
+    _write(ser, "Command: ")
+
+
+def start_directory_manager(sess, ser, use_ansi=True):
+    sess["submode"] = "MANAGE"
+    sess["manager_action"] = None
+    _render_manager(ser, sess, use_ansi)
+
+
+def _directory_snapshot(sess):
+    return (
+        list(sess["bbss"]),
+        list(sess["ips"]),
+        list(sess["ports"]),
+    )
+
+
+def _save_session_directory(sess, snapshot):
+    entries = [
+        {"name": name, "host": host, "port": port}
+        for name, host, port in zip(
+            sess["bbss"], sess["ips"], sess["ports"]
+        )
+    ]
+    try:
+        save_directory(entries)
+    except OSError:
+        sess["bbss"][:] = snapshot[0]
+        sess["ips"][:] = snapshot[1]
+        sess["ports"][:] = snapshot[2]
+        raise
+
+
+def _manager_error(ser, sess, use_ansi, message):
+    sess["manager_action"] = None
+    _render_manager(ser, sess, use_ansi, notice=message)
+
+
+def handle_directory_manager_input(sess, line_str, ser, use_ansi=True):
+    """Handle one BBS directory manager command or field."""
+    text = line_str.strip()
+    state = sess.get("manager_action")
+    names, hosts, ports = sess["bbss"], sess["ips"], sess["ports"]
+
+    if state is None:
+        upper = text.upper()
+        if upper == "Q":
+            sess["submode"] = "BBS_MENU"
+            _render_menu(ser, sess, use_ansi)
+        elif upper == "A":
+            sess["manager_action"] = "ADD_NAME"
+            _write(ser, "\r\nNew entry name: ")
+        elif upper == "E":
+            sess["manager_action"] = "EDIT_INDEX"
+            _write(ser, "\r\nEntry number to edit: ")
+        elif upper == "D":
+            sess["manager_action"] = "DELETE_INDEX"
+            _write(ser, "\r\nEntry number to delete: ")
+        else:
+            _write(ser, "\r\nChoose A, E, D, or Q.\r\nCommand: ")
+        return True
+
+    if state == "ADD_NAME":
+        if not text:
+            return _manager_error(ser, sess, use_ansi, "Name cannot be empty")
+        sess["manager_name"] = text
+        sess["manager_action"] = "ADD_HOST"
+        _write(ser, "\r\nHost or IP address: ")
+    elif state == "ADD_HOST":
+        if not text or any(character.isspace() for character in text):
+            _write(ser, "Enter a valid host or IP address: ")
+            return True
+        sess["manager_host"] = text
+        sess["manager_action"] = "ADD_PORT"
+        _write(ser, "\r\nPort (1-65535): ")
+    elif state == "ADD_PORT":
+        try:
+            port = int(text)
+            if not 1 <= port <= 65535:
+                raise ValueError
+        except ValueError:
+            _write(ser, "Port must be from 1 to 65535: ")
+            return True
+        snapshot = _directory_snapshot(sess)
+        names.append(sess["manager_name"])
+        hosts.append(sess["manager_host"])
+        ports.append(port)
+        try:
+            _save_session_directory(sess, snapshot)
+        except OSError as exc:
+            return _manager_error(ser, sess, use_ansi, str(exc))
+        _write(ser, "\r\nBBS entry added.\r\n")
+        sess["manager_action"] = None
+        _render_manager(ser, sess, use_ansi)
+    elif state in ("EDIT_INDEX", "DELETE_INDEX"):
+        try:
+            index = int(text) - 1
+            if not 0 <= index < len(names):
+                raise ValueError
+        except ValueError:
+            _write(ser, "Enter a valid entry number: ")
+            return True
+        sess["manager_index"] = index
+        if state == "DELETE_INDEX":
+            sess["manager_action"] = "DELETE_CONFIRM"
+            _write(ser, f"\r\nDelete {names[index]}? (Y/N): ")
+        else:
+            sess["manager_action"] = "EDIT_NAME"
+            _write(ser, f"\r\nNew name (Enter to keep {names[index]}): ")
+    elif state == "DELETE_CONFIRM":
+        if text.upper() not in ("Y", "N"):
+            _write(ser, "Enter Y or N: ")
+            return True
+        if text.upper() == "N":
+            sess["manager_action"] = None
+            _render_manager(ser, sess, use_ansi)
+            return True
+        snapshot = _directory_snapshot(sess)
+        index = sess["manager_index"]
+        del names[index]
+        del hosts[index]
+        del ports[index]
+        try:
+            _save_session_directory(sess, snapshot)
+        except OSError as exc:
+            return _manager_error(ser, sess, use_ansi, str(exc))
+        _write(ser, "\r\nBBS entry deleted.\r\n")
+        sess["manager_action"] = None
+        _render_manager(ser, sess, use_ansi)
+    elif state == "EDIT_NAME":
+        index = sess["manager_index"]
+        if text:
+            sess["edited_name"] = text
+        else:
+            sess["edited_name"] = names[index]
+        sess["manager_action"] = "EDIT_HOST"
+        _write(ser, f"\r\nNew host (Enter to keep {hosts[index]}): ")
+    elif state == "EDIT_HOST":
+        index = sess["manager_index"]
+        if text and any(character.isspace() for character in text):
+            _write(ser, "Host cannot contain whitespace: ")
+            return True
+        sess["edited_host"] = text or hosts[index]
+        sess["manager_action"] = "EDIT_PORT"
+        _write(ser, f"\r\nNew port (Enter to keep {ports[index]}): ")
+    elif state == "EDIT_PORT":
+        index = sess["manager_index"]
+        try:
+            port = ports[index] if not text else int(text)
+            if not 1 <= port <= 65535:
+                raise ValueError
+        except ValueError:
+            _write(ser, "Port must be from 1 to 65535: ")
+            return True
+        snapshot = _directory_snapshot(sess)
+        names[index] = sess["edited_name"]
+        hosts[index] = sess["edited_host"]
+        ports[index] = port
+        try:
+            _save_session_directory(sess, snapshot)
+        except OSError as exc:
+            return _manager_error(ser, sess, use_ansi, str(exc))
+        _write(ser, "\r\nBBS entry updated.\r\n")
+        sess["manager_action"] = None
+        _render_manager(ser, sess, use_ansi)
+    return True
 
 
 def _connect_bbs(index, ser, BBSS, IPS, PORTS):
@@ -135,9 +369,9 @@ def create_session(ser, use_ansi=True, BBSS=None, IPS=None, PORTS=None):
     """Initialize BBS module session"""
     sess = {
         'submode': 'BBS_MENU',
-        'bbss': BBSS or [],
-        'ips': IPS or [],
-        'ports': PORTS or [],
+        'bbss': BBSS if BBSS is not None else [],
+        'ips': IPS if IPS is not None else [],
+        'ports': PORTS if PORTS is not None else [],
         'sock': None,
         'line_buffer': b""
     }

@@ -9,12 +9,17 @@ but can be configured for gpt-4 if available.
 
 import os
 import json
-import openai
-import sys
 from pathlib import Path
+from openai import OpenAI
+from rsh_terminal import clear_terminal_screen
 
 # Load OpenAI API key from config file or environment
 CONFIG_FILE = Path(__file__).resolve().parent / "ai_config.json"
+SYSTEM_PROMPT = (
+    "You are a helpful AI assistant in a retro BBS system. Keep responses "
+    "concise and informative. Use ASCII art sparingly and only when "
+    "specifically requested."
+)
 
 def write(ser, s):
     """Write a string to the serial port."""
@@ -22,8 +27,7 @@ def write(ser, s):
 
 def write_header(ser, use_ansi):
     """Show the AI chat header."""
-    if use_ansi:
-        ser.write(b"\x1b[2J\x1b[H")  # Clear screen
+    clear_terminal_screen(ser, use_ansi)
     write(ser, "\r\nLogicNet AI Assistant (powered by ChatGPT)\r\n")
     write(ser, "--------------------------------------\r\n\r\n")
     write_help(ser)
@@ -37,37 +41,30 @@ def write_help(ser):
     write(ser, "context of your conversation until you start a new one.\r\n")
     write(ser, "\r\nEnter your message: ")
 
-# Try config file first
-try:
+def _load_api_key():
     if CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
-            config = json.load(f)
-            if 'api_key' in config:
-                openai.api_key = config['api_key']
-except Exception as e:
-    write(sys.stderr, f"Config file error: {e}\n")
-
-# Not found in config, try environment
-if not openai.api_key:
-    # Try direct environment access first
-    key = os.environ.get('OPENAI_API_KEY')
-    if key:
-        openai.api_key = key
-    else:
-        # Fallback to getenv and print debug info
-        key = os.getenv('OPENAI_API_KEY')
-        if key:
-            openai.api_key = key
+        try:
+            with CONFIG_FILE.open(encoding="utf-8") as config_file:
+                config = json.load(config_file)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Config file error: {exc}")
         else:
-            print("DEBUG: OpenAI API key not found in environment")
-            print("Available env vars:", list(os.environ.keys()))
+            api_key = config.get("api_key")
+            if api_key:
+                return api_key
+    return os.environ.get("OPENAI_API_KEY")
+
+
+_api_key = _load_api_key()
+client = OpenAI(api_key=_api_key) if _api_key else None
 
 def create_session(ser, use_ansi=True):
     """Initialize a new AI chat session.
     
     Returns a dict with conversation state that will be passed to handle_input.
     """
-    if not openai.api_key:
+    if client is None:
+        clear_terminal_screen(ser, use_ansi)
         write(ser, "\r\n*** Error: OpenAI API key not configured ***\r\n")
         write(ser, "Please create ai_config.json with {'api_key': 'your-key'}\r\n")
         write(ser, "or set OPENAI_API_KEY environment variable.\r\n")
@@ -76,7 +73,7 @@ def create_session(ser, use_ansi=True):
     write_header(ser, use_ansi)
     return {
         'messages': [
-            {"role": "system", "content": "You are a helpful AI assistant in a retro BBS system. Keep responses concise and informative. Use ASCII art sparingly and only when specifically requested."}
+            {"role": "system", "content": SYSTEM_PROMPT}
         ],
         'pending_response': False
     }
@@ -94,7 +91,7 @@ def handle_input(session, line_str, ser, use_ansi=True):
         (consumed, action) where consumed is True if input was handled,
         and action is None to continue or 'MENU' to exit.
     """
-    if not openai.api_key:
+    if client is None:
         return True, 'MENU'
         
     if not line_str:
@@ -109,7 +106,7 @@ def handle_input(session, line_str, ser, use_ansi=True):
     if upper == 'N':
         # Start fresh conversation with just the system message
         session['messages'] = [
-            {"role": "system", "content": "You are a helpful AI assistant in a retro BBS system. Keep responses concise and informative. Use ASCII art sparingly and only when specifically requested."}
+            {"role": "system", "content": SYSTEM_PROMPT}
         ]
         write_header(ser, use_ansi)
         return True, None
@@ -123,19 +120,21 @@ def handle_input(session, line_str, ser, use_ansi=True):
         
         # Call ChatGPT API
         try:
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=session['messages'],
                 max_tokens=500,  # Keep responses reasonable for serial
                 temperature=0.7
             )
-            
+
             # Get response content
-            ai_message = response.choices[0].message
-            session['messages'].append(ai_message)
-            
+            content = response.choices[0].message.content or ""
+            session['messages'].append(
+                {"role": "assistant", "content": content}
+            )
+
             # Format and display response
-            content = ai_message['content'].strip()
+            content = content.strip()
             # Split into lines and add proper line endings
             lines = [ln.rstrip() for ln in content.splitlines()]
             for line in lines:

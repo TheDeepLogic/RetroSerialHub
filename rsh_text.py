@@ -13,6 +13,7 @@ All text functionality is self-contained in this module to keep the hub clean.
 
 import time
 import pathlib
+from rsh_terminal import clear_terminal_screen
 
 
 def _write(ser, s):
@@ -22,10 +23,7 @@ def _write(ser, s):
 
 def _clear_screen(ser, use_ansi=True):
     """Clear the terminal screen"""
-    if use_ansi:
-        _write(ser, "\x1b[2J\x1b[H")  # ANSI clear screen + home cursor
-    else:
-        _write(ser, "\r\n")  # Simple newline for non-ANSI terminals
+    clear_terminal_screen(ser, use_ansi)
 
 
 def _wait_for_key(ser):
@@ -93,12 +91,14 @@ def create_session(ser, use_ansi=True, files=None, base_dir=None):
         'files': list(files) if files else [],
         'page_idx': 0,
         'base_dir': base_dir,
+        'use_ansi': use_ansi,
     }
     _render_menu(ser, sess)
     return sess
 
 
 def _render_menu(ser, sess):
+    clear_terminal_screen(ser, sess.get('use_ansi', True))
     items = sess.get('files', [])
     if not items:
         _write(ser, "\r\nNo text files available.\r\n")

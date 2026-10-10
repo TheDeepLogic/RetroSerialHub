@@ -14,6 +14,7 @@ This file implements the current WARGAMES behavior extracted from the monolith.
 """
 
 import time
+from rsh_terminal import clear_terminal_screen
 
 GAMES_LIST = [
     "FALKEN'S MAZE",
@@ -39,6 +40,7 @@ def _write(ser, s):
 
 def create_session(ser, use_ansi=True, **kwargs):
     """Create and initialize a session. Returns a session dict."""
+    clear_terminal_screen(ser, use_ansi)
     sess = {
         'submode': 'CPM',  # CPM, DIALER, TERM, TERM_SCHOOL, TERM_AIRLINE, TERM_BANK, TERM_PROTO
         'student_name': '',
@@ -75,11 +77,11 @@ def handle_input(sess, line_str, ser, use_ansi=True):
             return True, None
         if lower in ('dialer', 'dialer.com', 'a:dialer', 'a:dialer.com'):
             sess['submode'] = 'DIALER'
-            _enter_dialer(ser)
+            _enter_dialer(ser, use_ansi)
             return True, None
         if lower in ('term', 'term.com', 'a:term', 'a:term.com'):
             sess['submode'] = 'TERM'
-            _enter_term(ser)
+            _enter_term(ser, use_ansi)
             return True, None
         # unknown
         _write(ser, "\r\nBad command or file name\r\n")
@@ -177,7 +179,8 @@ def handle_input(sess, line_str, ser, use_ansi=True):
 
 
 # helper printers
-def _enter_dialer(ser):
+def _enter_dialer(ser, use_ansi=True):
+    clear_terminal_screen(ser, use_ansi)
     _write(ser, "\r\nTO SCAN FOR CARRIER TONES, PLEASE LIST\r\n")
     _write(ser, "DESIRED AREA CODES AND PREFIXES\r\n\r\n")
     _write(ser, "     AREA           AREA           AREA           AREA\r\n")
@@ -188,7 +191,8 @@ def _enter_dialer(ser):
     _write(ser, "\r\nDIALING...")
 
 
-def _enter_term(ser):
+def _enter_term(ser, use_ansi=True):
+    clear_terminal_screen(ser, use_ansi)
     _write(ser, "\r\nTERMINAL PROGRAM v1.0\r\n\r\n")
     _write(ser, "1] School System\r\n")
     _write(ser, "2] Airline System\r\n")

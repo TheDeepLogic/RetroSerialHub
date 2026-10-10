@@ -26,6 +26,7 @@ STOPBITS_ONE = getattr(serial, 'STOPBITS_ONE', 1)
 STOPBITS_TWO = getattr(serial, 'STOPBITS_TWO', 2)
 import time
 import os
+from rsh_terminal import clear_terminal_screen
 
 
 def _write(ser, s):
@@ -39,11 +40,12 @@ def create_session(ser, use_ansi=True, active_ports=None, surrendered_ports=None
         'active_ports': active_ports,
         'surrendered_ports': surrendered_ports,
     }
-    _render_intro(ser)
+    _render_intro(ser, use_ansi)
     return sess
 
 
-def _render_intro(ser):
+def _render_intro(ser, use_ansi=True):
+    clear_terminal_screen(ser, use_ansi)
     _write(ser, "\r\nCOM Port Bridge setup. Press Enter to accept the default for any prompt.\r\n\r\n")
     _write(ser, "COM Port Number (Default: 1): ")
 
@@ -245,20 +247,20 @@ def handle_input(sess, line_str, ser, use_ansi=True):
                 _write(ser, f"\r\n*** Unable to open {port_name}: {last_exc} ***\r\n")
                 _write(ser, "Press any key to continue.\r\n")
                 sess['stage'] = 0
-                _render_intro(ser)
+                _render_intro(ser, use_ansi)
                 return True, None
         except Exception as e:
             _write(ser, f"\r\n*** Unable to open {port_name}: {e} ***\r\n")
             _write(ser, "Press any key to continue.\r\n")
             sess['stage'] = 0
-            _render_intro(ser)
+            _render_intro(ser, use_ansi)
             return True, None
 
         # Return the opened serial object to the core
         return True, ('OPEN_BRIDGE', bridge_serial, port_name)
 
     # default: re-render intro
-    _render_intro(ser)
+    _render_intro(ser, use_ansi)
     return True, None
 
 

@@ -16,6 +16,10 @@ PARITY_NONE = getattr(serial, 'PARITY_NONE', 'N')
 STOPBITS_ONE = getattr(serial, 'STOPBITS_ONE', 1)
 STOPBITS_TWO = getattr(serial, 'STOPBITS_TWO', 2)
 
+# Main menu welcome banner. A value changed through the Welcome Banner option is saved
+# separately and takes precedence until the saved override is reset.
+WELCOME_BANNER = "Welcome to the Retro Serial Hub"
+
 # ============================================================================
 # SERIAL PORT CONFIGURATION
 # ============================================================================
@@ -30,7 +34,10 @@ STOPBITS_TWO = getattr(serial, 'STOPBITS_TWO', 2)
 #   stopbits: Stop bits (STOPBITS_ONE or STOPBITS_TWO)
 #   xonxoff:  Software flow control (True or False)
 #   rtscts:   Hardware flow control (True or False)
-#   ansi:     Terminal supports ANSI escape codes (True or False)
+#   ansi:     Hub menus should use ANSI sequences (True) or plain text (False)
+#   translate_ansi: Translate incoming BBS ANSI/VT100 data for a non-ANSI terminal
+#   ansi_clear_sequence: Bytes sent to clear the screen on translated terminals
+#   ansi_home_clears_screen: Treat cursor-home as a clear for screen redraws
 #
 # Example configurations are provided below for common vintage systems.
 # Modify the port assignments and parameters to match your setup.
@@ -82,8 +89,10 @@ SERIAL_CONFIGS = {
 # ============================================================================
 # BBS DIRECTORY CONFIGURATION
 # ============================================================================
-# Configure the bulletin board systems (BBSs) available for dialing.
-# Each BBS needs three corresponding entries in BBSS, IPS, and PORTS lists.
+# Default bulletin board systems (BBSs) used to seed the saved directory.
+# The hub's Bulletin Boards manager can edit or remove these entries; saved
+# changes are stored in bbs_directory.json and override these defaults.
+# Each default BBS needs corresponding entries in BBSS, IPS, and PORTS.
 # The entries must be in the same order across all three lists.
 #
 # BBSS:  Display names shown in the BBS menu

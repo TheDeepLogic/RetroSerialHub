@@ -22,6 +22,7 @@ from textwrap import shorten
 import os
 import time
 import pathlib
+from rsh_terminal import clear_terminal_screen
 
 # XMODEM / YMODEM constants
 SOH = 0x01  # 128-byte blocks
@@ -43,12 +44,14 @@ def create_session(ser, use_ansi=True, files=None, transfer_mode='XMODEM', base_
         'files': files or [],
         'transfer_mode': transfer_mode,
         'base_dir': pathlib.Path(base_dir) if base_dir is not None else None,
+        'use_ansi': use_ansi,
     }
     _render_menu(ser, sess)
     return sess
 
 
 def _render_menu(ser, sess):
+    clear_terminal_screen(ser, sess.get('use_ansi', True))
     _write(ser, f"\r\nFile Transfer Menu (Current mode: {sess['transfer_mode']})\r\n\r\n")
     display_names = [shorten(f, width=34, placeholder='…') for f in sess['files']]
     # two-column list simple implementation

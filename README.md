@@ -15,10 +15,12 @@ A multi-port serial hub that bridges vintage computers to modern TCP/IP networks
 ## Features
 
 - **Multi-Port Serial Support**: Connect multiple vintage computers simultaneously, each with independent configurations
-- **BBS Directory**: Browse and connect to a curated list of retro bulletin board systems
+- **BBS Directory**: Browse, connect to, and manage saved BBS destinations
+- **Telnet**: Connect to a host and port directly; manage Telnet bookmarks or add destinations to the BBS directory
+- **FTP/FTPS**: Browse FTP servers and save downloads to the hub or transfer them directly to the connected terminal
 - **File Transfers**: Send and receive files using XMODEM, YMODEM, or ASCII protocols
 - **Text Library**: View text files with pagination support for vintage terminals
-- **URL Reader**: Fetch web content and strip HTML for display on text-only terminals
+- **Web Browser**: Browse paginated text pages, follow numbered links, and manage bookmarks
 - **Notes System**: Create, read, and manage text notes
 - **COM Port Bridge**: Bridge between different serial ports for direct computer-to-computer communication
 - **WarGames Mode**: Nostalgic WarGames movie-inspired interface (proof-of-concept)
@@ -29,7 +31,7 @@ A multi-port serial hub that bridges vintage computers to modern TCP/IP networks
 ## Requirements
 
 - Python 3.6 or higher
-- PySerial library (`pip install pyserial`)
+- Dependencies listed in `requirements.txt`
 - USB-to-Serial adapters or RS-232 ports for connecting vintage computers
 - Optional: OpenAI API key for AI Assistant feature
 
@@ -39,12 +41,16 @@ A multi-port serial hub that bridges vintage computers to modern TCP/IP networks
 
 2. Install Python dependencies:
    ```bash
-   pip install pyserial
+   python -m pip install -r requirements.txt
    ```
+   This installs PySerial and, on macOS/Linux, `pynput` for the Keyboard Bridge.
+   On macOS, grant the terminal or Python process Accessibility permission.
+   On Linux, the bridge requires a supported graphical desktop session; Wayland
+   sessions may not permit global keyboard injection.
 
 3. Optional - For AI Assistant functionality:
    ```bash
-   pip install openai
+   python -m pip install openai
    ```
 
 4. Configure your serial ports and BBS list (see Configuration section below)
@@ -72,7 +78,10 @@ SERIAL_CONFIGS = {
         "stopbits": STOPBITS_ONE,
         "xonxoff": False,
         "rtscts": True,
-        "ansi": False             # Set to True if terminal supports ANSI
+        "ansi": False,            # Set to True when the local terminal supports ANSI
+        "translate_ansi": False,  # Optional: translate incoming ANSI/VT100 for a non-ANSI terminal
+        "ansi_clear_sequence": b"\x0c",  # Replacement bytes for supported clear requests
+        "ansi_home_clears_screen": False  # Optional: treat cursor-home as a screen clear
     },
     # Add more computers as needed...
 }
@@ -84,21 +93,70 @@ Common baud rates for vintage systems:
 - IBM PC/XT/AT: 300, 1200, 2400, 9600
 - TRS-80: 300, 1200, 2400, 9600
 
-### BBS Directory Configuration
+#### Optional translation for non-ANSI terminals
 
-The BBS directory is configured using three synchronized lists in `config.py`:
+ANSI translation is useful with any terminal or display that cannot interpret
+the control sequences sent by a remote system. It is configured independently
+in each `SERIAL_CONFIGS` entry and affects **incoming BBS/Telnet data** on that
+serial profile. It does not affect the serial-to-serial COM Port Bridge or
+other configured ports. Hub menu screens use `ansi` for native ANSI
+clear/home controls; when ANSI translation is enabled, they use
+`ansi_clear_sequence` to clear the terminal.
+
+```python
+"RETRO_TERMINAL": {
+    # Existing serial settings go here...
+    "ansi": False,
+    "translate_ansi": True,
+    "ansi_clear_sequence": b"\x0c",
+    "ansi_home_clears_screen": False,
+}
+```
+
+- `translate_ansi` enables the lossy ANSI/VT100-to-text translator. It strips
+  color and unsupported control sequences, approximates common CP437
+  line-drawing characters, and linearizes supported cursor positioning. It is
+  not a complete terminal emulator; applications using complex screen
+  addressing or terminal queries may not display correctly.
+- `ansi_clear_sequence` is the byte sequence sent to the terminal for a
+  supported erase-in-display/reset request, incoming form-feed (`0x0C`), or a
+  Hub menu screen clear when `translate_ansi` is enabled.
+  Set this to the clear-screen control sequence expected by the receiving
+  terminal or its software. The default when omitted is form feed
+  (`b"\x0c"`).
+- `ansi_home_clears_screen` defaults to `False`. Set it to `True` when an
+  application redraws a screen by returning the cursor home and the configured
+  clear sequence is suitable. This can be useful for refreshed or animated
+  interfaces; cursor-home is then treated as a clear rather than merely
+  repositioning the cursor.
+
+The clear sequence can be any byte sequence understood by the terminal or its
+software. Some terminal emulators can map a custom sequence to a screen action.
+Leave translation disabled for terminals that already interpret the remote
+system's control sequences.
+
+### BBS Directory
+
+The initial BBS directory is seeded from three synchronized lists in `config.py`:
 
 - `BBSS`: Display names for each BBS
 - `IPS`: Hostnames or IP addresses
 - `PORTS`: TCP port numbers
 
-To add a new BBS, append entries to all three lists in the same order:
+The first time the hub starts, it uses those lists as its directory. Changes
+made with **Bulletin Boards → M=Manage directory** are saved to
+`bbs_directory.json` and include the original entries. The saved directory then
+takes precedence over `config.py`, so entries can be added, edited, and deleted
+without keeping three lists synchronized. Delete `bbs_directory.json` while
+the hub is stopped to restore the defaults from `config.py`.
 
-```python
-BBSS.append("My BBS")
-IPS.append("mybbs.example.com")
-PORTS.append(23)
-```
+In the **Telnet** option, enter a hostname/IP and port for a direct TCP terminal
+connection. Choose whether to save that destination in Telnet bookmarks, add it
+to the Bulletin Boards directory, or connect without saving. Telnet bookmarks
+are stored separately in `telnet_bookmarks.json`; select a saved destination by
+number or use `D` to delete it. Both connection types support `ATH` to hang up
+and `ATM` to return to the main menu. Incoming data uses the same configured
+ANSI translation and screen-clear behavior.
 
 ### AI Assistant Configuration (Optional)
 
@@ -130,25 +188,73 @@ The hub will attempt to open each configured serial port. Ports that are not pre
 1. Connect your vintage computer to the USB-to-Serial adapter
 2. Start your terminal software on the vintage computer
 3. Configure the terminal to match the settings in `config.py` (baud rate, data bits, parity, stop bits)
-4. Press Enter to see the main menu
+4. Press Enter to see the main menu. Type `ATM` at any time to return to it.
 
 ### Main Menu
 
 When connected, you'll see the LogicNet BBS main menu with these options:
 
-1. **Bulletin Boards**: Browse and connect to BBSs
-2. **File Transfers**: Send or receive files
-3. **Text Library**: View text files
-4. **URL Reader**: Fetch and read web content
-5. **Notes**: Create and manage notes
-6. **COM Port Bridge**: Bridge to another serial port
-7. **Wargames**: WarGames-inspired interface
-8. **AI Assistant**: Chat with ChatGPT (if configured)
+1. **Bulletin Boards**: Browse and connect to BBSs; enter `M` to add, edit, or delete directory entries
+2. **Web Browser**: Browse web pages as paginated text
+3. **Telnet**: Connect directly to a host and port, or open/delete saved Telnet bookmarks
+4. **FTP**: Connect to traditional FTP or explicit FTPS, browse directories, and choose whether a download is saved on the hub or sent directly to the terminal
+5. **File Transfers**: Send or receive files
+6. **Text Library**: View text files
+7. **AI Assistant**: Chat with ChatGPT (if configured)
+8. **Wargames**: WarGames-inspired interface
+9. **Notes**: Create and manage notes
+10. **COM Port Bridge**: Bridge to another serial port
+11. **Keyboard Bridge**: Type into the focused host application from the
+   serial terminal. Enter, Tab, and Backspace are supported; press **Ctrl+X**
+   to exit. Escape and Ctrl+] are also recognized when the terminal can send
+   them. This uses Windows' native input API on Windows and `pynput` on
+   macOS/Linux. Keep the intended application focused while using this mode.
+12. **Welcome Banner**: Set a persistent main-menu banner. The `WELCOME_BANNER`
+    value in `config.py` is the default; a banner set here is saved separately
+    and takes precedence until an empty entry resets it to the configured default.
+
+Type `ATM` at any time to return to the main menu and disconnect an active
+network or serial bridge session.
+
+Use `N` and `P` to scroll, `G` to jump to a page number, `F` to return to
+the first page, and enter a displayed link number (such as `3` or `[3]`) to
+follow it. `B` goes back, `U` enters another address, and `Q` returns to the
+main menu. `A` saves the current page as a bookmark; `M` opens saved
+bookmarks, where you can enter a number to open it or `D` followed by a
+number to delete it. HTML search inputs appear as `I<number>`; choose one,
+enter the value, then use `S<number>` to submit its form. Press Backspace to
+edit the current input line. Bookmarks are stored in `browser_bookmarks.json`
+beside the hub. The browser displays text and numbered links; JavaScript and
+images are not supported. HTML GET/POST forms are supported when their fields
+are standard text controls. HTML and plain-text responses are limited to 1 MiB.
+
+### FTP Downloads
+
+Select **FTP**, enter the server hostname and port (default 21), choose regular
+FTP or explicit FTPS, and provide credentials. Press Enter at the username
+prompt for anonymous login. The client uses passive mode and displays files and
+directories; use `C<number>` to open a directory, `U` to go up, and `R` to
+refresh. Enter `A` to bookmark the current site; `M` opens saved FTP sites,
+where a number opens a site and `D<number>` deletes a bookmark. Bookmarks retain
+the hostname, port, FTP/FTPS selection, and username, but never the password;
+the password is prompted for when opening a saved site. They are stored in
+`ftp_bookmarks.json`.
+
+Selecting a file prompts for **Host** or **Direct**:
+
+- **Host** saves the file in `files/`, where it appears in **File Transfers**
+  the next time that menu is opened.
+- **Direct** downloads to a temporary host file and immediately sends it using
+  XMODEM, YMODEM, or ASCII. The temporary copy is removed after transfer.
+
+Press `Q` to disconnect and return to the main menu. `ATM` also returns to the
+main menu. Explicit FTPS encrypts the connection; ordinary FTP does not encrypt
+credentials or data.
 
 ### Special Commands
 
 - **ATM**: Return to main menu from anywhere (like the old modem "AT" commands)
-- **ATH**: Hang up / disconnect from a BBS
+- **ATH**: Hang up / disconnect from a BBS or Telnet host
 - **Q**: Quit from most sub-menus
 
 ### File Transfers
@@ -180,17 +286,28 @@ Retro-Serial-Hub/
 ├── RETRO_SERIAL_HUB.py    # Main hub program
 ├── config.py               # Configuration file (edit this!)
 ├── ai_config.json          # OpenAI API key (optional)
+├── bbs_directory.json     # Managed BBS directory (created when first changed)
+├── telnet_bookmarks.json  # Telnet bookmarks (created when first saved)
+├── ftp_bookmarks.json     # FTP/FTPS bookmarks (created when first saved)
+├── requirements.txt       # Python dependencies
 ├── rsh_ai.py              # AI Assistant module
-├── rsh_bbs.py             # BBS directory module
+├── rsh_bbs.py             # BBS directory and management module
+├── rsh_directory.py       # Persistent BBS directory storage
+├── rsh_telnet.py          # Direct TCP terminal connections and bookmarks
+├── rsh_ftp.py             # FTP/FTPS browser and downloads
+├── rsh_browser.py         # Text-first web browser and bookmarks
 ├── rsh_bridge.py          # COM port bridge module
 ├── rsh_files.py           # File transfer module
+├── rsh_keyboard.py        # Host keyboard bridge
 ├── rsh_notes.py           # Notes module
+├── rsh_terminal.py        # ANSI translation and screen clearing
 ├── rsh_text.py            # Text library module
-├── rsh_url.py             # URL reader module
 ├── rsh_wargames.py        # WarGames module
+├── rsh_welcome.py         # Persistent welcome banner
 ├── files/                 # File transfer storage
 ├── text/                  # Text library files
-└── notes/                 # Notes storage
+├── notes/                 # Notes storage
+└── tests/                 # Unit tests
 ```
 
 ## Module Development
@@ -230,7 +347,7 @@ This design allows you to customize or extend features without modifying the cor
 
 ### BBS Won't Connect
 
-- Verify the hostname/IP and port in `config.py`
+- Verify the hostname/IP and port in the BBS directory or Telnet bookmark
 - Check your internet connection
 - Some BBSs may be offline; try a different one
 - Firewall may be blocking outbound Telnet connections
@@ -241,6 +358,27 @@ This design allows you to customize or extend features without modifying the cor
 - Verify data bits setting (usually 8)
 - Disable ANSI support for terminals that don't support it
 - Try a different cable
+
+## Release Notes
+
+### v1.1
+
+- Replaced the former URL Reader with a text-first Web Browser supporting
+  paginated pages, numbered links, standard HTML forms, history, and bookmarks.
+- Added direct Telnet connections with persistent Telnet bookmarks and the
+  option to add destinations to the Bulletin Boards directory.
+- Added persistent BBS directory management for adding, editing, and deleting
+  configured and user-added entries.
+- Added FTP/explicit-FTPS directory browsing, saved site bookmarks, and
+  downloads to the hub's file library or directly to the terminal using
+  XMODEM, YMODEM, or ASCII.
+- Added a cross-platform Keyboard Bridge (Windows native input; macOS/Linux
+  through `pynput`), plus Ctrl+X as an exit shortcut.
+- Added persistent welcome-banner customization, main-menu and submenu screen
+  clearing, and improved ANSI translation for non-ANSI terminals.
+- Migrated the AI Assistant to the current OpenAI Python client interface.
+- Reordered the main menu, added the FTP option, shortened the banner option
+  label to **Welcome Banner**, and documented `ATM` as the menu return command.
 
 ## Hardware Recommendations
 

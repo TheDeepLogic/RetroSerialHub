@@ -16,6 +16,8 @@ Actions returned to core:
 This module renders the notes list and returns high-level actions to the core.
 """
 
+from rsh_terminal import clear_terminal_screen
+
 
 def _write(ser, s):
     ser.write(s.encode('ascii', errors='ignore'))
@@ -43,16 +45,17 @@ def create_session(ser, use_ansi=True, notes=None, base_dir=None):
     sess = {
         'notes': list(notes) if notes else [],
         'base_dir': base_dir,
+        'use_ansi': use_ansi,
     }
     _render_menu(ser, sess)
     return sess
 
 
 def _render_menu(ser, sess):
+    clear_terminal_screen(ser, sess.get('use_ansi', True))
     items = sess.get('notes', [])
-    clear = "\r\n"
     if not items:
-        _write(ser, f"{clear}No notes available.\r\n")
+        _write(ser, "No notes available.\r\n")
         _write(ser, "\r\nC=Create, Q=Quit\r\n")
         _write(ser, "Command: ")
         return

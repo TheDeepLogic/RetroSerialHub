@@ -5,9 +5,11 @@ LogicNet Multi-port Serial <-> TCP bridge with BBS-style menus.
 Features per serial port:
 - Main menu (ATM to return from anywhere)
 - Bulletin Boards directory with ADTnn dialing and ATH hangup
+- Telnet direct connections and bookmarks
 - File Transfers: two-column file list, select number to XMODEM-send
 - Text Library: list *.txt files, view with pagination
-- URL Reader: fetch URL text, strip HTML, paginate, loop
+- Web Browser: browse paginated text pages and follow numbered links
+- Keyboard Bridge: inject serial input into a focused host application
 
 Each configured COM port is opened (if available) and runs its own
 independent bridge loop. If a port isn't present, it's skipped.
@@ -17,15 +19,41 @@ UX Design:
 - ATM cancels any active BBS connection and returns to main menu
 """
 
-import serial, socket, select, threading, time, os, sys, pathlib, urllib.request, urllib.error, html, re, importlib
+import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile
+from rsh_terminal import (
+    AnsiToTextTranslator,
+    clear_terminal_screen,
+    configure_screen_clearing,
+)
+from rsh_welcome import load_banner, reset_banner, save_banner, validate_banner
 
 # Import configuration from config.py
 try:
-    from config import SERIAL_CONFIGS, BBSS, IPS, PORTS, EIGHTBITS, SEVENBITS, PARITY_NONE, STOPBITS_ONE
+    from config import (
+        SERIAL_CONFIGS,
+        BBSS,
+        IPS,
+        PORTS,
+        EIGHTBITS,
+        SEVENBITS,
+        PARITY_NONE,
+        STOPBITS_ONE,
+        WELCOME_BANNER as CONFIG_WELCOME_BANNER,
+    )
+    from rsh_directory import load_directory, save_directory
 except ImportError:
     print("ERROR: config.py not found. Please ensure config.py exists in the same directory.")
     print("See config.py for configuration examples.")
     sys.exit(1)
+
+try:
+    _bbs_entries = load_directory(BBSS, IPS, PORTS)
+except (OSError, ValueError) as exc:
+    print(f"ERROR: Could not load BBS directory: {exc}")
+    sys.exit(1)
+BBSS[:] = [entry["name"] for entry in _bbs_entries]
+IPS[:] = [entry["host"] for entry in _bbs_entries]
+PORTS[:] = [entry["port"] for entry in _bbs_entries]
 
 # Global registry: map port name -> {'thread': thread_name, 'serial': Serial()}
 ACTIVE_PORTS = {}
@@ -37,25 +65,37 @@ BASE_DIR = pathlib.Path(__file__).resolve().parent
 FILES_DIR = BASE_DIR / "files"
 TEXT_DIR  = BASE_DIR / "text"
 NOTES_DIR = BASE_DIR / "notes"
+WELCOME_BANNER_FILE = BASE_DIR / "welcome_banner.json"
 FILES_DIR.mkdir(exist_ok=True)
 TEXT_DIR.mkdir(exist_ok=True)
 NOTES_DIR.mkdir(exist_ok=True)
 
+try:
+    WELCOME_BANNER = load_banner(CONFIG_WELCOME_BANNER, WELCOME_BANNER_FILE)
+except (OSError, ValueError) as exc:
+    print(f"Welcome banner override error: {exc}. Using config.py value.")
+    WELCOME_BANNER = CONFIG_WELCOME_BANNER
+
 # ---------------- UI helpers ----------------
 def clear_screen(ser, use_ansi=True):
-    if use_ansi:
-        # ANSI clear screen + cursor home
-        ser.write(b"\x1b[2J\x1b[H")
-    else:
-        # Fallback: just drop a bunch of newlines
-        # ser.write(b"\r\n" * 24)
-        ser.write(b"\r\n")
+    clear_terminal_screen(ser, use_ansi)
 
 def write(ser, s):
     ser.write(s.encode('ascii', errors='ignore'))
 
 def write_bytes(ser, b):
     ser.write(b)
+
+
+def update_command_input(buffer, data):
+    """Append printable input and apply destructive backspaces."""
+    for byte in data:
+        if byte in (8, 127):
+            buffer = buffer[:-1]
+        elif byte in (10, 13) or byte >= 32:
+            buffer += bytes((byte,))
+    return buffer
+
 
 def wait_for_key(ser, quit_msg=False):
     if quit_msg:
@@ -107,17 +147,22 @@ def two_column_list(items, left_pad=38):
 
 def show_main_menu(ser, use_ansi=True):
     clear_screen(ser, use_ansi)
-    write(ser, "\r\nWelcome to the LogicNet Bulletin Board System\r\n")
-    write(ser, "v1.0, copyright (c) 2025\r\n\r\n")
+    write(ser, "\r\n" + WELCOME_BANNER + "\r\n")
+    write(ser, "v1.1, copyright (c) 2025\r\n\r\n")
     write(ser, "Please select a command from the options below:\r\n\r\n")
     write(ser, " 1] Bulletin Boards\r\n")
-    write(ser, " 2] File Transfers\r\n")
-    write(ser, " 3] Text Library\r\n")
-    write(ser, " 4] URL Reader\r\n")
-    write(ser, " 5] Notes\r\n")
-    write(ser, " 6] COM Port Bridge\r\n")
-    write(ser, " 7] Wargames\r\n")
-    write(ser, " 8] AI Assistant\r\n\r\n")
+    write(ser, " 2] Web Browser\r\n")
+    write(ser, " 3] Telnet\r\n")
+    write(ser, " 4] FTP\r\n")
+    write(ser, " 5] File Transfers\r\n")
+    write(ser, " 6] Text Library\r\n")
+    write(ser, " 7] AI Assistant\r\n")
+    write(ser, " 8] Wargames\r\n")
+    write(ser, " 9] Notes\r\n")
+    write(ser, "10] COM Port Bridge\r\n")
+    write(ser, "11] Keyboard Bridge\r\n")
+    write(ser, "12] Welcome Banner\r\n\r\n")
+    write(ser, "Type ATM at any time to return to this menu.\r\n\r\n")
     write(ser, "Command: ")
 
 def show_notes_menu(ser, notes, use_ansi=True):
@@ -171,10 +216,13 @@ def truncate_name(name, max_len=34):
 
 def connect_bbs(index, ser):
     host, port = IPS[index], PORTS[index]
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(10)
+    return connect_host(host, port, ser)
+
+
+def connect_host(host, port, ser):
+    """Open a TCP connection to the requested host and port."""
     try:
-        s.connect((host, port))
+        s = socket.create_connection((host, port), timeout=10)
         s.settimeout(None)
         write(ser, "\r\nCONNECT\r\n")
         return s
@@ -184,52 +232,24 @@ def connect_bbs(index, ser):
         wait_for_key(ser)
         return None
 
-# ---------------- URL Reader ----------------
 
-def strip_html_to_text(html_bytes):
+def add_bbs_entry(name, host, port):
+    """Add an entry to the persisted BBS directory transactionally."""
+    snapshot = (list(BBSS), list(IPS), list(PORTS))
+    BBSS.append(name)
+    IPS.append(host)
+    PORTS.append(port)
+    entries = [
+        {"name": entry_name, "host": entry_host, "port": entry_port}
+        for entry_name, entry_host, entry_port in zip(BBSS, IPS, PORTS)
+    ]
     try:
-        text = html_bytes.decode('utf-8', errors='ignore')
-    except Exception:
-        text = html_bytes.decode(errors='ignore')
-    # Remove scripts/styles
-    text = re.sub(r"(?is)<script.*?>.*?</script>", "", text)
-    text = re.sub(r"(?is)<style.*?>.*?</style>", "", text)
-    # Replace breaks and paragraphs with newlines
-    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"(?i)</p>", "\n\n", text)
-    # Strip tags
-    text = re.sub(r"(?is)<.*?>", "", text)
-    # Unescape entities
-    text = html.unescape(text)
-    # Normalize whitespace
-    lines = [ln.rstrip() for ln in text.splitlines()]
-    # Collapse long blank runs
-    cleaned = []
-    blank = 0
-    for ln in lines:
-        if ln.strip() == "":
-            blank += 1
-            if blank <= 1:
-                cleaned.append("")
-        else:
-            blank = 0
-            cleaned.append(ln)
-    return cleaned
+        save_directory(entries)
+    except (OSError, ValueError):
+        BBSS[:], IPS[:], PORTS[:] = snapshot
+        raise
 
-def fetch_url_text(url, ser):
-    # Add scheme if missing
-    if not re.match(r"^[a-z]+://", url, re.I):
-        url = "http://" + url
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            data = resp.read()
-            return strip_html_to_text(data)
-    except urllib.error.URLError as e:
-        write(ser, f"\r\n*** URL error: {e} ***\r\n")
-    except Exception as e:
-        write(ser, f"\r\n*** Fetch failed: {e} ***\r\n")
-    wait_for_key(ser)
-    return None
+
 # File transfer functionality is handled by rsh_files.py
 
 # ---------------- Per-port bridge loop ----------------
@@ -247,6 +267,11 @@ def port_worker(name, cfg):
                 rtscts=cfg.get("rtscts", False),
                 timeout=0
             )
+            configure_screen_clearing(
+                ser,
+                translate_ansi=cfg.get("translate_ansi", False),
+                clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+            )
             print(f"[{name}] Listening on {cfg['port']} at {cfg['baud']} baud")
             # Register active port
             try:
@@ -254,7 +279,14 @@ def port_worker(name, cfg):
             except Exception:
                 pass
             # Run bridge loop until it throws (e.g. port disappears)
-            bridge_loop(name, ser, cfg.get("ansi", True))
+            bridge_loop(
+                name,
+                ser,
+                cfg.get("ansi", True),
+                translate_ansi=cfg.get("translate_ansi", False),
+                ansi_clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+                ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
+            )
             # When bridge_loop exits normally, unregister
             try:
                 ACTIVE_PORTS.pop(cfg['port'].upper(), None)
@@ -285,19 +317,30 @@ def port_worker(name, cfg):
             time.sleep(5)
             continue
 
-def bridge_loop(name, ser, use_ansi):
+def bridge_loop(
+    name,
+    ser,
+    use_ansi,
+    translate_ansi=False,
+    ansi_clear_sequence=b"\x0c",
+    ansi_home_clears_screen=False,
+):
     tcp_sock = None
     # For COM Port Bridge mode: separate serial to bridge
     bridge_serial = None
     pending_bridge = None
     input_buffer = b""
-    mode = "MENU"  # MENU, BBS, FILES, TEXT, URL
+    mode = "MENU"  # MENU, TELNET, BBS, FILES, TEXT, BROWSER
     # dynamic module handles (loaded on demand)
     wargames_module = None
     wargames_session = None
     # BBS module handles
     bbs_module = None
     bbs_session = None
+    telnet_module = None
+    telnet_session = None
+    ftp_module = None
+    ftp_session = None
     # AI module handles
     ai_module = None
     ai_session = None
@@ -306,11 +349,22 @@ def bridge_loop(name, ser, use_ansi):
     # Text module handles
     text_module = None
     text_session = None
+    # Browser module handles
+    browser_module = None
+    browser_session = None
+    keyboard_bridge = None
     # Notes module handles
     notes_module = None
     notes_session = None
     # buffer to assemble a single input line while connected to a remote BBS
     bbs_line_buffer = b""
+    inbound_translator = (
+        AnsiToTextTranslator(
+            clear_sequence=ansi_clear_sequence,
+            clear_on_home=ansi_home_clears_screen,
+        )
+        if translate_ansi else None
+    )
 
     # Pre-compute files lists
     notes_list = sorted([p.name for p in NOTES_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
@@ -322,6 +376,22 @@ def bridge_loop(name, ser, use_ansi):
     files_module = None
     files_session = None
 
+    def return_to_connection_menu():
+        nonlocal mode, bbs_session
+        try:
+            if mode == "TELNET" and telnet_module and telnet_session:
+                telnet_module.show_menu(ser, telnet_session, use_ansi)
+            elif bbs_module:
+                bbs_session = bbs_module.create_session(
+                    ser, use_ansi, BBSS=BBSS, IPS=IPS, PORTS=PORTS
+                )
+            else:
+                show_bbs_menu(ser, use_ansi)
+        except Exception as exc:
+            write(ser, f"\r\n*** Could not display connection menu: {exc} ***\r\n")
+            mode = "MENU"
+            show_main_menu(ser, use_ansi)
+
     show_main_menu(ser, use_ansi)
 
     while True:
@@ -329,9 +399,33 @@ def bridge_loop(name, ser, use_ansi):
         if ser.in_waiting:
             data = ser.read(ser.in_waiting)
 
+            if mode == "KEYBOARD":
+                try:
+                    if keyboard_bridge.feed(data):
+                        keyboard_bridge = None
+                        mode = "MENU"
+                        write(ser, "\r\nKeyboard Bridge closed.\r\n")
+                        show_main_menu(ser, use_ansi)
+                except Exception as e:
+                    keyboard_bridge = None
+                    mode = "MENU"
+                    write(ser, f"\r\n*** Keyboard Bridge error: {e} ***\r\n")
+                    show_main_menu(ser, use_ansi)
+                continue
+
             # Echo in command-mode only (i.e., not while transparent BBS session)
-            if mode != "BBS" or (mode == "BBS" and not tcp_sock):
-                ser.write(data)
+            suppress_ftp_password_echo = (
+                mode == "FTP"
+                and ftp_session is not None
+                and ftp_session.get("submode") == "PASSWORD"
+            )
+            if (
+                (mode not in ("BBS", "TELNET") or not tcp_sock)
+                and not suppress_ftp_password_echo
+            ):
+                echoed_data = data.replace(b"\x08", b"\x08 \x08")
+                echoed_data = echoed_data.replace(b"\x7f", b"\x08 \x08")
+                ser.write(echoed_data)
 
             # If we're in COMBRIDGE, delegate raw bytes to the bridge module so
             # it can forward characters immediately (per-character live mode).
@@ -368,10 +462,10 @@ def bridge_loop(name, ser, use_ansi):
             except Exception:
                 pass
 
-            # If we're currently connected to a remote BBS, forward bytes immediately
+            # Forward raw input while connected to a BBS or direct Telnet host.
             # to the TCP socket and assemble a small line buffer so we can still
             # detect an 'ATH' hangup when the user presses Enter.
-            if mode == "BBS" and tcp_sock:
+            if mode in ("BBS", "TELNET") and tcp_sock:
                 try:
                     tcp_sock.sendall(data)
                 except Exception:
@@ -381,14 +475,8 @@ def bridge_loop(name, ser, use_ansi):
                     except Exception:
                         pass
                     tcp_sock = None
-                    # re-render BBS menu (module or fallback)
-                    if bbs_module:
-                        try:
-                            bbs_session = bbs_module.create_session(ser, use_ansi, BBSS=BBSS, IPS=IPS, PORTS=PORTS)
-                        except Exception:
-                            show_main_menu(ser, use_ansi)
-                    else:
-                        show_main_menu(ser, use_ansi)
+                    tcp_sock = None
+                    return_to_connection_menu()
                     continue
 
                 # Accumulate characters until a CR/LF so we can detect local ATH hangup.
@@ -407,14 +495,7 @@ def bridge_loop(name, ser, use_ansi):
                                 except Exception:
                                     pass
                                 tcp_sock = None
-                                # show BBS menu via module if available
-                                if bbs_module:
-                                    try:
-                                        bbs_session = bbs_module.create_session(ser, use_ansi, BBSS=BBSS, IPS=IPS, PORTS=PORTS)
-                                    except Exception:
-                                        show_bbs_menu(ser, use_ansi)
-                                else:
-                                    show_bbs_menu(ser, use_ansi)
+                                return_to_connection_menu()
                                 bbs_line_buffer = b""
                                 break
                             bbs_line_buffer = b""
@@ -427,7 +508,7 @@ def bridge_loop(name, ser, use_ansi):
                 continue
 
             # otherwise normal command-mode buffering
-            input_buffer += data
+            input_buffer = update_command_input(input_buffer, data)
 
             # parse lines
             while b"\r" in input_buffer or b"\n" in input_buffer:
@@ -448,6 +529,8 @@ def bridge_loop(name, ser, use_ansi):
                         write(ser, "\r\nDisconnecting...\r\n")
                         tcp_sock.close()
                         tcp_sock = None
+                    if mode == "FTP" and ftp_module and ftp_session:
+                        ftp_module.close_session(ftp_session)
                     # If a COM bridge is active, close it too (ask module or close underlying serial)
                     if bridge_session:
                         try:
@@ -478,6 +561,30 @@ def bridge_loop(name, ser, use_ansi):
                     show_main_menu(ser, use_ansi)
                     continue
 
+                if mode == "WELCOME_BANNER":
+                    global WELCOME_BANNER
+                    if not line_str:
+                        try:
+                            reset_banner(WELCOME_BANNER_FILE)
+                        except OSError as exc:
+                            write(ser, f"\r\n*** Could not reset banner: {exc} ***\r\n")
+                        else:
+                            WELCOME_BANNER = CONFIG_WELCOME_BANNER
+                            write(ser, "\r\nWelcome banner reset to config.py value.\r\n")
+                    else:
+                        try:
+                            new_banner = validate_banner(line_str)
+                            save_banner(WELCOME_BANNER_FILE, new_banner)
+                        except (OSError, ValueError) as exc:
+                            write(ser, f"\r\n*** Could not change banner: {exc} ***\r\n")
+                            write(ser, "Enter a banner (1-80 printable ASCII characters): ")
+                            continue
+                        WELCOME_BANNER = new_banner
+                        write(ser, "\r\nWelcome banner saved.\r\n")
+                    mode = "MENU"
+                    show_main_menu(ser, use_ansi)
+                    continue
+
                 if mode == "MENU":
                     # Echo full command line
                     if upper == "1":
@@ -499,7 +606,36 @@ def bridge_loop(name, ser, use_ansi):
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "BBS"
-                    elif upper == "2":
+                    elif upper == "3":
+                        try:
+                            importlib.invalidate_caches()
+                            telnet_module = importlib.import_module("rsh_telnet")
+                            importlib.reload(telnet_module)
+                            telnet_session = telnet_module.create_session(
+                                ser, use_ansi
+                            )
+                        except Exception as exc:
+                            write(
+                                ser,
+                                f"\r\n*** Telnet module load error: {exc} ***\r\n",
+                            )
+                            wait_for_key(ser)
+                            show_main_menu(ser, use_ansi)
+                            continue
+                        mode = "TELNET"
+                    elif upper == "4":
+                        try:
+                            importlib.invalidate_caches()
+                            ftp_module = importlib.import_module("rsh_ftp")
+                            importlib.reload(ftp_module)
+                            ftp_session = ftp_module.create_session(ser, use_ansi)
+                        except Exception as exc:
+                            write(ser, f"\r\n*** FTP module load error: {exc} ***\r\n")
+                            wait_for_key(ser)
+                            show_main_menu(ser, use_ansi)
+                            continue
+                        mode = "FTP"
+                    elif upper == "5":
                         # Load files module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -514,7 +650,7 @@ def bridge_loop(name, ser, use_ansi):
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "FILES"
-                    elif upper == "3":
+                    elif upper == "6":
                         # Load text module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -529,21 +665,19 @@ def bridge_loop(name, ser, use_ansi):
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "TEXT"
-                    elif upper == "4":
-                        # Load URL module on demand so it can be edited without restarting the hub
+                    elif upper == "2":
                         try:
                             importlib.invalidate_caches()
-                            um = importlib.import_module('rsh_url')
-                            importlib.reload(um)
-                            url_module = um
-                            url_session = um.create_session(ser, use_ansi)
+                            browser_module = importlib.import_module('rsh_browser')
+                            importlib.reload(browser_module)
+                            browser_session = browser_module.create_session(ser, use_ansi)
                         except Exception as e:
-                            write(ser, f"\r\n*** URL module load error: {e} ***\r\n")
+                            write(ser, f"\r\n*** Browser module load error: {e} ***\r\n")
                             wait_for_key(ser)
                             show_main_menu(ser, use_ansi)
                             continue
-                        mode = "URL"
-                    elif upper == "5":
+                        mode = "BROWSER"
+                    elif upper == "9":
                         # Load notes module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -558,7 +692,50 @@ def bridge_loop(name, ser, use_ansi):
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "NOTES"
-                    elif upper == "6":
+                    elif upper == "11":
+                        try:
+                            keyboard_module = importlib.import_module(
+                                'rsh_keyboard'
+                            )
+                            keyboard_bridge = keyboard_module.KeyboardBridge()
+                        except Exception as e:
+                            keyboard_bridge = None
+                            write(
+                                ser,
+                                f"\r\n*** Keyboard Bridge unavailable: {e} ***\r\n",
+                            )
+                            show_main_menu(ser, use_ansi)
+                            continue
+                        clear_screen(ser, use_ansi)
+                        write(ser, "\r\nKeyboard Bridge is active.\r\n")
+                        write(
+                            ser,
+                            "Characters are sent to the currently focused "
+                            "host application.\r\n",
+                        )
+                        write(
+                            ser,
+                            "Enter, Tab, and Backspace are supported. "
+                            "Press Ctrl+X to exit.\r\n",
+                        )
+                        write(
+                            ser,
+                            "Keep this terminal focused only when you want "
+                            "the Apple II to type there.\r\n",
+                        )
+                        mode = "KEYBOARD"
+                    elif upper == "12":
+                        clear_screen(ser, use_ansi)
+                        write(ser, "\r\nWelcome Banner\r\n")
+                        write(ser, "Current: " + WELCOME_BANNER + "\r\n\r\n")
+                        write(
+                            ser,
+                            "Enter a banner (1-80 printable ASCII characters).\r\n",
+                        )
+                        write(ser, "Press Enter with an empty line to use config.py default.\r\n")
+                        write(ser, "New banner: ")
+                        mode = "WELCOME_BANNER"
+                    elif upper == "10":
                         # Enter COM Port Bridge: delegate prompts to rsh_bridge module
                         try:
                             importlib.invalidate_caches()
@@ -581,7 +758,7 @@ def bridge_loop(name, ser, use_ansi):
                         # the prompt state isn't None (which caused a NoneType subscriptable error).
                         pending_bridge = bridge_session
                         mode = "COMBRIDGE_PROMPT"
-                    elif upper == "7":
+                    elif upper == "8":
                         # Enter Wargames mode (load module on demand so it can be edited separately)
                         try:
                             importlib.invalidate_caches()
@@ -600,7 +777,7 @@ def bridge_loop(name, ser, use_ansi):
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "WARGAMES"
-                    elif upper == "8":
+                    elif upper == "7":
                         # Enter AI chat mode (load module on demand)
                         try:
                             importlib.invalidate_caches()
@@ -618,6 +795,152 @@ def bridge_loop(name, ser, use_ansi):
                     else:
                         write(ser, "Invalid command\r\n")
                         write(ser, "Command: ")
+                    continue
+
+                if mode == "TELNET":
+                    try:
+                        consumed, action = telnet_module.handle_input(
+                            telnet_session,
+                            line_str,
+                            ser,
+                            use_ansi,
+                            add_bbs_entry=add_bbs_entry,
+                        )
+                        if consumed:
+                            if action == "MENU":
+                                mode = "MENU"
+                                show_main_menu(ser, use_ansi)
+                            elif (
+                                isinstance(action, tuple)
+                                and action[0] == "CONNECT"
+                            ):
+                                _, host, port = action
+                                write(ser, f"\r\nConnecting to {host}:{port}...\r\n")
+                                tcp_sock = connect_host(host, port, ser)
+                                if tcp_sock and inbound_translator:
+                                    inbound_translator.reset()
+                                elif not tcp_sock:
+                                    telnet_module.show_menu(
+                                        ser, telnet_session, use_ansi
+                                    )
+                            continue
+                    except Exception as exc:
+                        write(ser, f"\r\n*** Telnet error: {exc} ***\r\n")
+                        mode = "MENU"
+                        show_main_menu(ser, use_ansi)
+                        continue
+
+                if mode == "FTP":
+                    try:
+                        consumed, action = ftp_module.handle_input(
+                            ftp_session, line_str, ser, use_ansi
+                        )
+                        if not consumed:
+                            continue
+                        if action == "MENU":
+                            ftp_module.close_session(ftp_session)
+                            mode = "MENU"
+                            show_main_menu(ser, use_ansi)
+                            continue
+                        if (
+                            isinstance(action, tuple)
+                            and action[0] == "DOWNLOAD_TO_HOST"
+                        ):
+                            remote_name = action[1]
+                            candidate = FILES_DIR / remote_name
+                            stem, suffix = candidate.stem, candidate.suffix
+                            sequence = 2
+                            while candidate.exists():
+                                candidate = FILES_DIR / (
+                                    f"{stem} ({sequence}){suffix}"
+                                )
+                                sequence += 1
+                            write(
+                                ser,
+                                f"\r\nDownloading to host: {candidate.name}\r\n",
+                            )
+                            try:
+                                ftp_module.download_to_path(
+                                    ftp_session, remote_name, candidate
+                                )
+                            except Exception as exc:
+                                ftp_module.download_finished(
+                                    ftp_session,
+                                    ser,
+                                    use_ansi,
+                                    notice=f"Download failed: {exc}",
+                                )
+                            else:
+                                ftp_module.download_finished(
+                                    ftp_session,
+                                    ser,
+                                    use_ansi,
+                                    notice=f"Saved to host as {candidate.name}.",
+                                )
+                            continue
+                        if (
+                            isinstance(action, tuple)
+                            and action[0] == "DOWNLOAD_TO_SERIAL"
+                        ):
+                            _, remote_name, transfer_type = action
+                            transfer_name = pathlib.Path(remote_name).name
+                            try:
+                                with tempfile.TemporaryDirectory() as temp_dir:
+                                    local_path = pathlib.Path(temp_dir) / transfer_name
+                                    write(
+                                        ser,
+                                        f"\r\nDownloading {transfer_name} for "
+                                        f"{transfer_type.replace('_SEND', '')}...\r\n",
+                                    )
+                                    ftp_module.download_to_path(
+                                        ftp_session, remote_name, local_path
+                                    )
+                                    if files_module is None:
+                                        files_module = importlib.import_module(
+                                            "rsh_files"
+                                        )
+                                        importlib.reload(files_module)
+                                    transfer_func = getattr(
+                                        files_module, transfer_type.lower()
+                                    )
+                                    if transfer_type == "XMODEM_SEND":
+                                        transfer_func(ser, str(local_path), name)
+                                    else:
+                                        transfer_func(ser, str(local_path))
+                            except Exception as exc:
+                                ftp_module.download_finished(
+                                    ftp_session,
+                                    ser,
+                                    use_ansi,
+                                    notice=f"Direct download/transfer failed: {exc}",
+                                )
+                            else:
+                                ftp_module.download_finished(
+                                    ftp_session,
+                                    ser,
+                                    use_ansi,
+                                    notice="Direct download and transfer complete.",
+                                )
+                            continue
+                    except Exception as exc:
+                        write(ser, f"\r\n*** FTP error: {exc} ***\r\n")
+                        if ftp_module and ftp_session:
+                            ftp_module.close_session(ftp_session)
+                        mode = "MENU"
+                        show_main_menu(ser, use_ansi)
+                        continue
+
+                if mode == "BBS_MANAGE":
+                    try:
+                        bbs_module.handle_directory_manager_input(
+                            bbs_session, line_str, ser, use_ansi
+                        )
+                        if bbs_session.get("submode") == "BBS_MENU":
+                            mode = "BBS"
+                    except Exception as exc:
+                        write(ser, f"\r\n*** BBS directory manager error: {exc} ***\r\n")
+                        mode = "BBS"
+                        return_to_connection_menu()
                     continue
 
                 if mode == "BBS":
@@ -656,11 +979,19 @@ def bridge_loop(name, ser, use_ansi):
 
                     # If not connected, interpret numeric selection
                     if not tcp_sock:
+                        if upper == "M":
+                            bbs_module.start_directory_manager(
+                                bbs_session, ser, use_ansi
+                            )
+                            mode = "BBS_MANAGE"
+                            continue
                         try:
                             num = int(upper)
                             if 1 <= num <= len(BBSS):
                                 write(ser, f"\r\nDialing {BBSS[num-1]}...\r\n")
                                 tcp_sock = connect_bbs(num-1, ser)
+                                if tcp_sock and inbound_translator:
+                                    inbound_translator.reset()
                                 if not tcp_sock:
                                     if bbs_module:
                                         try:
@@ -738,28 +1069,27 @@ def bridge_loop(name, ser, use_ansi):
                     show_main_menu(ser, use_ansi)
                     continue
 
-                if mode == "URL":
-                    # Delegate all URL behavior to the rsh_url module
-                    if url_module:
+                if mode == "BROWSER":
+                    if browser_module:
                         try:
-                            consumed, action = url_module.handle_input(url_session, line_str, ser, use_ansi)
+                            consumed, action = browser_module.handle_input(
+                                browser_session, line_str, ser, use_ansi
+                            )
                             if consumed:
                                 if action == 'MENU':
                                     mode = 'MENU'
                                     show_main_menu(ser, use_ansi)
-                                # consumed and handled by module; continue loop
                                 continue
                         except Exception as e:
-                            write(ser, f"\r\n*** URL module error: {e} ***\r\n")
+                            write(ser, f"\r\n*** Browser module error: {e} ***\r\n")
                             wait_for_key(ser)
-                            mode = "MENU"
+                            mode = 'MENU'
                             show_main_menu(ser, use_ansi)
                             continue
 
-                    # No module available - inform user and return to menu
-                    write(ser, "\r\n*** URL module not available ***\r\n")
+                    write(ser, "\r\n*** Browser module not available ***\r\n")
                     wait_for_key(ser)
-                    mode = "MENU"
+                    mode = 'MENU'
                     show_main_menu(ser, use_ansi)
                     continue
                 if mode == "COMBRIDGE_PROMPT":
@@ -960,6 +1290,8 @@ def bridge_loop(name, ser, use_ansi):
                                             tcp = connect_bbs(idx, ser)
                                             if tcp:
                                                 tcp_sock = tcp
+                                                if inbound_translator:
+                                                    inbound_translator.reset()
                                                 mode = 'BBS'
                                             else:
                                                 # show BBS menu again via module create_session
@@ -1027,16 +1359,12 @@ def bridge_loop(name, ser, use_ansi):
                     write(ser, "\r\n*** Connection closed by remote ***\r\n")
                     tcp_sock.close()
                     tcp_sock = None
-                    # Render BBS menu via module if available, otherwise return to main menu
-                    if bbs_module:
-                        try:
-                            bbs_session = bbs_module.create_session(ser, use_ansi, BBSS=BBSS, IPS=IPS, PORTS=PORTS)
-                        except Exception:
-                            show_main_menu(ser, use_ansi)
-                    else:
-                        show_main_menu(ser, use_ansi)
+                    return_to_connection_menu()
                 else:
-                    ser.write(data)
+                    if inbound_translator:
+                        data = inbound_translator.feed(data)
+                    if data:
+                        ser.write(data)
 
         # COM bridge routing: delegate polling/forwarding to the bridge module if present
         if bridge_session:
