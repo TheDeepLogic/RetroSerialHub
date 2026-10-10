@@ -45,14 +45,17 @@ WELCOME_BANNER = "Welcome to the Retro Serial Hub"
 
 SERIAL_CONFIGS = {
     "APPLE2": {
-        "port": "COM2",           # Change to your Apple II COM port
-        "baud": 115200,           # Adjust to match your serial card
+        "port": "COM14",           # Change to your Apple II COM port
+        "baud": 19200,           # Adjust to match your serial card
         "bytesize": EIGHTBITS,
         "parity": PARITY_NONE,
         "stopbits": STOPBITS_ONE,
         "xonxoff": False,
-        "rtscts": True,
-        "ansi": False             # Apple II modem manager: no ANSI
+        "rtscts": False,
+        "ansi": False,            # Hub menus use the non-ANSI rendering path
+        "translate_ansi": True,   # Convert ANSI/VT100 output for a non-ANSI terminal
+        "ansi_clear_sequence": b"\x1bv",  # Terminal-specific screen-clear sequence
+        "ansi_home_clears_screen": True,  # Clear when applications redraw from cursor home
     },
     "IBM": {
         "port": "COM6",           # Change to your IBM PC COM port
