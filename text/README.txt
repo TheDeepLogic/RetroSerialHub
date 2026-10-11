@@ -277,11 +277,11 @@ The main menu groups features into:
 * Bridging: 5 COM Port and 6 Keyboard
 * Files: 7 File Transfers, 8 Text Library, and 9 FTP
 * Various: 10 AI Assistant and 11 Wargames
-* System: 12 switch between 40- and 80-column layouts and 13 Welcome
-  Banner.
+* System: 12 toggle ANSI translation, 13 switch between 40- and
+  80-column layouts, and 14 Welcome Banner.
   The selection is saved for that machine profile. Remote TCP terminal
   clients
-  also see 14 Disconnect.
+  also see 15 Disconnect.
 
 At 80 columns, numbering proceeds down the left column (Accessories,
 Bridging,
@@ -297,6 +297,12 @@ terminal can send them. This uses Windows' native input API on Windows and
 pynput on macOS/Linux. Keep the intended application focused while using
 this
 mode.
+
+The ANSI Translation option toggles translating incoming ANSI/VT100 BBS
+output
+for the connected machine. Its setting is saved per machine profile and
+applies
+to later connections as well.
 
 Welcome Banner sets a persistent main-menu banner. The WELCOME_BANNER value
 in config.py is the default; a banner set here is saved separately and takes
@@ -367,17 +373,26 @@ The hub supports multiple file transfer protocols:
 
 To send a file from the hub to your vintage computer:
 1. Select "File Transfers" from the main menu
-2. Choose the transfer protocol (X/Y/A)
-3. Select the file number
-4. Start the receive function on your vintage computer
+2. Browse into a directory by selecting its number, or type a directory path
+   to jump directly to it. D opens the available drives (or filesystem
+   root),
+   B goes to the parent directory, and H returns to the hub's files/
+   home directory.
+3. Choose the transfer protocol (X/Y/A)
+4. Select the file number
+5. Start the receive function on your vintage computer
 
 To upload a file from your vintage computer:
 1. Select "File Transfers" from the main menu
 2. Press "U" for upload
 3. Enter the filename to save as
 4. Start the send function on your vintage computer
+Uploads are saved in the directory currently open in File Transfers.
 
-Files are stored in the files/ directory.
+The File Transfers menu opens in the hub's files/ directory by default, but
+you can browse or type a path to transfer files from anywhere the hub
+process
+can access. Uploads are saved in the currently open directory.
 
 Directory Structure
 
@@ -460,6 +475,16 @@ Garbled Text
 * Try a different cable
 
 Release Notes
+
+v1.5
+
+* Added a persistent, per-machine ANSI translation toggle in the System menu
+  (option 12), and moved the terminal-width toggle to option 13.
+* Added File Transfers directory browsing, drive/root selection, direct path
+  entry, and shortcuts to move to the parent or return to the files/ home.
+* Expanded Text Library reader pages to use the available 24 terminal rows at
+  40 and 80 columns.
+* Incremented the application version to v1.5.
 
 v1.4
 

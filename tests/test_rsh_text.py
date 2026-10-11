@@ -18,9 +18,9 @@ class FakeSerial:
 class TextPaginationTests(unittest.TestCase):
     def test_pagination_reserves_prompt_rows_at_40_and_80_columns(self):
         cases = (
-            (80, 80, 19),
-            (40, 40, 19),
-            (40, 80, 9),
+            (80, 80, 22),
+            (40, 40, 22),
+            (40, 80, 11),
         )
         prompt = b"Press any key to continue (Q to quit)..."
 
@@ -33,7 +33,12 @@ class TextPaginationTests(unittest.TestCase):
                         encoding="ascii",
                     )
                     ser = FakeSerial()
-                    configure_screen_clearing(ser, columns=columns)
+                    configure_screen_clearing(
+                        ser,
+                        translate_ansi=True,
+                        clear_sequence=b"\x1bv",
+                        columns=columns,
+                    )
                     session = rsh_text.create_session(
                         ser,
                         use_ansi=False,
@@ -51,6 +56,16 @@ class TextPaginationTests(unittest.TestCase):
                         body_before_prompt.count(b"X" * line_width),
                         expected_lines,
                     )
+
+    def test_full_final_page_only_shows_one_continue_prompt(self):
+        ser = FakeSerial()
+        configure_screen_clearing(ser, columns=80)
+
+        with patch.object(rsh_text, "_wait_for_key", return_value=" ") as wait:
+            result = rsh_text._paginate_lines(ser, ["line"] * 22)
+
+        self.assertEqual(result, "DONE")
+        wait.assert_called_once()
 
 
 if __name__ == "__main__":

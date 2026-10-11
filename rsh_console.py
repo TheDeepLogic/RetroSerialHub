@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-VERSION = "1.4"
+VERSION = "1.5"
 
 
 class ConsoleDashboard:

@@ -69,10 +69,11 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b" 9] FTP", output)
         self.assertIn(b"10] AI Assistant", output)
         self.assertIn(b"11] Wargames", output)
-        self.assertIn(b"12] Switch to 40 Columns", output)
-        self.assertIn(b"13] Welcome Banner", output)
-        self.assertNotIn(b"14] Disconnect", output)
-        version_banner = b"v1.4, copyright (c) 2026"
+        self.assertIn(b"12] Turn ANSI Translation On", output)
+        self.assertIn(b"13] Switch to 40 Columns", output)
+        self.assertIn(b"14] Welcome Banner", output)
+        self.assertNotIn(b"15] Disconnect", output)
+        version_banner = b"v1.5, copyright (c) 2026"
         self.assertIn(version_banner, output)
         self.assertIn(
             version_banner + b"\r\n\r\n[ Accessories ]",
@@ -104,8 +105,9 @@ class ScreenClearingTests(unittest.TestCase):
                 "9": "ftp",
                 "10": "ai",
                 "11": "wargames",
-                "12": "columns",
-                "13": "welcome_banner",
+                "12": "translate_ansi",
+                "13": "columns",
+                "14": "welcome_banner",
             },
         )
 
@@ -128,7 +130,7 @@ class ScreenClearingTests(unittest.TestCase):
             terminal = SocketTerminal(client)
             peer.sendall(
                 b"4\rC\rMy Note\rfirst line\rsecond line\rEND\r"
-                b"C\rCancelled Note\rQ\rQ\r9\rQ\r14\r"
+                b"C\rCancelled Note\rQ\rQ\r9\rQ\r15\r"
             )
             with (
                 patch.object(RETRO_SERIAL_HUB, "NOTES_DIR", notes_directory),
@@ -173,7 +175,7 @@ class ScreenClearingTests(unittest.TestCase):
 
             client, peer = socket.socketpair()
             terminal = SocketTerminal(client)
-            peer.sendall(b"4\r1\rQ\r9\rQ\r14\r")
+            peer.sendall(b"4\r1\rQ\r9\rQ\r15\r")
             read_lines = []
 
             def paginate_note(_ser, lines, **_kwargs):
@@ -217,7 +219,7 @@ class ScreenClearingTests(unittest.TestCase):
             client.close()
             peer.close()
 
-        self.assertIn(b"14] Disconnect", output)
+        self.assertIn(b"15] Disconnect", output)
 
     def test_main_menu_status_shows_time_and_active_connection_counts(self):
         import RETRO_SERIAL_HUB
@@ -277,7 +279,10 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b" 8] Text Library", output)
         self.assertIn(b" 9] FTP", output)
         self.assertIn(b"10] AI Assistant   11] Wargames", output)
-        self.assertIn(b"12] 80 Columns", output)
+        self.assertIn(b"12] ANSI: Turn On", output)
+        self.assertIn(b"13] 80 Columns", output)
+        self.assertIn(b"14] Welcome Banner", output)
+        self.assertLessEqual(max(map(len, output.split(b"\r\n"))), 40)
         self.assertIn(
             f"v{VERSION}, copyright (c) 2026\r\n\r\n[ Accessories ]\r\n".encode(),
             output,
@@ -312,6 +317,124 @@ class ScreenClearingTests(unittest.TestCase):
                 RETRO_SERIAL_HUB.load_column_preferences(path),
                 {"APPLE2": 40},
             )
+
+    def test_ansi_translation_preferences_are_saved_and_loaded_per_profile(self):
+        import tempfile
+        import RETRO_SERIAL_HUB
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            path = Path(temp_directory) / "terminal_ansi_translation.json"
+            preferences = RETRO_SERIAL_HUB.save_ansi_translation_preference(
+                path, {}, "APPLE2", False
+            )
+
+            self.assertEqual(preferences, {"APPLE2": False})
+            self.assertEqual(
+                RETRO_SERIAL_HUB.load_ansi_translation_preferences(path),
+                {"APPLE2": False},
+            )
+
+    def test_main_menu_shows_ansi_toggle_direction_in_80_columns(self):
+        import RETRO_SERIAL_HUB
+
+        serial = FakeSerial()
+        configure_screen_clearing(serial, columns=80)
+        serial._rsh_translate_ansi = True
+        RETRO_SERIAL_HUB.show_main_menu(serial, use_ansi=False)
+        self.assertIn(b"12] Turn ANSI Translation Off", b"".join(serial.writes))
+
+    def test_ansi_toggle_persists_for_profile_and_updates_active_terminal(self):
+        import json
+        import socket
+        import RETRO_SERIAL_HUB
+        from rsh_server import SocketTerminal
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            settings_path = Path(temp_directory) / "ansi.json"
+            client, peer = socket.socketpair()
+            terminal = SocketTerminal(client)
+            peer.sendall(b"12\r15\r")
+            with (
+                patch.object(
+                    RETRO_SERIAL_HUB,
+                    "ANSI_TRANSLATION_SETTINGS_FILE",
+                    settings_path,
+                ),
+                patch.object(
+                    RETRO_SERIAL_HUB, "ANSI_TRANSLATION_PREFERENCES", {}
+                ),
+                patch.dict(
+                    RETRO_SERIAL_HUB.SERIAL_CONFIGS,
+                    {"TEST": {"columns": 80, "translate_ansi": False}},
+                ),
+            ):
+                try:
+                    RETRO_SERIAL_HUB.bridge_loop(
+                        "TEST", terminal, use_ansi=False, translate_ansi=False
+                    )
+                    output = bytearray()
+                    peer.settimeout(1)
+                    while b"Disconnecting from Retro Serial Hub." not in output:
+                        output.extend(peer.recv(8192))
+                finally:
+                    terminal.close()
+                    peer.close()
+
+            self.assertTrue(terminal._rsh_translate_ansi)
+            self.assertIn(b"12] Turn ANSI Translation Off", output)
+            self.assertTrue(json.loads(settings_path.read_text())["TEST"])
+
+    def test_column_toggle_routes_to_option_13_and_persists_per_profile(self):
+        import json
+        import socket
+        import RETRO_SERIAL_HUB
+        from rsh_server import SocketTerminal
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            settings_path = Path(temp_directory) / "columns.json"
+            client, peer = socket.socketpair()
+            terminal = SocketTerminal(client)
+            peer.sendall(b"13\r15\r")
+            with (
+                patch.object(RETRO_SERIAL_HUB, "COLUMN_SETTINGS_FILE", settings_path),
+                patch.object(RETRO_SERIAL_HUB, "COLUMN_PREFERENCES", {}),
+                patch.dict(
+                    RETRO_SERIAL_HUB.SERIAL_CONFIGS,
+                    {"TEST": {"columns": 80, "translate_ansi": False}},
+                ),
+            ):
+                try:
+                    RETRO_SERIAL_HUB.bridge_loop(
+                        "TEST", terminal, use_ansi=False, translate_ansi=False
+                    )
+                    output = bytearray()
+                    peer.settimeout(1)
+                    while b"Disconnecting from Retro Serial Hub." not in output:
+                        output.extend(peer.recv(8192))
+                finally:
+                    terminal.close()
+                    peer.close()
+
+            self.assertEqual(terminal._rsh_columns, 40)
+            self.assertEqual(json.loads(settings_path.read_text())["TEST"], 40)
+
+    def test_remote_disconnect_moves_after_new_system_options(self):
+        import socket
+        import RETRO_SERIAL_HUB
+
+        client, peer = socket.socketpair()
+        try:
+            RETRO_SERIAL_HUB.show_main_menu(
+                RETRO_SERIAL_HUB.SocketTerminal(client), use_ansi=False
+            )
+            output = peer.recv(4096)
+        finally:
+            client.close()
+            peer.close()
+
+        self.assertIn(b"15] Disconnect", output)
+        self.assertNotIn(b"14] Disconnect", output)
 
     def test_main_menu_displays_active_welcome_banner(self):
         import RETRO_SERIAL_HUB

@@ -82,8 +82,9 @@ MAIN_MENU_ACTIONS = {
     "9": "ftp",
     "10": "ai",
     "11": "wargames",
-    "12": "columns",
-    "13": "welcome_banner",
+    "12": "translate_ansi",
+    "13": "columns",
+    "14": "welcome_banner",
 }
 
 # ---------------- Paths ----------------
@@ -93,6 +94,7 @@ TEXT_DIR  = BASE_DIR / "text"
 NOTES_DIR = BASE_DIR / "notes"
 WELCOME_BANNER_FILE = BASE_DIR / "welcome_banner.json"
 COLUMN_SETTINGS_FILE = BASE_DIR / "terminal_columns.json"
+ANSI_TRANSLATION_SETTINGS_FILE = BASE_DIR / "terminal_ansi_translation.json"
 FILES_DIR.mkdir(exist_ok=True)
 TEXT_DIR.mkdir(exist_ok=True)
 NOTES_DIR.mkdir(exist_ok=True)
@@ -133,6 +135,46 @@ def save_column_preference(path, preferences, name, columns):
     return updated_preferences
 
 
+def load_ansi_translation_preferences(path):
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as settings_file:
+            preferences = json.load(settings_file)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OSError(
+            f"Could not load ANSI translation settings from {path}: {exc}"
+        ) from exc
+    if not isinstance(preferences, dict) or any(
+        not isinstance(name, str) or not isinstance(value, bool)
+        for name, value in preferences.items()
+    ):
+        raise ValueError(f"Invalid ANSI translation settings in {path}.")
+    return preferences
+
+
+def save_ansi_translation_preference(path, preferences, name, enabled):
+    if not isinstance(enabled, bool):
+        raise ValueError("ANSI translation preference must be a boolean.")
+    updated_preferences = dict(preferences)
+    updated_preferences[name] = enabled
+    temporary_path = path.with_name(path.name + ".tmp")
+    try:
+        with temporary_path.open("w", encoding="utf-8") as settings_file:
+            json.dump(updated_preferences, settings_file, indent=2)
+            settings_file.write("\n")
+        temporary_path.replace(path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise OSError(
+            f"Could not save ANSI translation settings to {path}: {exc}"
+        ) from exc
+    return updated_preferences
+
+
 try:
     COLUMN_PREFERENCES = load_column_preferences(COLUMN_SETTINGS_FILE)
 except (OSError, ValueError) as exc:
@@ -142,6 +184,18 @@ COLUMN_PREFERENCES_LOCK = threading.Lock()
 for _profile_name, _columns in COLUMN_PREFERENCES.items():
     if _profile_name in SERIAL_CONFIGS:
         SERIAL_CONFIGS[_profile_name]["columns"] = _columns
+
+try:
+    ANSI_TRANSLATION_PREFERENCES = load_ansi_translation_preferences(
+        ANSI_TRANSLATION_SETTINGS_FILE
+    )
+except (OSError, ValueError) as exc:
+    print(f"ANSI translation settings error: {exc}. Using config.py values.")
+    ANSI_TRANSLATION_PREFERENCES = {}
+ANSI_TRANSLATION_PREFERENCES_LOCK = threading.Lock()
+for _profile_name, _enabled in ANSI_TRANSLATION_PREFERENCES.items():
+    if _profile_name in SERIAL_CONFIGS:
+        SERIAL_CONFIGS[_profile_name]["translate_ansi"] = _enabled
 
 try:
     WELCOME_BANNER = load_banner(CONFIG_WELCOME_BANNER, WELCOME_BANNER_FILE)
@@ -250,12 +304,29 @@ def show_main_menu(ser, use_ansi=True):
         ],
         "Various": [("10", "AI Assistant"), ("11", "Wargames")],
         "System": [
-            ("12", f"Switch to {120 - columns} Columns"),
-            ("13", "Welcome Banner"),
+            (
+                "12",
+                (
+                    "ANSI: Turn Off"
+                    if getattr(ser, "_rsh_translate_ansi", False)
+                    else "ANSI: Turn On"
+                )
+                if columns == 40
+                else (
+                    "Turn ANSI Translation Off"
+                    if getattr(ser, "_rsh_translate_ansi", False)
+                    else "Turn ANSI Translation On"
+                ),
+            ),
+            (
+                "13",
+                f"Switch to {120 - columns} Columns",
+            ),
+            ("14", "Welcome Banner"),
         ],
     }
     if remote_client:
-        options["System"].append(("14", "Disconnect"))
+        options["System"].append(("15", "Disconnect"))
 
     if columns == 80:
         left_groups = ("Accessories", "Bridging", "Files")
@@ -275,7 +346,7 @@ def show_main_menu(ser, use_ansi=True):
             entries = [
                 f"{number:>2}] "
                 f"{120 - columns} Columns"
-                if number == "12"
+                if number == "13"
                 else f"{number:>2}] {label[:14]}"
                 for number, label in options[group]
             ]
@@ -621,7 +692,8 @@ def bridge_loop(
     ansi_clear_sequence=b"\x0c",
     ansi_home_clears_screen=False,
 ):
-    global COLUMN_PREFERENCES
+    global ANSI_TRANSLATION_PREFERENCES, COLUMN_PREFERENCES
+    ser._rsh_translate_ansi = bool(translate_ansi)
     tcp_sock = None
     # For COM Port Bridge mode: separate serial to bridge
     bridge_serial = None
@@ -668,7 +740,6 @@ def bridge_loop(
 
     # Pre-compute files lists
     notes_list = sorted([p.name for p in NOTES_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
-    files_list = sorted([p.name for p in FILES_DIR.iterdir() if p.is_file()])
     text_list  = sorted([p.name for p in TEXT_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
 
     def refresh_notes_session(notice=None):
@@ -882,7 +953,7 @@ def bridge_loop(
 
                 if (
                     mode == "MENU"
-                    and upper == "14"
+                    and upper == "15"
                     and isinstance(ser, SocketTerminal)
                 ):
                     write(ser, "\r\nDisconnecting from Retro Serial Hub.\r\n")
@@ -934,6 +1005,45 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         write(ser, f"\r\nTerminal width saved: {new_columns} columns.\r\n")
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "translate_ansi":
+                        new_translate_ansi = not bool(
+                            getattr(ser, "_rsh_translate_ansi", translate_ansi)
+                        )
+                        try:
+                            with ANSI_TRANSLATION_PREFERENCES_LOCK:
+                                ANSI_TRANSLATION_PREFERENCES = (
+                                    save_ansi_translation_preference(
+                                        ANSI_TRANSLATION_SETTINGS_FILE,
+                                        ANSI_TRANSLATION_PREFERENCES,
+                                        name,
+                                        new_translate_ansi,
+                                    )
+                                )
+                            SERIAL_CONFIGS[name]["translate_ansi"] = (
+                                new_translate_ansi
+                            )
+                            ser._rsh_translate_ansi = new_translate_ansi
+                            translate_ansi = new_translate_ansi
+                            inbound_translator = (
+                                AnsiToTextTranslator(
+                                    clear_sequence=ansi_clear_sequence,
+                                    columns=terminal_columns(ser),
+                                    clear_on_home=ansi_home_clears_screen,
+                                )
+                                if new_translate_ansi
+                                else None
+                            )
+                        except (OSError, ValueError) as exc:
+                            write(
+                                ser,
+                                f"\r\n*** Could not save ANSI translation setting: {exc} ***\r\n",
+                            )
+                            show_main_menu(ser, use_ansi)
+                            continue
+                        state = "enabled" if new_translate_ansi else "disabled"
+                        write(ser, f"\r\nANSI translation {state} for {name}.\r\n")
                         show_main_menu(ser, use_ansi)
                         continue
                     elif menu_action == "bbs":
@@ -991,8 +1101,9 @@ def bridge_loop(
                             fm = importlib.import_module('rsh_files')
                             importlib.reload(fm)
                             files_module = fm
-                            files_list = sorted([p.name for p in FILES_DIR.iterdir() if p.is_file()])
-                            files_session = fm.create_session(ser, use_ansi, files=files_list, base_dir=FILES_DIR)
+                            files_session = fm.create_session(
+                                ser, use_ansi, base_dir=FILES_DIR
+                            )
                         except Exception as e:
                             write(ser, f"\r\n*** Files module load error: {e} ***\r\n")
                             wait_for_key(ser)
@@ -1372,12 +1483,18 @@ def bridge_loop(
                                     transfer_func = getattr(files_module, transfer_type.lower())
                                     # Only XMODEM gets the name parameter
                                     if transfer_type == 'XMODEM_SEND':
-                                        transfer_func(ser, str(FILES_DIR / fname), name)
+                                        transfer_func(ser, fname, name)
                                     else:
-                                        transfer_func(ser, str(FILES_DIR / fname))
-                                    # Refresh files and session after transfer
-                                    files_list = sorted([p.name for p in FILES_DIR.iterdir() if p.is_file()])
-                                    files_session = files_module.create_session(ser, use_ansi, files=files_list, base_dir=FILES_DIR)
+                                        transfer_func(ser, fname)
+                                    # Refresh the current directory after transfer.
+                                    files_session = files_module.create_session(
+                                        ser,
+                                        use_ansi,
+                                        base_dir=FILES_DIR,
+                                        transfer_mode=files_session["transfer_mode"],
+                                        current_dir=files_session["current_dir"],
+                                        root_mode=files_session.get("root_mode", False),
+                                    )
                                     continue
                                 elif action == 'MENU':
                                     mode = 'MENU'

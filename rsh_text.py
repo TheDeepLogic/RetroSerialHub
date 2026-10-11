@@ -45,15 +45,15 @@ def _paginate_lines(ser, lines, page_lines=None, quit_msg=True):
     """Display lines with pagination"""
     columns = terminal_columns(ser)
     if page_lines is None:
-        prompt_rows = max(1, (len(PAGE_PROMPT) + columns - 1) // columns)
-        # Reserve rows for the initial blank line, prompt spacing, prompt, and Enter echo.
-        page_lines = PAGE_ROWS - prompt_rows - 4
+        prompt = PAGE_PROMPT if quit_msg else "Press any key to continue..."
+        prompt_rows = max(1, (len(prompt) + columns - 1) // columns)
+        page_lines = PAGE_ROWS - prompt_rows - 1
 
     def pause():
         if quit_msg:
-            _write(ser, f"\r\n{PAGE_PROMPT}\r\n")
+            _write(ser, f"{PAGE_PROMPT}\r\n")
         else:
-            _write(ser, "\r\nPress any key to continue...\r\n")
+            _write(ser, "Press any key to continue...\r\n")
         return _wait_for_key(ser) == "Q"
 
     count = 0
@@ -71,7 +71,7 @@ def _paginate_lines(ser, lines, page_lines=None, quit_msg=True):
                 return "QUIT"
             count = 0
     # Only pause at EOF if requested
-    if quit_msg:
+    if quit_msg and (count or not lines):
         if pause():
             return "QUIT"
     return "DONE"
@@ -150,7 +150,6 @@ def handle_input(sess, line_str, ser, use_ansi=True):
                 # Read and display the file
                 lines = _read_text_file(path)
                 _clear_screen(ser, use_ansi)
-                _write(ser, "\r\n")
                 result = _paginate_lines(ser, lines, quit_msg=True)
                 
                 # Refresh file list and redraw menu

@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
 welcome_banner.json
+terminal_ansi_translation.json
 bbs_directory.json
 telnet_bookmarks.json
