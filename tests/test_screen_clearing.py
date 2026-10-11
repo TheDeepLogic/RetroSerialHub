@@ -69,8 +69,8 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b" 9] FTP", output)
         self.assertIn(b"10] AI Assistant", output)
         self.assertIn(b"11] Wargames", output)
-        self.assertIn(b"12] Welcome Banner", output)
-        self.assertIn(b"13] Switch to 40 Columns", output)
+        self.assertIn(b"12] Switch to 40 Columns", output)
+        self.assertIn(b"13] Welcome Banner", output)
         self.assertNotIn(b"14] Disconnect", output)
         self.assertIn(b"v1.3, copyright (c) 2026", output)
         self.assertIn(
@@ -103,8 +103,8 @@ class ScreenClearingTests(unittest.TestCase):
                 "9": "ftp",
                 "10": "ai",
                 "11": "wargames",
-                "12": "welcome_banner",
-                "13": "columns",
+                "12": "columns",
+                "13": "welcome_banner",
             },
         )
 
@@ -275,7 +275,7 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b" 8] Text Library", output)
         self.assertIn(b" 9] FTP", output)
         self.assertIn(b"10] AI Assistant   11] Wargames", output)
-        self.assertIn(b"13] 80 Columns", output)
+        self.assertIn(b"12] 80 Columns", output)
         self.assertIn(
             b"v1.3, copyright (c) 2026\r\n\r\n[ Accessories ]\r\n",
             output,

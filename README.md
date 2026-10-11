@@ -248,9 +248,10 @@ The main menu groups features into:
 - **Bridging**: `5` COM Port and `6` Keyboard
 - **Files**: `7` File Transfers, `8` Text Library, and `9` FTP
 - **Various**: `10` AI Assistant and `11` Wargames
-- **System**: `12` Welcome Banner and `13` switch between 40- and 80-column
-  layouts. The selection is saved for that machine profile. Remote TCP
-  terminal clients also see `14` Disconnect.
+- **System**: `12` switch between 40- and 80-column layouts and `13` Welcome
+  Banner.
+  The selection is saved for that machine profile. Remote TCP terminal clients
+  also see `14` Disconnect.
 
 At 80 columns, numbering proceeds down the left column (Accessories, Bridging,
 then Files) and continues at the top of the right column (Various, then System).

@@ -82,8 +82,8 @@ MAIN_MENU_ACTIONS = {
     "9": "ftp",
     "10": "ai",
     "11": "wargames",
-    "12": "welcome_banner",
-    "13": "columns",
+    "12": "columns",
+    "13": "welcome_banner",
 }
 
 # ---------------- Paths ----------------
@@ -250,8 +250,8 @@ def show_main_menu(ser, use_ansi=True):
         ],
         "Various": [("10", "AI Assistant"), ("11", "Wargames")],
         "System": [
-            ("12", "Welcome Banner"),
-            ("13", f"Switch to {120 - columns} Columns"),
+            ("12", f"Switch to {120 - columns} Columns"),
+            ("13", "Welcome Banner"),
         ],
     }
     if remote_client:
@@ -275,7 +275,7 @@ def show_main_menu(ser, use_ansi=True):
             entries = [
                 f"{number:>2}] "
                 f"{120 - columns} Columns"
-                if number == "13"
+                if number == "12"
                 else f"{number:>2}] {label[:14]}"
                 for number, label in options[group]
             ]
