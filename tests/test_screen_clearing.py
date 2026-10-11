@@ -53,25 +53,28 @@ class ScreenClearingTests(unittest.TestCase):
         for heading in (
             b"[ Accessories ]",
             b"[ Bridging ]",
-            b"[ Tools ]",
+            b"[ Files ]",
             b"[ Various ]",
             b"[ System ]",
         ):
             self.assertIn(heading, output)
         self.assertIn(b" 1] Bulletin Boards", output)
         self.assertIn(b" 2] Web Browser", output)
-        self.assertIn(b" 4] FTP", output)
+        self.assertIn(b" 3] Telnet", output)
+        self.assertIn(b" 4] Notes", output)
         self.assertIn(b" 5] COM Port", output)
         self.assertIn(b" 6] Keyboard", output)
         self.assertIn(b" 7] File Transfers", output)
+        self.assertIn(b" 8] Text Library", output)
+        self.assertIn(b" 9] FTP", output)
         self.assertIn(b"10] AI Assistant", output)
         self.assertIn(b"11] Wargames", output)
         self.assertIn(b"12] Welcome Banner", output)
         self.assertIn(b"13] Switch to 40 Columns", output)
         self.assertNotIn(b"14] Disconnect", output)
-        self.assertIn(b"v1.2, copyright (c) 2025", output)
+        self.assertIn(b"v1.3, copyright (c) 2026", output)
         self.assertIn(
-            b"v1.2, copyright (c) 2025\r\n\r\n[ Accessories ]",
+            b"v1.3, copyright (c) 2026\r\n\r\n[ Accessories ]",
             output,
         )
         self.assertIn(
@@ -80,8 +83,124 @@ class ScreenClearingTests(unittest.TestCase):
         )
         self.assertIn(b"Type ATM to return to this menu.\r\n\r\nCommand:", output)
         self.assertLess(output.index(b"[ Accessories ]"), output.index(b"[ Bridging ]"))
-        self.assertLess(output.index(b"[ Bridging ]"), output.index(b"[ Tools ]"))
+        self.assertLess(output.index(b"[ Bridging ]"), output.index(b"[ Files ]"))
         self.assertLess(output.index(b"[ Various ]"), output.index(b"[ System ]"))
+
+    def test_main_menu_numbers_route_to_the_displayed_features(self):
+        import RETRO_SERIAL_HUB
+
+        self.assertEqual(
+            RETRO_SERIAL_HUB.MAIN_MENU_ACTIONS,
+            {
+                "1": "bbs",
+                "2": "browser",
+                "3": "telnet",
+                "4": "notes",
+                "5": "com_bridge",
+                "6": "keyboard",
+                "7": "files",
+                "8": "text",
+                "9": "ftp",
+                "10": "ai",
+                "11": "wargames",
+                "12": "welcome_banner",
+                "13": "columns",
+            },
+        )
+
+    def test_notes_can_create_a_multiline_note_and_cancel_or_quit(self):
+        import socket
+
+        import RETRO_SERIAL_HUB
+        from rsh_server import SocketTerminal
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            notes_directory = root / "notes"
+            files_directory = root / "files"
+            text_directory = root / "text"
+            notes_directory.mkdir()
+            files_directory.mkdir()
+            text_directory.mkdir()
+
+            client, peer = socket.socketpair()
+            terminal = SocketTerminal(client)
+            peer.sendall(
+                b"4\rC\rMy Note\rfirst line\rsecond line\rEND\r"
+                b"C\rCancelled Note\rQ\rQ\r9\rQ\r14\r"
+            )
+            with (
+                patch.object(RETRO_SERIAL_HUB, "NOTES_DIR", notes_directory),
+                patch.object(RETRO_SERIAL_HUB, "FILES_DIR", files_directory),
+                patch.object(RETRO_SERIAL_HUB, "TEXT_DIR", text_directory),
+            ):
+                try:
+                    RETRO_SERIAL_HUB.bridge_loop("TEST", terminal, use_ansi=False)
+                    peer.setblocking(False)
+                    output = peer.recv(65536)
+                finally:
+                    terminal.close()
+                    peer.close()
+
+            self.assertEqual(
+                (notes_directory / "My Note.txt").read_text(encoding="utf-8"),
+                "first line\nsecond line\n",
+            )
+            self.assertFalse((notes_directory / "Cancelled Note.txt").exists())
+            self.assertIn(b"Enter note text. Type END on a line by itself", output)
+            self.assertIn(b"Note creation cancelled.", output)
+            self.assertIn(b"FTP / Explicit FTPS", output)
+            self.assertIn(b"Disconnecting from Retro Serial Hub.", output)
+
+    def test_reading_note_returns_to_notes_menu_without_module_error(self):
+        import socket
+
+        import RETRO_SERIAL_HUB
+        from rsh_server import SocketTerminal
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            notes_directory = root / "notes"
+            files_directory = root / "files"
+            text_directory = root / "text"
+            notes_directory.mkdir()
+            files_directory.mkdir()
+            text_directory.mkdir()
+            (notes_directory / "existing.txt").write_text(
+                "Saved note text\n", encoding="utf-8"
+            )
+
+            client, peer = socket.socketpair()
+            terminal = SocketTerminal(client)
+            peer.sendall(b"4\r1\rQ\r9\rQ\r14\r")
+            read_lines = []
+
+            def paginate_note(_ser, lines, **_kwargs):
+                read_lines.extend(lines)
+                return "DONE"
+
+            with (
+                patch.object(RETRO_SERIAL_HUB, "NOTES_DIR", notes_directory),
+                patch.object(RETRO_SERIAL_HUB, "FILES_DIR", files_directory),
+                patch.object(RETRO_SERIAL_HUB, "TEXT_DIR", text_directory),
+                patch.object(
+                    RETRO_SERIAL_HUB, "paginate_lines", side_effect=paginate_note
+                ),
+            ):
+                try:
+                    RETRO_SERIAL_HUB.bridge_loop("TEST", terminal, use_ansi=False)
+                    peer.settimeout(1)
+                    output = bytearray()
+                    while b"Disconnecting from Retro Serial Hub." not in output:
+                        output.extend(peer.recv(65536))
+                finally:
+                    terminal.close()
+                    peer.close()
+
+            self.assertEqual(read_lines, ["Saved note text"])
+            self.assertIn(b"FTP / Explicit FTPS", output)
+            self.assertNotIn(b"Notes module error", output)
+            self.assertNotIn(b"Notes module not available", output)
 
     def test_main_menu_shows_disconnect_option_for_remote_terminal(self):
         import socket
@@ -153,15 +272,17 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b" 5] COM Port", output)
         self.assertIn(b" 6] Keyboard", output)
         self.assertIn(b" 7] File Transfers", output)
+        self.assertIn(b" 8] Text Library", output)
+        self.assertIn(b" 9] FTP", output)
         self.assertIn(b"10] AI Assistant   11] Wargames", output)
         self.assertIn(b"13] 80 Columns", output)
         self.assertIn(
-            b"v1.2, copyright (c) 2025\r\n\r\n[ Accessories ]\r\n",
+            b"v1.3, copyright (c) 2026\r\n\r\n[ Accessories ]\r\n",
             output,
         )
         self.assertLess(output.index(b"[ Accessories ]"), output.index(b"[ Bridging ]"))
-        self.assertLess(output.index(b"[ Bridging ]"), output.index(b"[ Tools ]"))
-        self.assertLess(output.index(b"[ Tools ]"), output.index(b"[ Various ]"))
+        self.assertLess(output.index(b"[ Bridging ]"), output.index(b"[ Files ]"))
+        self.assertLess(output.index(b"[ Files ]"), output.index(b"[ Various ]"))
         self.assertIn(
             b"Type ATM to return to this menu.\r\nCommand:",
             output,

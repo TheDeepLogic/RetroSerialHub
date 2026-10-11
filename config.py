@@ -38,6 +38,7 @@ WELCOME_BANNER = "Welcome to the Retro Serial Hub"
 #   translate_ansi: Translate incoming BBS ANSI/VT100 data for a non-ANSI terminal
 #   ansi_clear_sequence: Bytes sent to clear the screen on translated terminals
 #   ansi_home_clears_screen: Treat cursor-home as a clear for screen redraws
+#   columns: 40 or 80 column terminal layout
 #
 # Example configurations are provided below for common vintage systems.
 # Modify the port assignments and parameters to match your setup.
@@ -45,7 +46,7 @@ WELCOME_BANNER = "Welcome to the Retro Serial Hub"
 
 SERIAL_CONFIGS = {
     "APPLE2": {
-        "port": "COM14",           # Change to your Apple II COM port
+        "port": "COM2",           # Change to your Apple II COM port
         "baud": 19200,           # Adjust to match your serial card
         "bytesize": EIGHTBITS,
         "parity": PARITY_NONE,
@@ -56,6 +57,7 @@ SERIAL_CONFIGS = {
         "translate_ansi": True,   # Convert ANSI/VT100 output for a non-ANSI terminal
         "ansi_clear_sequence": b"\x1bv",  # Terminal-specific screen-clear sequence
         "ansi_home_clears_screen": True,  # Clear when applications redraw from cursor home
+        "columns": 80,
     },
     "IBM": {
         "port": "COM6",           # Change to your IBM PC COM port
@@ -65,7 +67,8 @@ SERIAL_CONFIGS = {
         "stopbits": STOPBITS_ONE,
         "xonxoff": False,
         "rtscts": False,
-        "ansi": True              # IBM PC supports ANSI
+        "ansi": True,             # IBM PC supports ANSI
+        "columns": 80,
     },
     "C64": {
         "port": "COM4",           # Change to your Commodore 64 COM port
@@ -75,7 +78,8 @@ SERIAL_CONFIGS = {
         "stopbits": STOPBITS_ONE,
         "xonxoff": False,
         "rtscts": False,
-        "ansi": True              # C64 terminal software may support ANSI
+        "ansi": True,             # C64 terminal software may support ANSI
+        "columns": 40,
     },
     "TRS80": {
         "port": "COM80",          # Change to your TRS-80 COM port
@@ -85,8 +89,20 @@ SERIAL_CONFIGS = {
         "stopbits": STOPBITS_ONE,
         "xonxoff": True,
         "rtscts": True,
-        "ansi": False             # TRS-80: assume no ANSI
+        "ansi": False,            # TRS-80: assume no ANSI
+        "columns": 80,
     }
+}
+
+# Optional inbound TCP terminal servers, keyed by a SERIAL_CONFIGS profile.
+# Leave empty to keep network access disabled. Use a distinct port per profile.
+# Binding to 0.0.0.0 allows other devices on the LAN to connect; do not expose
+# these unauthenticated, unencrypted terminal sessions directly to the Internet.
+TELNET_SERVER_CONFIGS = {
+    "APPLE2": {"host": "0.0.0.0", "port": 6400},
+    "IBM": {"host": "0.0.0.0", "port": 6401},
+    "C64": {"host": "0.0.0.0", "port": 6402},
+    "TRS80": {"host": "0.0.0.0", "port": 6403}
 }
 
 # ============================================================================

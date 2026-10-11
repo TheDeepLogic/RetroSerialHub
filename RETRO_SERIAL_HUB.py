@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Aaron Smith.
 """
 LogicNet Multi-port Serial <-> TCP bridge with BBS-style menus.
 
@@ -68,6 +69,22 @@ ACTIVE_REMOTE_CLIENTS_LOCK = threading.Lock()
 CONSOLE = None
 # Ports that have been surrendered/taken over by a COM-bridge request. Worker threads should stop retrying if their port is surrendered.
 SURRENDERED_PORTS = set()
+
+MAIN_MENU_ACTIONS = {
+    "1": "bbs",
+    "2": "browser",
+    "3": "telnet",
+    "4": "notes",
+    "5": "com_bridge",
+    "6": "keyboard",
+    "7": "files",
+    "8": "text",
+    "9": "ftp",
+    "10": "ai",
+    "11": "wargames",
+    "12": "welcome_banner",
+    "13": "columns",
+}
 
 # ---------------- Paths ----------------
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -217,19 +234,19 @@ def show_main_menu(ser, use_ansi=True):
     banner_prefix = "\r\n" if columns == 80 else ""
     version_spacing = "\r\n\r\n"
     write(ser, banner_prefix + WELCOME_BANNER + "\r\n")
-    write(ser, f"v{VERSION}, copyright (c) 2025" + version_spacing)
+    write(ser, f"v{VERSION}, copyright (c) 2026" + version_spacing)
     options = {
         "Accessories": [
             ("1", "Bulletin Boards"),
             ("2", "Web Browser"),
             ("3", "Telnet"),
-            ("4", "FTP"),
+            ("4", "Notes"),
         ],
         "Bridging": [("5", "COM Port"), ("6", "Keyboard")],
-        "Tools": [
+        "Files": [
             ("7", "File Transfers"),
             ("8", "Text Library"),
-            ("9", "Notes"),
+            ("9", "FTP"),
         ],
         "Various": [("10", "AI Assistant"), ("11", "Wargames")],
         "System": [
@@ -241,7 +258,7 @@ def show_main_menu(ser, use_ansi=True):
         options["System"].append(("14", "Disconnect"))
 
     if columns == 80:
-        left_groups = ("Accessories", "Bridging", "Tools")
+        left_groups = ("Accessories", "Bridging", "Files")
         right_groups = ("Various", "System")
         left_lines = _format_menu_groups(left_groups, options, 39)
         right_lines = _format_menu_groups(right_groups, options, 39)
@@ -251,7 +268,7 @@ def show_main_menu(ser, use_ansi=True):
             write(ser, f"{left_line:<40}{right_line}\r\n")
     else:
         for group_index, group in enumerate(
-            ("Accessories", "Bridging", "Tools", "Various", "System")
+            ("Accessories", "Bridging", "Files", "Various", "System")
         ):
             group_spacing = "\r\n" if group_index else ""
             write(ser, f"{group_spacing}[ {group} ]\r\n")
@@ -636,6 +653,8 @@ def bridge_loop(
     # Notes module handles
     notes_module = None
     notes_session = None
+    note_buffer = []
+    pending_delete = None
     # buffer to assemble a single input line while connected to a remote BBS
     bbs_line_buffer = b""
     inbound_translator = (
@@ -651,6 +670,22 @@ def bridge_loop(
     notes_list = sorted([p.name for p in NOTES_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
     files_list = sorted([p.name for p in FILES_DIR.iterdir() if p.is_file()])
     text_list  = sorted([p.name for p in TEXT_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
+
+    def refresh_notes_session(notice=None):
+        nonlocal notes_list, notes_session
+        notes_list = sorted(
+            p.name
+            for p in NOTES_DIR.iterdir()
+            if p.is_file() and p.suffix.lower() == ".txt"
+        )
+        notes_session = notes_module.create_session(
+            ser,
+            use_ansi,
+            notes=notes_list,
+            base_dir=NOTES_DIR,
+            notice=notice,
+        )
+
     # dynamic module handles for menus loaded on demand
     wargames_module = None
     wargames_session = None
@@ -879,7 +914,8 @@ def bridge_loop(
 
                 if mode == "MENU":
                     # Echo full command line
-                    if upper == "13":
+                    menu_action = MAIN_MENU_ACTIONS.get(upper)
+                    if menu_action == "columns":
                         new_columns = 40 if terminal_columns(ser) == 80 else 80
                         try:
                             with COLUMN_PREFERENCES_LOCK:
@@ -900,7 +936,7 @@ def bridge_loop(
                         write(ser, f"\r\nTerminal width saved: {new_columns} columns.\r\n")
                         show_main_menu(ser, use_ansi)
                         continue
-                    elif upper == "1":
+                    elif menu_action == "bbs":
                         # Load BBS module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -919,7 +955,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "BBS"
-                    elif upper == "3":
+                    elif menu_action == "telnet":
                         try:
                             importlib.invalidate_caches()
                             telnet_module = importlib.import_module("rsh_telnet")
@@ -936,7 +972,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "TELNET"
-                    elif upper == "4":
+                    elif menu_action == "ftp":
                         try:
                             importlib.invalidate_caches()
                             ftp_module = importlib.import_module("rsh_ftp")
@@ -948,7 +984,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "FTP"
-                    elif upper == "7":
+                    elif menu_action == "files":
                         # Load files module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -963,7 +999,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "FILES"
-                    elif upper == "8":
+                    elif menu_action == "text":
                         # Load text module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -978,7 +1014,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "TEXT"
-                    elif upper == "2":
+                    elif menu_action == "browser":
                         try:
                             importlib.invalidate_caches()
                             browser_module = importlib.import_module('rsh_browser')
@@ -990,22 +1026,21 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "BROWSER"
-                    elif upper == "9":
+                    elif menu_action == "notes":
                         # Load notes module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
                             nm = importlib.import_module('rsh_notes')
                             importlib.reload(nm)
                             notes_module = nm
-                            notes_list = sorted([p.name for p in NOTES_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
-                            notes_session = nm.create_session(ser, use_ansi, notes=notes_list, base_dir=NOTES_DIR)
+                            refresh_notes_session()
                         except Exception as e:
                             write(ser, f"\r\n*** Notes module load error: {e} ***\r\n")
                             wait_for_key(ser)
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "NOTES"
-                    elif upper == "6":
+                    elif menu_action == "keyboard":
                         try:
                             keyboard_module = importlib.import_module(
                                 'rsh_keyboard'
@@ -1037,7 +1072,7 @@ def bridge_loop(
                             "the Apple II to type there.\r\n",
                         )
                         mode = "KEYBOARD"
-                    elif upper == "12":
+                    elif menu_action == "welcome_banner":
                         clear_screen(ser, use_ansi)
                         write(ser, "\r\nWelcome Banner\r\n")
                         write(ser, "Current: " + WELCOME_BANNER + "\r\n\r\n")
@@ -1048,7 +1083,7 @@ def bridge_loop(
                         write(ser, "Press Enter with an empty line to use config.py default.\r\n")
                         write(ser, "New banner: ")
                         mode = "WELCOME_BANNER"
-                    elif upper == "5":
+                    elif menu_action == "com_bridge":
                         # Enter COM Port Bridge: delegate prompts to rsh_bridge module
                         try:
                             importlib.invalidate_caches()
@@ -1071,7 +1106,7 @@ def bridge_loop(
                         # the prompt state isn't None (which caused a NoneType subscriptable error).
                         pending_bridge = bridge_session
                         mode = "COMBRIDGE_PROMPT"
-                    elif upper == "11":
+                    elif menu_action == "wargames":
                         # Enter Wargames mode (load module on demand so it can be edited separately)
                         try:
                             importlib.invalidate_caches()
@@ -1090,7 +1125,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "WARGAMES"
-                    elif upper == "10":
+                    elif menu_action == "ai":
                         # Enter AI chat mode (load module on demand)
                         try:
                             importlib.invalidate_caches()
@@ -1513,14 +1548,11 @@ def bridge_loop(
                                     try:
                                         clear_screen(ser, use_ansi)
                                         write(ser, "\r\n")
-                                        result = paginate_lines(ser, lines, page_lines=22, quit_msg=True)
-                                        if result == "QUIT":
-                                            try:
-                                                notes_list = sorted([p.name for p in NOTES_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
-                                                notes_session = notes_module.create_session(ser, use_ansi, notes=notes_list, base_dir=NOTES_DIR)
-                                            except Exception:
-                                                show_notes_menu(ser, notes_list, use_ansi)
-                                            continue
+                                        paginate_lines(
+                                            ser, lines, page_lines=22, quit_msg=True
+                                        )
+                                        refresh_notes_session()
+                                        continue
                                     except Exception as e:
                                         write(ser, f"\r\n*** Error displaying note: {e} ***\r\n")
                                         wait_for_key(ser)
@@ -1537,14 +1569,11 @@ def bridge_loop(
                                             lines = [ln.rstrip("\r\n") for ln in f.readlines()]
                                         clear_screen(ser, use_ansi)
                                         write(ser, "\r\n")
-                                        result = paginate_lines(ser, lines, page_lines=22, quit_msg=True)
-                                        if result == "QUIT":
-                                            try:
-                                                notes_list = sorted([p.name for p in NOTES_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".txt"])
-                                                notes_session = notes_module.create_session(ser, use_ansi, notes=notes_list, base_dir=NOTES_DIR)
-                                            except Exception:
-                                                show_notes_menu(ser, notes_list, use_ansi)
-                                            continue
+                                        paginate_lines(
+                                            ser, lines, page_lines=22, quit_msg=True
+                                        )
+                                        refresh_notes_session()
+                                        continue
                                     except Exception as e:
                                         write(ser, f"\r\n*** Error reading note: {e} ***\r\n")
                                         wait_for_key(ser)
@@ -1555,9 +1584,8 @@ def bridge_loop(
                                             show_notes_menu(ser, notes_list, use_ansi)
                                         continue
                                 if action == 'CREATE':
-                                    write(ser, "\r\nEnter note text. Type END on a line by itself to finish.\r\n")
-                                    mode = "CREATE_NOTE"
-                                    note_buffer = []
+                                    write(ser, "\r\nEnter a note name (without .txt). Q=Cancel: ")
+                                    mode = "CREATE_NOTE_NAME"
                                     continue
                                 if action and action.startswith('DELETE:'):
                                     fname = action.split(':',1)[1]
@@ -1581,10 +1609,106 @@ def bridge_loop(
                     mode = "MENU"
                     show_main_menu(ser, use_ansi)
                     continue
-                # Note: inline create/delete note flows removed. rsh_notes.py must implement
-                # any create/delete interactions. If rsh_notes is not available the hub
-                # returns to the main menu (handled above).
-                
+
+                if mode == "CREATE_NOTE_NAME":
+                    write(ser, "\r\n")
+                    if upper == "Q":
+                        mode = "NOTES"
+                        refresh_notes_session("Note creation cancelled.")
+                        continue
+
+                    title = line_str.strip()
+                    invalid_characters = '<>:"/\\|?*'
+                    reserved_names = {
+                        "CON", "PRN", "AUX", "NUL",
+                        *(f"COM{index}" for index in range(1, 10)),
+                        *(f"LPT{index}" for index in range(1, 10)),
+                    }
+                    if (
+                        not title
+                        or any(
+                            ord(character) < 32 or character in invalid_characters
+                            for character in title
+                        )
+                        or title[-1:] in (".", " ")
+                        or pathlib.Path(title).name != title
+                        or pathlib.Path(title).stem.upper() in reserved_names
+                    ):
+                        write(ser, "Invalid note name. Use a simple filename without path characters.\r\n")
+                        write(ser, "Note name (without .txt). Q=Cancel: ")
+                        continue
+
+                    note_filename = (
+                        title if title.lower().endswith(".txt") else f"{title}.txt"
+                    )
+                    note_path = NOTES_DIR / note_filename
+                    if note_path.exists():
+                        write(ser, "A note with that name already exists.\r\n")
+                        write(ser, "Choose another name (without .txt). Q=Cancel: ")
+                        continue
+
+                    note_buffer = []
+                    mode = "CREATE_NOTE"
+                    write(ser, "Enter note text. Type END on a line by itself to finish; Q cancels.\r\n")
+                    continue
+
+                if mode == "CREATE_NOTE":
+                    write(ser, "\r\n")
+                    if upper == "Q":
+                        note_buffer = []
+                        mode = "NOTES"
+                        refresh_notes_session("Note creation cancelled.")
+                        continue
+                    if upper == "END":
+                        try:
+                            with note_path.open("x", encoding="utf-8", newline="") as note_file:
+                                if note_buffer:
+                                    note_file.write("\n".join(note_buffer) + "\n")
+                        except FileExistsError:
+                            mode = "CREATE_NOTE_NAME"
+                            write(ser, "A note with that name already exists.\r\n")
+                            write(ser, "Choose another name (without .txt). Q=Cancel: ")
+                            continue
+                        except OSError as exc:
+                            note_buffer = []
+                            mode = "NOTES"
+                            refresh_notes_session(f"Could not save note: {exc}")
+                            continue
+
+                        note_buffer = []
+                        mode = "NOTES"
+                        refresh_notes_session(f"Saved {note_filename}.")
+                        continue
+                    note_buffer.append(line_str)
+                    continue
+
+                if mode == "CONFIRM_DELETE":
+                    write(ser, "\r\n")
+                    if upper in ("Y", "YES"):
+                        if pending_delete is None:
+                            mode = "NOTES"
+                            refresh_notes_session(
+                                "Could not delete note: no note is selected."
+                            )
+                            continue
+                        try:
+                            pending_delete.unlink()
+                        except OSError as exc:
+                            notice = f"Could not delete note: {exc}"
+                        else:
+                            notice = f"Deleted {pending_delete.name}."
+                        pending_delete = None
+                        mode = "NOTES"
+                        refresh_notes_session(notice)
+                        continue
+                    if upper in ("N", "NO", "Q"):
+                        pending_delete = None
+                        mode = "NOTES"
+                        refresh_notes_session("Note deletion cancelled.")
+                        continue
+                    write(ser, "Please enter Y to delete or N to cancel: ")
+                    continue
+
                 if mode == "WARGAMES":
                     # Delegate to wargames module if loaded
                     if wargames_module:

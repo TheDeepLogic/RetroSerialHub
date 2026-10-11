@@ -2,7 +2,12 @@
 
 # Retro Serial Hub
 
-A multi-port serial hub that bridges vintage computers to modern TCP/IP networks, providing access to bulletin board systems (BBS), file transfers, and other retro computing services through a unified menu interface.
+A multi-port serial hub that connects vintage computers to modern TCP/IP
+networks and accepts incoming Telnet-compatible connections. Systems using
+dedicated Wi-Fi modems can connect over the LAN and access the same BBS, file
+transfer, browser, and other retro-computing services through the hub's menu.
+
+Copyright (c) 2026 Aaron Smith.
 
 ![Retro Serial Hub Screenshot](images/retroserialhub_screenshot.jpg)
 
@@ -25,6 +30,7 @@ A multi-port serial hub that bridges vintage computers to modern TCP/IP networks
 - **Web Browser**: Browse paginated text pages, follow numbered links, and manage bookmarks
 - **Notes System**: Create, read, and manage text notes
 - **COM Port Bridge**: Bridge between different serial ports for direct computer-to-computer communication
+- **Keyboard Bridge**: Type serial input into the focused host application
 - **WarGames Mode**: Nostalgic WarGames movie-inspired interface (proof-of-concept)
 - **AI Assistant**: Optional ChatGPT-powered assistant accessible from vintage terminals
 - **Hot-Reload Modules**: Edit feature modules without restarting the hub
@@ -32,7 +38,7 @@ A multi-port serial hub that bridges vintage computers to modern TCP/IP networks
 
 ## Requirements
 
-- Python 3.6 or higher
+- Python 3.8 or higher
 - Dependencies listed in `requirements.txt`
 - USB-to-Serial adapters or RS-232 ports for connecting vintage computers
 - Optional: OpenAI API key for AI Assistant feature
@@ -96,7 +102,8 @@ switch and save that profile's preference. The saved selection is stored in
 `terminal_columns.json` and takes precedence over `config.py`. At 40 columns,
 menus use a compact layout, browser pages wrap to the configured width, long
 labels are shortened to fit, and ANSI translation uses the configured terminal
-width. The default is 80 for profiles without this setting.
+width. The included defaults use 80 columns for APPLE2, IBM, and TRS80 profiles,
+and 40 columns for C64; profiles without this setting default to 80.
 
 Common baud rates for vintage systems:
 - Apple II with Super Serial Card: 300, 1200, 2400, 9600, 19200, or 115200
@@ -237,16 +244,16 @@ errors are printed as ordinary text without ANSI color codes.
 
 The main menu groups features into:
 
-- **Accessories**: `1` Bulletin Boards, `2` Web Browser, `3` Telnet, and `4` FTP
+- **Accessories**: `1` Bulletin Boards, `2` Web Browser, `3` Telnet, and `4` Notes
 - **Bridging**: `5` COM Port and `6` Keyboard
-- **Tools**: `7` File Transfers, `8` Text Library, and `9` Notes
+- **Files**: `7` File Transfers, `8` Text Library, and `9` FTP
 - **Various**: `10` AI Assistant and `11` Wargames
 - **System**: `12` Welcome Banner and `13` switch between 40- and 80-column
   layouts. The selection is saved for that machine profile. Remote TCP
   terminal clients also see `14` Disconnect.
 
 At 80 columns, numbering proceeds down the left column (Accessories, Bridging,
-then Tools) and continues at the top of the right column (Various, then System).
+then Files) and continues at the top of the right column (Various, then System).
 At 40 columns, the same numbering is used in section order, with options paired
 compactly within each section. The Keyboard option types into the focused host
 application. Enter, Tab, and Backspace are supported;
@@ -410,6 +417,15 @@ This design allows you to customize or extend features without modifying the cor
 - Try a different cable
 
 ## Release Notes
+
+### v1.3
+
+- Fixed main-menu routing after the Accessories/Files reorder and restored
+  Notes creation, cancellation, and deletion workflows.
+- Fixed returning to the Notes menu after reading a note.
+- Documented incoming Telnet-compatible Wi-Fi modem access and the Keyboard
+  Bridge; set the default C64 terminal width to 40 columns.
+- Added the project copyright notice and incremented the application version.
 
 ### v1.2
 

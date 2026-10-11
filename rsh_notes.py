@@ -27,11 +27,12 @@ def two_column_list(items, left_pad=38):
     return format_numbered_list(items, left_pad=left_pad)
 
 
-def create_session(ser, use_ansi=True, notes=None, base_dir=None):
+def create_session(ser, use_ansi=True, notes=None, base_dir=None, notice=None):
     sess = {
         'notes': list(notes) if notes else [],
         'base_dir': base_dir,
         'use_ansi': use_ansi,
+        'notice': notice,
     }
     _render_menu(ser, sess)
     return sess
@@ -43,6 +44,8 @@ def _render_menu(ser, sess):
     if not items:
         _write(ser, "No notes available.\r\n")
         _write(ser, "\r\nC=Create, Q=Quit\r\n")
+        if sess.get('notice'):
+            _write(ser, f"\r\n{sess['notice']}\r\n")
         _write(ser, "Command: ")
         return
 
@@ -51,6 +54,8 @@ def _render_menu(ser, sess):
     for ln in lines:
         _write(ser, ln + "\r\n")
     _write(ser, "\r\nEnter number to read, C=Create, D=Delete, Q=Quit\r\n")
+    if sess.get('notice'):
+        _write(ser, f"\r\n{sess['notice']}\r\n")
     _write(ser, "Command: ")
 
 
