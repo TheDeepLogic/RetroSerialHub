@@ -1,0 +1,23 @@
+[
+  {
+    "name": "ftp.cdrom.com",
+    "host": "ftp.cdrom.com",
+    "port": 21,
+    "secure": false,
+    "username": "anonymous"
+  },
+  {
+    "name": "ftp.oldskool.org",
+    "host": "ftp.oldskool.org",
+    "port": 21,
+    "secure": false,
+    "username": "anonymous"
+  },
+  {
+    "name": "ftp.ngdc.noaa.gov",
+    "host": "ftp.ngdc.noaa.gov",
+    "port": 21,
+    "secure": false,
+    "username": "anonymous"
+  }
+]

@@ -1,7 +1,5 @@
 __pycache__/
 *.py[cod]
-browser_bookmarks.json
 welcome_banner.json
 bbs_directory.json
 telnet_bookmarks.json
-ftp_bookmarks.json

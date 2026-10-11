@@ -2,7 +2,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from rsh_console import ConsoleDashboard
+from rsh_console import ConsoleDashboard, VERSION
 
 
 class ConsoleDashboardTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ConsoleDashboardTests(unittest.TestCase):
             dashboard.remove_client(1)
 
         text = output.getvalue()
-        self.assertIn("Retro Serial Hub v1.3", text)
+        self.assertIn(f"Retro Serial Hub v{VERSION}", text)
         self.assertIn("Connect 192.168.1.20:6400", text)
         self.assertIn("Serial COM2: OPEN 19200 | TCP 6400: LISTENING (0)", text)
         self.assertIn("TCP 6400: LISTENING (1)", text)

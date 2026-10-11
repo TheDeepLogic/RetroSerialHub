@@ -1,0 +1,28 @@
+ALTAIR 8800
+===========
+
+The Altair 8800 was introduced by MITS in 1975 as a computer kit for
+electronics hobbyists. Its appearance on the cover of Popular Electronics
+helped bring the emerging microcomputer into public view.
+
+Based on the Intel 8080 processor, the Altair arrived as a kit that buyers
+assembled themselves, with an assembled version also available. The basic
+front panel used switches for entering data and lights for viewing results.
+It did not include a keyboard or screen as a standard user interface, so
+owners often added terminals and other peripherals.
+
+The computer's design encouraged expansion. Additional memory and interface
+boards could be fitted to the bus, and outside companies soon offered
+compatible products. This ecosystem helped turn the Altair into more than a
+single kit: it became a platform for experimentation and software.
+
+MITS also offered Altair BASIC, an interpreter that let users write and run
+programs. The Altair and its community helped inspire the growth of the
+personal-computer industry and many of the clubs and businesses that formed
+around microcomputers in the 1970s.
+
+Source: Wikipedia contributors, "Altair 8800"
+https://en.wikipedia.org/wiki/Altair_8800
+Wikipedia text is available under the Creative Commons Attribution-ShareAlike
+4.0 International License. This is an original summary, not copied article
+text. License: https://creativecommons.org/licenses/by-sa/4.0/

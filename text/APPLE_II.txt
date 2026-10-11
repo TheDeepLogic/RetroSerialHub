@@ -1,0 +1,30 @@
+APPLE II
+========
+
+The Apple II was introduced by Apple Computer in 1977. Designed by Steve
+Wozniak, it helped move personal computing from electronics hobbyists into
+homes, schools, and small businesses.
+
+The original model used a MOS Technology 6502 processor and shipped with 4
+kilobytes of memory in its base configuration. Its color graphics and
+composite video output made it possible to connect the computer to a
+television or monitor. Programs and data could initially be loaded from
+audio cassette. A built-in version of Integer BASIC gave users a way to
+write and run programs as soon as the computer started.
+
+Expansion slots were an important part of the design. Owners could add
+memory, serial interfaces, and other cards, extending the computer for new
+uses. Apple's Disk II floppy drive made storing and loading programs more
+convenient than cassette. Later Apple II models added features and memory
+while keeping much of the original system's compatibility.
+
+The Apple II became a significant platform for educational software,
+productivity programs, and games. Its long-lived design and broad selection
+of expansion hardware helped establish the personal computer as a practical
+tool for more than electronics enthusiasts.
+
+Source: Wikipedia contributors, "Apple II"
+https://en.wikipedia.org/wiki/Apple_II
+Wikipedia text is available under the Creative Commons Attribution-ShareAlike
+4.0 International License. This is an original summary, not copied article
+text. License: https://creativecommons.org/licenses/by-sa/4.0/

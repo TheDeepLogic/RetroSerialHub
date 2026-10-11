@@ -15,6 +15,9 @@ import time
 import pathlib
 from rsh_terminal import clear_terminal_screen, format_numbered_list, terminal_columns
 
+PAGE_ROWS = 24
+PAGE_PROMPT = "Press any key to continue (Q to quit)..."
+
 
 def _write(ser, s):
     """Write string to serial port encoded as ASCII"""
@@ -38,26 +41,38 @@ def _wait_for_key(ser):
         time.sleep(0.05)
 
 
-def _paginate_lines(ser, lines, page_lines=22, quit_msg=True):
+def _paginate_lines(ser, lines, page_lines=None, quit_msg=True):
     """Display lines with pagination"""
+    columns = terminal_columns(ser)
+    if page_lines is None:
+        prompt_rows = max(1, (len(PAGE_PROMPT) + columns - 1) // columns)
+        # Reserve rows for the initial blank line, prompt spacing, prompt, and Enter echo.
+        page_lines = PAGE_ROWS - prompt_rows - 4
+
+    def pause():
+        if quit_msg:
+            _write(ser, f"\r\n{PAGE_PROMPT}\r\n")
+        else:
+            _write(ser, "\r\nPress any key to continue...\r\n")
+        return _wait_for_key(ser) == "Q"
+
     count = 0
     for ln in lines:
+        line_rows = max(1, (len(ln) + columns - 1) // columns)
+        if count and count + line_rows > page_lines:
+            if pause():
+                return "QUIT"
+            count = 0
+
         _write(ser, ln + "\r\n")
-        count += 1
+        count += line_rows
         if count >= page_lines:
-            if quit_msg:
-                _write(ser, "\r\nPress any key to continue (Q to quit)...\r\n")
-            else:
-                _write(ser, "\r\nPress any key to continue...\r\n")
-            key = _wait_for_key(ser)
-            if key == "Q":
+            if pause():
                 return "QUIT"
             count = 0
     # Only pause at EOF if requested
     if quit_msg:
-        _write(ser, "\r\nPress any key to continue (Q to quit)...\r\n")
-        key = _wait_for_key(ser)
-        if key == "Q":
+        if pause():
             return "QUIT"
     return "DONE"
 
@@ -136,7 +151,7 @@ def handle_input(sess, line_str, ser, use_ansi=True):
                 lines = _read_text_file(path)
                 _clear_screen(ser, use_ansi)
                 _write(ser, "\r\n")
-                result = _paginate_lines(ser, lines, page_lines=22, quit_msg=True)
+                result = _paginate_lines(ser, lines, quit_msg=True)
                 
                 # Refresh file list and redraw menu
                 if base:

@@ -72,9 +72,10 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"12] Switch to 40 Columns", output)
         self.assertIn(b"13] Welcome Banner", output)
         self.assertNotIn(b"14] Disconnect", output)
-        self.assertIn(b"v1.3, copyright (c) 2026", output)
+        version_banner = b"v1.4, copyright (c) 2026"
+        self.assertIn(version_banner, output)
         self.assertIn(
-            b"v1.3, copyright (c) 2026\r\n\r\n[ Accessories ]",
+            version_banner + b"\r\n\r\n[ Accessories ]",
             output,
         )
         self.assertIn(
@@ -263,6 +264,7 @@ class ScreenClearingTests(unittest.TestCase):
 
     def test_main_menu_uses_compact_two_option_rows_at_40_columns(self):
         import RETRO_SERIAL_HUB
+        from rsh_console import VERSION
 
         ser = FakeSerial()
         configure_screen_clearing(ser, columns=40)
@@ -277,7 +279,7 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"10] AI Assistant   11] Wargames", output)
         self.assertIn(b"12] 80 Columns", output)
         self.assertIn(
-            b"v1.3, copyright (c) 2026\r\n\r\n[ Accessories ]\r\n",
+            f"v{VERSION}, copyright (c) 2026\r\n\r\n[ Accessories ]\r\n".encode(),
             output,
         )
         self.assertLess(output.index(b"[ Accessories ]"), output.index(b"[ Bridging ]"))

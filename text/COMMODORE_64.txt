@@ -1,0 +1,27 @@
+COMMODORE 64
+============
+
+Commodore introduced the Commodore 64 in 1982. Its name referred to its 64
+kilobytes of RAM, an unusually large amount for a relatively affordable home
+computer at the time.
+
+The machine combined a MOS Technology 6510 processor with two custom chips
+that became central to its character. The VIC-II generated color graphics
+and hardware sprites, while the SID chip produced programmable sound. These
+capabilities made the C64 popular for games, music, and creative software.
+
+At startup, users encountered Commodore BASIC. The computer could connect to
+a television or monitor and supported cassette, cartridge, and disk storage
+through its expansion and peripheral ports. Its low price and the scale of
+Commodore's manufacturing helped it reach a very large audience.
+
+An active software and hardware community grew around the system. Commercial
+games, educational titles, music tools, and user-written programs appeared
+throughout its lifetime. The C64 remains especially well known for its
+distinctive sound and colorful game library.
+
+Source: Wikipedia contributors, "Commodore 64"
+https://en.wikipedia.org/wiki/Commodore_64
+Wikipedia text is available under the Creative Commons Attribution-ShareAlike
+4.0 International License. This is an original summary, not copied article
+text. License: https://creativecommons.org/licenses/by-sa/4.0/

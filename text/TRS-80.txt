@@ -1,0 +1,30 @@
+TRS-80
+======
+
+Tandy Corporation introduced the TRS-80 Model I in 1977 through its Radio
+Shack stores. The name combined Tandy, Radio Shack, and the Zilog Z80
+processor used by the computer. Selling through a familiar retail chain
+made the new machine accessible to hobbyists and first-time computer users.
+
+The Model I was sold with a keyboard, a video display, and a version of
+BASIC. Early systems used cassette recorders to save and load programs.
+Tandy's Expansion Interface added connections for peripherals, including
+floppy disk drives and a printer. This let users begin with a basic setup
+and add capabilities as needed.
+
+The TRS-80 family grew to include later models with updated processors,
+keyboards, storage, and enclosures. The Model III brought many components
+together in a more integrated case. Software publishers and independent
+developers produced games, business applications, programming tools, and
+utilities for the line.
+
+TRS-80 computers were also supported by user groups and magazines. Their
+combination of retail availability, approachable BASIC, and expandable
+hardware helped make personal computing a hands-on activity for a wide
+community.
+
+Source: Wikipedia contributors, "TRS-80"
+https://en.wikipedia.org/wiki/TRS-80
+Wikipedia text is available under the Creative Commons Attribution-ShareAlike
+4.0 International License. This is an original summary, not copied article
+text. License: https://creativecommons.org/licenses/by-sa/4.0/

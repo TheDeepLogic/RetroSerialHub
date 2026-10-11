@@ -1,0 +1,29 @@
+IBM PERSONAL COMPUTER
+=====================
+
+IBM announced the IBM Personal Computer, model 5150, in 1981. IBM was already
+well known for large business systems, so its entry into the personal
+computer market brought the new category additional attention from
+businesses and software developers.
+
+The 5150 used an Intel 8088 processor and was designed from standard
+components. Customers could choose memory, display, and storage options,
+and expansion slots allowed additional hardware to be installed. The
+computer's operating system was PC DOS, supplied by Microsoft.
+
+IBM published technical information that helped independent companies make
+compatible hardware and software. Over time, computers following the
+"IBM-compatible" design became a broad industry standard. Many companies
+produced systems that could run software written for the IBM PC, expanding
+the range of available applications.
+
+The original IBM PC was not the first personal computer, but its market
+influence shaped the direction of business computing. Its open, expandable
+approach helped establish a platform that continued through many generations
+of compatible computers.
+
+Source: Wikipedia contributors, "IBM Personal Computer"
+https://en.wikipedia.org/wiki/IBM_Personal_Computer
+Wikipedia text is available under the Creative Commons Attribution-ShareAlike
+4.0 International License. This is an original summary, not copied article
+text. License: https://creativecommons.org/licenses/by-sa/4.0/

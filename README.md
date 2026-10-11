@@ -7,8 +7,6 @@ networks and accepts incoming Telnet-compatible connections. Systems using
 dedicated Wi-Fi modems can connect over the LAN and access the same BBS, file
 transfer, browser, and other retro-computing services through the hub's menu.
 
-Copyright (c) 2026 Aaron Smith.
-
 ![Retro Serial Hub Screenshot](images/retroserialhub_screenshot.jpg)
 
 > **AI-Assisted Development Notice**
@@ -26,7 +24,8 @@ Copyright (c) 2026 Aaron Smith.
 - **Telnet**: Connect to a host and port directly; manage Telnet bookmarks or add destinations to the BBS directory
 - **FTP/FTPS**: Browse FTP servers and save downloads to the hub or transfer them directly to the connected terminal
 - **File Transfers**: Send and receive files using XMODEM, YMODEM, or ASCII protocols
-- **Text Library**: View text files with pagination support for vintage terminals
+- **Text Library**: Browse and read text files with pagination; includes starter
+  articles on classic computers
 - **Web Browser**: Browse paginated text pages, follow numbered links, and manage bookmarks
 - **Notes System**: Create, read, and manage text notes
 - **COM Port Bridge**: Bridge between different serial ports for direct computer-to-computer communication
@@ -281,8 +280,9 @@ bookmarks, where you can enter a number to open it or `D` followed by a
 number to delete it. HTML search inputs appear as `I<number>`; choose one,
 enter the value, then use `S<number>` to submit its form. Press Backspace to
 edit the current input line. Bookmarks are stored in `browser_bookmarks.json`
-beside the hub. The browser displays text and numbered links; JavaScript and
-images are not supported. HTML GET/POST forms are supported when their fields
+beside the hub. The browser includes starter bookmarks for retro-computing
+resources. It displays text and numbered links; JavaScript and images are not
+supported. HTML GET/POST forms are supported when their fields
 are standard text controls. HTML and plain-text responses are limited to 1 MiB.
 
 ### FTP Downloads
@@ -296,6 +296,7 @@ where a number opens a site and `D<number>` deletes a bookmark. Bookmarks retain
 the hostname, port, FTP/FTPS selection, and username, but never the password;
 the password is prompted for when opening a saved site. They are stored in
 `ftp_bookmarks.json`.
+The file includes starter FTP sites.
 
 Selecting a file prompts for **Host** or **Direct**:
 
@@ -363,7 +364,7 @@ Retro-Serial-Hub/
 ├── rsh_wargames.py        # WarGames module
 ├── rsh_welcome.py         # Persistent welcome banner
 ├── files/                 # File transfer storage
-├── text/                  # Text library files
+├── text/                  # Text library files, README, and starter articles
 ├── notes/                 # Notes storage
 └── tests/                 # Unit tests
 ```
@@ -418,6 +419,24 @@ This design allows you to customize or extend features without modifying the cor
 - Try a different cable
 
 ## Release Notes
+
+### v1.4
+
+- Fixed text-library pagination to account for wrapped lines, terminal width,
+  the continuation prompt, and the echoed Enter key so the first displayed
+  lines remain visible on 40- and 80-column terminals.
+- Added plain-text versions of this README and short vintage-computer articles
+  on the Apple II, Commodore 64, TRS-80, IBM PC, and Altair 8800 to the Text
+  Library.
+- Added starter browser bookmarks for retro-computing resources and anonymous
+  FTP bookmarks for three public file archives.
+- Set saved terminal-column defaults to match the bundled machine profiles
+  and reordered the System menu so option 12 switches column width and option
+  13 opens Welcome Banner.
+- Included the recent menu-routing and Notes workflow fixes, incoming
+  Telnet-compatible Wi-Fi modem documentation, Keyboard Bridge feature listing,
+  and Aaron Smith copyright notice.
+- Updated the application version to v1.4.
 
 ### v1.3
 
