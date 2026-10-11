@@ -15,20 +15,24 @@ Each configured COM port is opened (if available) and runs its own
 independent bridge loop. If a port isn't present, it's skipped.
 
 UX Design:
-- Menu uses 80-column, two-column lists (column 2 starts at 40)
+- Menu layout supports 40- and 80-column terminal profiles
 - ATM cancels any active BBS connection and returns to main menu
 """
 
-import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile
+import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile, json
 from rsh_terminal import (
     AnsiToTextTranslator,
     clear_terminal_screen,
     configure_screen_clearing,
+    format_numbered_list,
+    terminal_columns,
 )
 from rsh_welcome import load_banner, reset_banner, save_banner, validate_banner
+from rsh_console import ConsoleDashboard, VERSION
 
 # Import configuration from config.py
 try:
+    import config as _config
     from config import (
         SERIAL_CONFIGS,
         BBSS,
@@ -41,10 +45,12 @@ try:
         WELCOME_BANNER as CONFIG_WELCOME_BANNER,
     )
     from rsh_directory import load_directory, save_directory
+    from rsh_server import SocketTerminal
 except ImportError:
     print("ERROR: config.py not found. Please ensure config.py exists in the same directory.")
     print("See config.py for configuration examples.")
     sys.exit(1)
+TELNET_SERVER_CONFIGS = getattr(_config, "TELNET_SERVER_CONFIGS", {})
 
 try:
     _bbs_entries = load_directory(BBSS, IPS, PORTS)
@@ -57,6 +63,9 @@ PORTS[:] = [entry["port"] for entry in _bbs_entries]
 
 # Global registry: map port name -> {'thread': thread_name, 'serial': Serial()}
 ACTIVE_PORTS = {}
+ACTIVE_REMOTE_CLIENTS = set()
+ACTIVE_REMOTE_CLIENTS_LOCK = threading.Lock()
+CONSOLE = None
 # Ports that have been surrendered/taken over by a COM-bridge request. Worker threads should stop retrying if their port is surrendered.
 SURRENDERED_PORTS = set()
 
@@ -66,9 +75,56 @@ FILES_DIR = BASE_DIR / "files"
 TEXT_DIR  = BASE_DIR / "text"
 NOTES_DIR = BASE_DIR / "notes"
 WELCOME_BANNER_FILE = BASE_DIR / "welcome_banner.json"
+COLUMN_SETTINGS_FILE = BASE_DIR / "terminal_columns.json"
 FILES_DIR.mkdir(exist_ok=True)
 TEXT_DIR.mkdir(exist_ok=True)
 NOTES_DIR.mkdir(exist_ok=True)
+
+def load_column_preferences(path):
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as settings_file:
+            preferences = json.load(settings_file)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OSError(f"Could not load terminal column settings from {path}: {exc}") from exc
+    if not isinstance(preferences, dict) or any(
+        not isinstance(name, str) or value not in (40, 80)
+        for name, value in preferences.items()
+    ):
+        raise ValueError(f"Invalid terminal column settings in {path}.")
+    return preferences
+
+
+def save_column_preference(path, preferences, name, columns):
+    if columns not in (40, 80):
+        raise ValueError("Terminal columns must be 40 or 80.")
+    updated_preferences = dict(preferences)
+    updated_preferences[name] = columns
+    temporary_path = path.with_name(path.name + ".tmp")
+    try:
+        with temporary_path.open("w", encoding="utf-8") as settings_file:
+            json.dump(updated_preferences, settings_file, indent=2)
+            settings_file.write("\n")
+        temporary_path.replace(path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise OSError(f"Could not save terminal column settings to {path}: {exc}") from exc
+    return updated_preferences
+
+
+try:
+    COLUMN_PREFERENCES = load_column_preferences(COLUMN_SETTINGS_FILE)
+except (OSError, ValueError) as exc:
+    print(f"Terminal column settings error: {exc}. Using config.py values.")
+    COLUMN_PREFERENCES = {}
+COLUMN_PREFERENCES_LOCK = threading.Lock()
+for _profile_name, _columns in COLUMN_PREFERENCES.items():
+    if _profile_name in SERIAL_CONFIGS:
+        SERIAL_CONFIGS[_profile_name]["columns"] = _columns
 
 try:
     WELCOME_BANNER = load_banner(CONFIG_WELCOME_BANNER, WELCOME_BANNER_FILE)
@@ -128,49 +184,127 @@ def paginate_lines(ser, lines, page_lines=22, quit_msg=False):
             return "QUIT"
     return "DONE"
 
-def two_column_list(items, left_pad=38):
-    half = (len(items) + 1) // 2
-    left = items[:half]
-    right = items[half:]
-    if len(right) < len(left):
-        right.append("")
-    lines = []
-    for i in range(len(left)):
-        left_num = f"{i+1:2d}] {left[i]}"
-        if i < len(right) and right[i]:
-            right_num = f"{i+1+half:2d}] {right[i]}"
-            line = f"{left_num:<{left_pad}}{right_num}"
-        else:
-            line = f"{left_num}"
-        lines.append(line)
-    return lines
+def two_column_list(items, left_pad=38, columns=80):
+    return format_numbered_list(items, columns, left_pad)
+
+
+def configured_columns(name, cfg):
+    columns = cfg.get("columns", 80)
+    if columns not in (40, 80):
+        console_log(f"{name}: invalid terminal columns {columns!r}; using 80.", level="yellow")
+        return 80
+    return columns
+
+
+def console_log(message, level="info"):
+    if CONSOLE is None:
+        print(message)
+    else:
+        CONSOLE.log(message, level=level)
+
+
+def get_active_connection_counts():
+    """Return the number of open serial ports and connected remote clients."""
+    with ACTIVE_REMOTE_CLIENTS_LOCK:
+        remote_count = len(ACTIVE_REMOTE_CLIENTS)
+    return len(ACTIVE_PORTS), remote_count
+
 
 def show_main_menu(ser, use_ansi=True):
+    columns = terminal_columns(ser)
+    remote_client = isinstance(ser, SocketTerminal)
     clear_screen(ser, use_ansi)
-    write(ser, "\r\n" + WELCOME_BANNER + "\r\n")
-    write(ser, "v1.1, copyright (c) 2025\r\n\r\n")
-    write(ser, "Please select a command from the options below:\r\n\r\n")
-    write(ser, " 1] Bulletin Boards\r\n")
-    write(ser, " 2] Web Browser\r\n")
-    write(ser, " 3] Telnet\r\n")
-    write(ser, " 4] FTP\r\n")
-    write(ser, " 5] File Transfers\r\n")
-    write(ser, " 6] Text Library\r\n")
-    write(ser, " 7] AI Assistant\r\n")
-    write(ser, " 8] Wargames\r\n")
-    write(ser, " 9] Notes\r\n")
-    write(ser, "10] COM Port Bridge\r\n")
-    write(ser, "11] Keyboard Bridge\r\n")
-    write(ser, "12] Welcome Banner\r\n\r\n")
-    write(ser, "Type ATM at any time to return to this menu.\r\n\r\n")
+    banner_prefix = "\r\n" if columns == 80 else ""
+    version_spacing = "\r\n\r\n"
+    write(ser, banner_prefix + WELCOME_BANNER + "\r\n")
+    write(ser, f"v{VERSION}, copyright (c) 2025" + version_spacing)
+    options = {
+        "Accessories": [
+            ("1", "Bulletin Boards"),
+            ("2", "Web Browser"),
+            ("3", "Telnet"),
+            ("4", "FTP"),
+        ],
+        "Bridging": [("5", "COM Port"), ("6", "Keyboard")],
+        "Tools": [
+            ("7", "File Transfers"),
+            ("8", "Text Library"),
+            ("9", "Notes"),
+        ],
+        "Various": [("10", "AI Assistant"), ("11", "Wargames")],
+        "System": [
+            ("12", "Welcome Banner"),
+            ("13", f"Switch to {120 - columns} Columns"),
+        ],
+    }
+    if remote_client:
+        options["System"].append(("14", "Disconnect"))
+
+    if columns == 80:
+        left_groups = ("Accessories", "Bridging", "Tools")
+        right_groups = ("Various", "System")
+        left_lines = _format_menu_groups(left_groups, options, 39)
+        right_lines = _format_menu_groups(right_groups, options, 39)
+        for index in range(max(len(left_lines), len(right_lines))):
+            left_line = left_lines[index] if index < len(left_lines) else ""
+            right_line = right_lines[index] if index < len(right_lines) else ""
+            write(ser, f"{left_line:<40}{right_line}\r\n")
+    else:
+        for group_index, group in enumerate(
+            ("Accessories", "Bridging", "Tools", "Various", "System")
+        ):
+            group_spacing = "\r\n" if group_index else ""
+            write(ser, f"{group_spacing}[ {group} ]\r\n")
+            entries = [
+                f"{number:>2}] "
+                f"{120 - columns} Columns"
+                if number == "13"
+                else f"{number:>2}] {label[:14]}"
+                for number, label in options[group]
+            ]
+            for index in range(0, len(entries), 2):
+                left = entries[index]
+                right = entries[index + 1] if index + 1 < len(entries) else ""
+                write(ser, f"{left:<19}{right}\r\n")
+
+    serial_count, remote_count = get_active_connection_counts()
+    if columns == 40:
+        status = (
+            f"{time.strftime('%H:%M')} | Serial {serial_count} "
+            f"Telnet {remote_count}"
+        )
+    else:
+        status = (
+            f"Status: {time.strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"Serial ports: {serial_count} | Telnet clients: {remote_count}"
+        )
+    write(ser, "\r\n" + status + "\r\n")
+    write(ser, "Type ATM to return to this menu.\r\n")
+    if columns == 80:
+        write(ser, "\r\n")
     write(ser, "Command: ")
+
+
+def _format_menu_groups(group_names, options, width):
+    lines = []
+    for group in group_names:
+        lines.append(f"[ {group} ]")
+        lines.extend(
+            f"{number:>2}] {label}"[:width]
+            for number, label in options[group]
+        )
+        lines.append("")
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
 
 def show_notes_menu(ser, notes, use_ansi=True):
     clear_screen(ser, use_ansi)
     write(ser, "\r\nNotes:\r\n\r\n")
     display_names = [truncate_name(f) for f in notes]
-    lines = two_column_list(display_names, left_pad=38)
-    for line in two_column_list(display_names, left_pad=38):
+    for line in two_column_list(
+        display_names, left_pad=38, columns=terminal_columns(ser)
+    ):
         write(ser, line + "\r\n")
     write(ser, "\r\nEnter number to read, C=Create, D=Delete, Q=Quit\r\n")
     write(ser, "Command: ")
@@ -186,7 +320,9 @@ def show_text_menu(ser, files, use_ansi=True):
     clear_screen(ser, use_ansi)
     write(ser, "Text library:\r\n\r\n")
     display_names = [truncate_name(f) for f in files]
-    for line in two_column_list(display_names, left_pad=38):
+    for line in two_column_list(
+        display_names, left_pad=38, columns=terminal_columns(ser)
+    ):
         write(ser, line + "\r\n")
     write(ser, "\r\nEnter the number to read the file. Enter Q to return to the main menu.\r\n")
     write(ser, "Command: ")
@@ -257,6 +393,7 @@ def port_worker(name, cfg):
     """Worker thread for each serial port. Only retries if a port was once open and then lost."""
     while True:
         try:
+            columns = configured_columns(name, cfg)
             ser = serial.Serial(
                 port=cfg["port"],
                 baudrate=cfg["baud"],
@@ -271,8 +408,10 @@ def port_worker(name, cfg):
                 ser,
                 translate_ansi=cfg.get("translate_ansi", False),
                 clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+                columns=columns,
             )
-            print(f"[{name}] Listening on {cfg['port']} at {cfg['baud']} baud")
+            if CONSOLE:
+                CONSOLE.update_profile(name, serial="OPEN")
             # Register active port
             try:
                 ACTIVE_PORTS[cfg['port'].upper()] = {'thread': name, 'serial': ser}
@@ -292,30 +431,170 @@ def port_worker(name, cfg):
                 ACTIVE_PORTS.pop(cfg['port'].upper(), None)
             except Exception:
                 pass
+            if CONSOLE:
+                CONSOLE.update_profile(name, serial="RETRY")
         except serial.SerialException as e:
+            try:
+                ACTIVE_PORTS.pop(cfg["port"].upper(), None)
+            except Exception:
+                pass
             # If the port was never present at startup, bail out permanently
             if "FileNotFoundError" in str(e) or "cannot find the file" in str(e):
-                print(f"[{name}] Port {cfg['port']} not present on this system. Skipping.")
+                if CONSOLE:
+                    CONSOLE.update_profile(name, serial="MISSING")
+                console_log(f"{name}: serial port {cfg['port']} is not present.")
                 return
             else:
                 # If this port was surrendered for COM bridge takeover, wait until it's returned
                 if cfg['port'].upper() in SURRENDERED_PORTS:
-                    print(f"[{name}] Port {cfg['port']} surrendered to COM bridge. Waiting to be returned...")
+                    if CONSOLE:
+                        CONSOLE.update_profile(name, serial="BRIDGED")
+                    console_log(
+                        f"{name}: serial port {cfg['port']} is in use by COM Bridge; waiting for it to return.",
+                        level="yellow",
+                    )
                     # ensure it's unregistered
                     ACTIVE_PORTS.pop(cfg['port'].upper(), None)
                     # Block here until the surrender is cleared
                     while cfg['port'].upper() in SURRENDERED_PORTS:
                         time.sleep(1)
-                    print(f"[{name}] Port {cfg['port']} returned. Retrying open...")
+                    console_log(f"{name}: serial port {cfg['port']} returned; retrying.")
                     time.sleep(1)
                     continue
-                print(f"[{name}] Serial error on {cfg['port']}: {e}. Retrying in 5s...")
+                if CONSOLE:
+                    CONSOLE.update_profile(name, serial="RETRY")
+                console_log(
+                    f"{name}: serial error on {cfg['port']}: {e}; retrying in 5 seconds.",
+                    level="red",
+                )
                 time.sleep(5)
                 continue
         except Exception as e:
-            print(f"[{name}] Unexpected error: {e}. Retrying in 5s...")
+            try:
+                ACTIVE_PORTS.pop(cfg["port"].upper(), None)
+            except Exception:
+                pass
+            if CONSOLE:
+                CONSOLE.update_profile(name, serial="ERROR")
+            console_log(
+                f"{name}: unexpected serial worker error: {e}; retrying in 5 seconds.",
+                level="red",
+            )
             time.sleep(5)
             continue
+
+
+def remote_client_worker(name, cfg, client_socket, address):
+    """Run one remote client through the same terminal menu as a serial port."""
+    terminal = SocketTerminal(client_socket)
+    columns = configured_columns(name, cfg)
+    client_id = id(client_socket)
+    with ACTIVE_REMOTE_CLIENTS_LOCK:
+        ACTIVE_REMOTE_CLIENTS.add(client_id)
+    if CONSOLE:
+        CONSOLE.add_client(client_id, name, address)
+    try:
+        configure_screen_clearing(
+            terminal,
+            translate_ansi=cfg.get("translate_ansi", False),
+            clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+            columns=columns,
+        )
+        bridge_loop(
+            name,
+            terminal,
+            cfg.get("ansi", True),
+            translate_ansi=cfg.get("translate_ansi", False),
+            ansi_clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+            ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
+        )
+    except (OSError, ConnectionError) as exc:
+        console_log(
+            f"{name}: remote client {address[0]}:{address[1]} disconnected: {exc}",
+            level="yellow",
+        )
+    except Exception as exc:
+        console_log(
+            f"{name}: remote session error for {address[0]}:{address[1]}: {exc}",
+            level="red",
+        )
+    finally:
+        with ACTIVE_REMOTE_CLIENTS_LOCK:
+            ACTIVE_REMOTE_CLIENTS.discard(client_id)
+        if CONSOLE:
+            CONSOLE.remove_client(client_id)
+        terminal.close()
+
+
+def local_ipv4_addresses():
+    """Return distinct non-loopback IPv4 addresses available on this host."""
+    addresses = set()
+    try:
+        addresses.update(
+            info[4][0]
+            for info in socket.getaddrinfo(
+                socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM
+            )
+            if not info[4][0].startswith("127.")
+        )
+    except socket.gaierror as exc:
+        console_log(
+            f"Could not resolve this computer's hostname for LAN address discovery: {exc}",
+            level="yellow",
+        )
+
+    # A UDP connect selects the default route without sending any network data.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_socket:
+            route_socket.connect(("192.0.2.1", 9))
+            address = route_socket.getsockname()[0]
+            if not address.startswith("127."):
+                addresses.add(address)
+    except OSError as exc:
+        console_log(
+            f"Could not detect the default LAN interface address: {exc}",
+            level="yellow",
+        )
+
+    return sorted(addresses)
+
+
+def telnet_server_worker(name, cfg, server_cfg):
+    """Accept remote terminal connections for one configured machine profile."""
+    host = server_cfg.get("host", "0.0.0.0")
+    port = server_cfg.get("port")
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        if CONSOLE:
+            CONSOLE.update_profile(name, tcp="ERROR")
+        console_log(
+            f"{name}: invalid TCP server port {port!r}; expected an integer from 1 to 65535.",
+            level="red",
+        )
+        return
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind((host, port))
+            listener.listen()
+            if CONSOLE:
+                CONSOLE.update_profile(name, tcp="LISTENING")
+            while True:
+                client_socket, address = listener.accept()
+                threading.Thread(
+                    target=remote_client_worker,
+                    args=(name, cfg, client_socket, address),
+                    name=f"{name}-remote-{address[0]}",
+                    daemon=True,
+                ).start()
+    except (OSError, TypeError) as exc:
+        if CONSOLE:
+            CONSOLE.update_profile(name, tcp="ERROR")
+        console_log(
+            f"{name}: could not start TCP terminal server on {host}:{port}: {exc}",
+            level="red",
+        )
+
 
 def bridge_loop(
     name,
@@ -325,6 +604,7 @@ def bridge_loop(
     ansi_clear_sequence=b"\x0c",
     ansi_home_clears_screen=False,
 ):
+    global COLUMN_PREFERENCES
     tcp_sock = None
     # For COM Port Bridge mode: separate serial to bridge
     bridge_serial = None
@@ -361,6 +641,7 @@ def bridge_loop(
     inbound_translator = (
         AnsiToTextTranslator(
             clear_sequence=ansi_clear_sequence,
+            columns=terminal_columns(ser),
             clear_on_home=ansi_home_clears_screen,
         )
         if translate_ansi else None
@@ -398,6 +679,9 @@ def bridge_loop(
         # serial input
         if ser.in_waiting:
             data = ser.read(ser.in_waiting)
+            if not data and isinstance(ser, SocketTerminal):
+                console_log(f"{name}: remote terminal disconnected.", level="yellow")
+                return
 
             if mode == "KEYBOARD":
                 try:
@@ -561,6 +845,14 @@ def bridge_loop(
                     show_main_menu(ser, use_ansi)
                     continue
 
+                if (
+                    mode == "MENU"
+                    and upper == "14"
+                    and isinstance(ser, SocketTerminal)
+                ):
+                    write(ser, "\r\nDisconnecting from Retro Serial Hub.\r\n")
+                    return
+
                 if mode == "WELCOME_BANNER":
                     global WELCOME_BANNER
                     if not line_str:
@@ -587,7 +879,28 @@ def bridge_loop(
 
                 if mode == "MENU":
                     # Echo full command line
-                    if upper == "1":
+                    if upper == "13":
+                        new_columns = 40 if terminal_columns(ser) == 80 else 80
+                        try:
+                            with COLUMN_PREFERENCES_LOCK:
+                                COLUMN_PREFERENCES = save_column_preference(
+                                    COLUMN_SETTINGS_FILE,
+                                    COLUMN_PREFERENCES,
+                                    name,
+                                    new_columns,
+                                )
+                            SERIAL_CONFIGS[name]["columns"] = new_columns
+                            ser._rsh_columns = new_columns
+                            if inbound_translator:
+                                inbound_translator.columns = new_columns
+                        except (OSError, ValueError) as exc:
+                            write(ser, f"\r\n*** Could not save display width: {exc} ***\r\n")
+                            show_main_menu(ser, use_ansi)
+                            continue
+                        write(ser, f"\r\nTerminal width saved: {new_columns} columns.\r\n")
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif upper == "1":
                         # Load BBS module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -635,7 +948,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "FTP"
-                    elif upper == "5":
+                    elif upper == "7":
                         # Load files module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -650,7 +963,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "FILES"
-                    elif upper == "6":
+                    elif upper == "8":
                         # Load text module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -692,7 +1005,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "NOTES"
-                    elif upper == "11":
+                    elif upper == "6":
                         try:
                             keyboard_module = importlib.import_module(
                                 'rsh_keyboard'
@@ -735,7 +1048,7 @@ def bridge_loop(
                         write(ser, "Press Enter with an empty line to use config.py default.\r\n")
                         write(ser, "New banner: ")
                         mode = "WELCOME_BANNER"
-                    elif upper == "10":
+                    elif upper == "5":
                         # Enter COM Port Bridge: delegate prompts to rsh_bridge module
                         try:
                             importlib.invalidate_caches()
@@ -758,7 +1071,7 @@ def bridge_loop(
                         # the prompt state isn't None (which caused a NoneType subscriptable error).
                         pending_bridge = bridge_session
                         mode = "COMBRIDGE_PROMPT"
-                    elif upper == "8":
+                    elif upper == "11":
                         # Enter Wargames mode (load module on demand so it can be edited separately)
                         try:
                             importlib.invalidate_caches()
@@ -777,7 +1090,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "WARGAMES"
-                    elif upper == "7":
+                    elif upper == "10":
                         # Enter AI chat mode (load module on demand)
                         try:
                             importlib.invalidate_caches()
@@ -1400,7 +1713,63 @@ def bridge_loop(
                 pass
 
 def main():
+    global CONSOLE
     threads = []
+    addresses = local_ipv4_addresses() if TELNET_SERVER_CONFIGS else []
+    profiles = {}
+    for name in dict.fromkeys((*SERIAL_CONFIGS, *TELNET_SERVER_CONFIGS)):
+        cfg = SERIAL_CONFIGS.get(name, {})
+        server_cfg = TELNET_SERVER_CONFIGS.get(name)
+        if isinstance(server_cfg, dict):
+            host = server_cfg.get("host", "0.0.0.0")
+            port = server_cfg.get("port")
+            if host == "0.0.0.0":
+                connect_host = ", ".join(addresses) if addresses else "LAN IP unavailable"
+            else:
+                connect_host = host
+            endpoint = f"{connect_host}:{port}" if port else None
+            tcp_status = "STARTING"
+        else:
+            port = None
+            endpoint = None
+            tcp_status = "DISABLED"
+        profiles[name] = {
+            "serial_port": cfg.get("port", "N/A"),
+            "baud": cfg.get("baud"),
+            "serial_status": "STARTING",
+            "tcp_port": port,
+            "tcp_status": tcp_status,
+            "endpoint": endpoint,
+        }
+
+    CONSOLE = ConsoleDashboard(profiles)
+    CONSOLE.start()
+
+    for name, server_cfg in TELNET_SERVER_CONFIGS.items():
+        cfg = SERIAL_CONFIGS.get(name)
+        if cfg is None:
+            CONSOLE.update_profile(name, tcp="ERROR")
+            console_log(
+                f"{name}: TCP listener has no matching SERIAL_CONFIGS profile; skipping.",
+                level="red",
+            )
+            continue
+        if not isinstance(server_cfg, dict):
+            CONSOLE.update_profile(name, tcp="ERROR")
+            console_log(
+                f"{name}: TCP server configuration must be a dictionary; skipping.",
+                level="red",
+            )
+            continue
+        t = threading.Thread(
+            target=telnet_server_worker,
+            args=(name, cfg, server_cfg),
+            name=f"{name}-tcp-server",
+            daemon=True,
+        )
+        t.start()
+        threads.append(t)
+
     for name, cfg in SERIAL_CONFIGS.items():
         t = threading.Thread(
             target=port_worker,
@@ -1410,13 +1779,12 @@ def main():
         t.start()
         threads.append(t)
 
-    # keep alive
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("Exiting.")
-        os._exit(0)
+        console_log("Shutting down.")
+        CONSOLE.stop()
 
 
 if __name__ == "__main__":

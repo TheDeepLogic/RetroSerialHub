@@ -38,6 +38,18 @@ class BbsMenuPaginationTests(unittest.TestCase):
     def test_empty_directory_has_no_pages(self):
         self.assertEqual(_two_column_pages([]), [])
 
+    def test_40_column_layout_uses_one_column_pages(self):
+        pages = _two_column_pages(
+            [f"BBS {index}" for index in range(1, 22)],
+            page_lines=19,
+            columns=40,
+        )
+
+        self.assertEqual([len(page) for page in pages], [19, 2])
+        self.assertEqual(pages[0][0], " 1] BBS 1")
+        self.assertEqual(pages[0][-1], "19] BBS 19")
+        self.assertEqual(pages[1][0], "20] BBS 20")
+
     def test_manager_adds_entry_and_persists_directory(self):
         names = ["Default"]
         hosts = ["default.example.org"]

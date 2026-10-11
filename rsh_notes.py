@@ -16,7 +16,7 @@ Actions returned to core:
 This module renders the notes list and returns high-level actions to the core.
 """
 
-from rsh_terminal import clear_terminal_screen
+from rsh_terminal import clear_terminal_screen, format_numbered_list, terminal_columns
 
 
 def _write(ser, s):
@@ -24,21 +24,7 @@ def _write(ser, s):
 
 
 def two_column_list(items, left_pad=38):
-    half = (len(items) + 1) // 2
-    left = items[:half]
-    right = items[half:]
-    if len(right) < len(left):
-        right.append("")
-    lines = []
-    for i in range(len(left)):
-        left_num = f"{i+1:2d}] {left[i]}"
-        if i < len(right) and right[i]:
-            right_num = f"{i+1+half:2d}] {right[i]}"
-            line = f"{left_num:<{left_pad}}{right_num}"
-        else:
-            line = f"{left_num}"
-        lines.append(line)
-    return lines
+    return format_numbered_list(items, left_pad=left_pad)
 
 
 def create_session(ser, use_ansi=True, notes=None, base_dir=None):
@@ -60,7 +46,7 @@ def _render_menu(ser, sess):
         _write(ser, "Command: ")
         return
 
-    lines = two_column_list(items, left_pad=38)
+    lines = format_numbered_list(items, terminal_columns(ser))
     _write(ser, "\r\nNotes:\r\n\r\n")
     for ln in lines:
         _write(ser, ln + "\r\n")

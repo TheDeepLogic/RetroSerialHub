@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from rsh_terminal import clear_terminal_screen
+from rsh_terminal import clear_terminal_screen, terminal_columns
 
 
 TELNET_BOOKMARKS_FILE = Path(__file__).with_name("telnet_bookmarks.json")
@@ -93,11 +93,15 @@ def _render_menu(ser, session, use_ansi):
     clear_terminal_screen(ser, use_ansi)
     _write(ser, "\r\nTelnet destinations\r\n\r\n")
     for index, bookmark in enumerate(session["bookmarks"], start=1):
-        _write(
-            ser,
-            f"{index:2d}] {bookmark['name']} - "
-            f"{bookmark['host']}:{bookmark['port']}\r\n",
-        )
+        if terminal_columns(ser) == 40:
+            _write(ser, f"{index:2d}] {bookmark['name'][:35]}\r\n")
+            _write(ser, f"    {bookmark['host'][:27]}:{bookmark['port']}\r\n")
+        else:
+            _write(
+                ser,
+                f"{index:2d}] {bookmark['name']} - "
+                f"{bookmark['host']}:{bookmark['port']}\r\n",
+            )
     _write(
         ser,
         "\r\nEnter a number to connect, A to enter an address, "

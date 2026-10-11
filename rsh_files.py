@@ -22,7 +22,7 @@ from textwrap import shorten
 import os
 import time
 import pathlib
-from rsh_terminal import clear_terminal_screen
+from rsh_terminal import clear_terminal_screen, format_numbered_list, terminal_columns
 
 # XMODEM / YMODEM constants
 SOH = 0x01  # 128-byte blocks
@@ -53,21 +53,12 @@ def create_session(ser, use_ansi=True, files=None, transfer_mode='XMODEM', base_
 def _render_menu(ser, sess):
     clear_terminal_screen(ser, sess.get('use_ansi', True))
     _write(ser, f"\r\nFile Transfer Menu (Current mode: {sess['transfer_mode']})\r\n\r\n")
-    display_names = [shorten(f, width=34, placeholder='…') for f in sess['files']]
-    # two-column list simple implementation
-    half = (len(display_names) + 1) // 2
-    left = display_names[:half]
-    right = display_names[half:]
-    if len(right) < len(left):
-        right.append("")
-    left_pad = 38
-    for i in range(len(left)):
-        left_num = f"{i+1:2d}] {left[i]}"
-        if i < len(right) and right[i]:
-            right_num = f"{i+1+half:2d}] {right[i]}"
-            line = f"{left_num:<{left_pad}}{right_num}"
-        else:
-            line = left_num
+    columns = terminal_columns(ser)
+    display_names = [
+        shorten(f, width=34 if columns == 80 else 35, placeholder='…')
+        for f in sess['files']
+    ]
+    for line in format_numbered_list(display_names, columns):
         _write(ser, line + "\r\n")
 
     _write(ser, "\r\nEnter number to transfer, U=Upload, X=XMODEM, Y=YMODEM, A=ASCII, Q=Quit\r\n")

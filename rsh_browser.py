@@ -9,11 +9,12 @@ import tempfile
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
-from rsh_terminal import clear_terminal_screen
+from rsh_terminal import clear_terminal_screen, terminal_columns
 
 
 PAGE_LINES = 20
 LINE_WIDTH = 76
+NARROW_PAGE_LINES = 14
 MAX_RESPONSE_BYTES = 1024 * 1024
 DEFAULT_BOOKMARKS_PATH = Path(__file__).resolve().parent / "browser_bookmarks.json"
 BLOCK_TAGS = {
@@ -33,6 +34,17 @@ def _write(ser, text):
 
 def _clear_screen(ser, use_ansi):
     clear_terminal_screen(ser, use_ansi)
+
+
+def _line_width(ser):
+    return 38 if terminal_columns(ser) == 40 else LINE_WIDTH
+
+
+def _page_size(session, ser):
+    return session.get(
+        "page_lines",
+        NARROW_PAGE_LINES if terminal_columns(ser) == 40 else PAGE_LINES,
+    )
 
 
 class _PageTextParser(HTMLParser):
@@ -182,7 +194,7 @@ def _wrap_text(text, width=LINE_WIDTH):
     return lines or ["(This page contains no readable text.)"]
 
 
-def parse_html(data):
+def parse_html(data, width=LINE_WIDTH):
     parser = _PageTextParser()
     parser.feed(data.decode("utf-8", errors="replace"))
     parser.close()
@@ -190,7 +202,7 @@ def parse_html(data):
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return _wrap_text(text), parser.links, parser.forms, parser.fields
+    return _wrap_text(text, width), parser.links, parser.forms, parser.fields
 
 
 def _normalize_url(url):
@@ -206,7 +218,7 @@ def _normalize_url(url):
     return url
 
 
-def _fetch_page(url, method="GET", form_data=None):
+def _fetch_page(url, method="GET", form_data=None, width=LINE_WIDTH):
     data = None
     if form_data is not None and method.upper() == "POST":
         data = urlencode(form_data).encode("ascii")
@@ -225,10 +237,10 @@ def _fetch_page(url, method="GET", form_data=None):
         data = data[:MAX_RESPONSE_BYTES]
         if content_type == "text/plain":
             charset = response.headers.get_content_charset() or "utf-8"
-            lines = _wrap_text(data.decode(charset, errors="replace"))
+            lines = _wrap_text(data.decode(charset, errors="replace"), width)
             links, forms, fields = [], [], []
         else:
-            lines, links, forms, fields = parse_html(data)
+            lines, links, forms, fields = parse_html(data, width)
         if truncated:
             lines.extend(["", "[Page truncated: response exceeded 1 MiB.]"])
         return response.geturl(), lines, links, forms, fields
@@ -272,6 +284,7 @@ def _save_bookmarks(session, bookmarks):
 
 def create_session(ser, use_ansi=True, bookmarks_path=None):
     bookmark_path = Path(bookmarks_path) if bookmarks_path else DEFAULT_BOOKMARKS_PATH
+    columns = terminal_columns(ser)
     session = {
         "history": [],
         "url": "",
@@ -289,6 +302,8 @@ def create_session(ser, use_ansi=True, bookmarks_path=None):
         "forms": [],
         "fields": [],
         "use_ansi": use_ansi,
+        "line_width": columns - 2,
+        "page_lines": NARROW_PAGE_LINES if columns == 40 else PAGE_LINES,
     }
     _render_url_prompt(ser, use_ansi)
     return session
@@ -297,33 +312,50 @@ def create_session(ser, use_ansi=True, bookmarks_path=None):
 def _render_url_prompt(ser, use_ansi=True):
     _clear_screen(ser, use_ansi)
     _write(ser, "\r\nWeb Browser\r\n")
-    _write(ser, "Text pages, numbered links, and simple search forms are supported.\r\n")
-    _write(ser, "Enter an HTTP(S) address, or Q to return to the menu.\r\n")
+    if terminal_columns(ser) == 40:
+        _write(ser, "Text pages, links, and forms\r\nare supported.\r\n")
+        _write(ser, "Enter an HTTP(S) address.\r\nQ returns to menu.\r\n")
+    else:
+        _write(ser, "Text pages, numbered links, and simple search forms are supported.\r\n")
+        _write(ser, "Enter an HTTP(S) address, or Q to return to the menu.\r\n")
     _write(ser, "URL: ")
 
 
 def _render_page(session, ser, use_ansi):
+    line_width = session.get("line_width", _line_width(ser))
+    page_lines = _page_size(session, ser)
     _clear_screen(ser, use_ansi)
     _write(ser, "\r\nWeb Browser\r\n")
-    _write(ser, session["url"][:LINE_WIDTH] + "\r\n")
+    _write(ser, session["url"][:line_width] + "\r\n")
     if session["error"]:
-        _write(ser, "\r\n*** " + session["error"] + " ***\r\n")
+        error_lines = _wrap_text("*** " + session["error"] + " ***", line_width)
+        _write(ser, "\r\n" + "\r\n".join(error_lines) + "\r\n")
     if session["lines"]:
-        start = session["page"] * PAGE_LINES
-        for line in session["lines"][start:start + PAGE_LINES]:
-            line = _render_controls(session, line)
+        start = session["page"] * page_lines
+        for line in session["lines"][start:start + page_lines]:
+            line = _render_controls(session, line, line_width)
             _write(ser, line + "\r\n")
-    total_pages = max(1, (len(session["lines"]) + PAGE_LINES - 1) // PAGE_LINES)
-    _write(
-        ser,
-        "\r\nPage %d/%d | N/P=scroll G=goto F=first B=back U=URL\r\n"
-        % (session["page"] + 1, total_pages),
-    )
-    _write(ser, "I#=input S#=submit G=goto F=first A=save M=bookmarks\r\n")
-    _write(ser, "B=back U=URL Q=menu | link number: ")
+    total_pages = max(1, (len(session["lines"]) + page_lines - 1) // page_lines)
+    if line_width < LINE_WIDTH:
+        _write(
+            ser,
+            "\r\nPage %d/%d | N/P scroll G goto\r\n"
+            % (session["page"] + 1, total_pages),
+        )
+        _write(ser, "F first B back U URL Q menu\r\n")
+        _write(ser, "I# input S# submit A save M marks\r\n")
+        _write(ser, "Link number: ")
+    else:
+        _write(
+            ser,
+            "\r\nPage %d/%d | N/P=scroll G=goto F=first B=back U=URL\r\n"
+            % (session["page"] + 1, total_pages),
+        )
+        _write(ser, "I#=input S#=submit G=goto F=first A=save M=bookmarks\r\n")
+        _write(ser, "B=back U=URL Q=menu | link number: ")
 
 
-def _render_controls(session, line):
+def _render_controls(session, line, line_width=LINE_WIDTH):
     def render_input(match):
         index = int(match.group(1)) - 1
         field = session["fields"][index]
@@ -333,17 +365,17 @@ def _render_controls(session, line):
             field["label"],
             value,
         )
-        return re.sub(r"[\x00-\x1f\x7f]", " ", control_text)[:LINE_WIDTH]
+        return re.sub(r"[\x00-\x1f\x7f]", " ", control_text)[:line_width]
 
     def render_submit(match):
         index = int(match.group(1)) - 1
         form = session["forms"][index]
         label = ", ".join(form["submit_labels"]) or "Submit"
         control_text = "[S%d submit: %s]" % (index + 1, label)
-        return re.sub(r"[\x00-\x1f\x7f]", " ", control_text)[:LINE_WIDTH]
+        return re.sub(r"[\x00-\x1f\x7f]", " ", control_text)[:line_width]
 
     line = INPUT_MARKER.sub(render_input, line)
-    return SUBMIT_MARKER.sub(render_submit, line)
+    return SUBMIT_MARKER.sub(render_submit, line)[:line_width]
 
 
 def _render_bookmarks(session, ser, use_ansi):
@@ -352,10 +384,17 @@ def _render_bookmarks(session, ser, use_ansi):
     if not session["bookmarks"]:
         _write(ser, "No bookmarks saved.\r\n")
     for index, bookmark in enumerate(session["bookmarks"], 1):
-        name = bookmark["name"][:28]
-        url = bookmark["url"][:45]
-        _write(ser, "%2d] %-28s %s\r\n" % (index, name, url))
-    _write(ser, "\r\nEnter number to open, D number to delete, Q to return.\r\n")
+        if terminal_columns(ser) == 40:
+            _write(ser, "%2d] %s\r\n" % (index, bookmark["name"][:35]))
+            _write(ser, "    %s\r\n" % bookmark["url"][:35])
+        else:
+            name = bookmark["name"][:28]
+            url = bookmark["url"][:45]
+            _write(ser, "%2d] %-28s %s\r\n" % (index, name, url))
+    if terminal_columns(ser) == 40:
+        _write(ser, "\r\nNumber opens; D# deletes; Q returns.\r\n")
+    else:
+        _write(ser, "\r\nEnter number to open, D number to delete, Q to return.\r\n")
     _write(ser, "Command: ")
 
 
@@ -373,10 +412,14 @@ def _open_url(
     method="GET",
     form_data=None,
 ):
+    columns = terminal_columns(ser)
+    line_width = _line_width(ser)
+    page_lines = NARROW_PAGE_LINES if columns == 40 else PAGE_LINES
     try:
-        final_url, lines, links, forms, fields = _fetch_page(
-            url, method=method, form_data=form_data
-        )
+        fetch_options = {"method": method, "form_data": form_data}
+        if line_width != LINE_WIDTH:
+            fetch_options["width"] = line_width
+        final_url, lines, links, forms, fields = _fetch_page(url, **fetch_options)
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
         session["error"] = "Could not load page: %s" % exc
         session["lines"] = []
@@ -397,6 +440,8 @@ def _open_url(
         "page": 0,
         "awaiting_url": False,
         "error": "",
+        "line_width": line_width,
+        "page_lines": page_lines,
     })
     _render_page(session, ser, use_ansi)
 
@@ -544,7 +589,8 @@ def handle_input(session, line_str, ser, use_ansi=True):
         except ValueError:
             _show_error(session, "Enter a page number.", ser, use_ansi)
             return True, None
-        page_count = max(1, (len(session["lines"]) + PAGE_LINES - 1) // PAGE_LINES)
+        page_lines = _page_size(session, ser)
+        page_count = max(1, (len(session["lines"]) + page_lines - 1) // page_lines)
         if not 1 <= page_number <= page_count:
             _show_error(
                 session,
@@ -604,7 +650,8 @@ def handle_input(session, line_str, ser, use_ansi=True):
             _render_page(session, ser, use_ansi)
         return True, None
     if upper in {"N", " "}:
-        max_page = max(0, (len(session["lines"]) - 1) // PAGE_LINES)
+        page_lines = _page_size(session, ser)
+        max_page = max(0, (len(session["lines"]) - 1) // page_lines)
         session["page"] = min(max_page, session["page"] + 1)
         _render_page(session, ser, use_ansi)
         return True, None

@@ -11,7 +11,11 @@ the RetroSerialHub system. It handles:
 
 import socket
 import time
-from rsh_terminal import clear_terminal_screen
+from rsh_terminal import (
+    clear_terminal_screen,
+    format_numbered_list,
+    terminal_columns,
+)
 from rsh_directory import save_directory
 
 
@@ -82,31 +86,23 @@ def _paginate_lines(ser, lines, page_lines=19, quit_msg=True):
 
 
 def two_column_list(items, left_pad=38):
-    half = (len(items) + 1) // 2
-    left = items[:half]
-    right = items[half:]
-    if len(right) < len(left):
-        right.append("")
-    lines = []
-    for i in range(len(left)):
-        left_num = f"{i+1:2d}] {left[i]}"
-        if i < len(right) and right[i]:
-            right_num = f"{i+1+half:2d}] {right[i]}"
-            line = f"{left_num:<{left_pad}}{right_num}"
-        else:
-            line = f"{left_num}"
-        lines.append(line)
-    return lines
+    return format_numbered_list(items, left_pad=left_pad)
 
 
-def _two_column_pages(items, page_lines=19, left_pad=38):
+def _two_column_pages(items, page_lines=19, left_pad=38, columns=80):
     if not items:
         return []
 
     pages = []
-    page_size = 2 * page_lines
+    page_size = page_lines if columns == 40 else 2 * page_lines
     for start in range(0, len(items), page_size):
         page_items = items[start:start + page_size]
+        if columns == 40:
+            pages.append([
+                f"{start + index + 1:2d}] {str(item)[:35]}"
+                for index, item in enumerate(page_items)
+            ])
+            continue
         left_items = page_items[:page_lines]
         right_items = page_items[page_lines:]
         lines = []
@@ -135,7 +131,10 @@ def _render_menu(ser, sess, use_ansi=True):
         _write(ser, "Command: ")
         return 'DONE'
 
-    pages = _two_column_pages(items, page_lines=19, left_pad=38)
+    columns = terminal_columns(ser)
+    pages = _two_column_pages(
+        items, page_lines=19, left_pad=38, columns=columns
+    )
     for page_index, lines in enumerate(pages):
         _write(ser, "\r\nAvailable BBS Systems")
         if len(pages) > 1:
@@ -156,15 +155,26 @@ def _render_menu(ser, sess, use_ansi=True):
 def _render_manager(ser, sess, use_ansi=True, notice=None):
     clear_terminal_screen(ser, use_ansi)
     _write(ser, "\r\nManage Bulletin Board Directory\r\n\r\n")
-    lines = [
-        f"{index:2d}] {name[:20]:<20} {host[:36]}:{port}"
-        for index, (name, host, port) in enumerate(
-            zip(sess["bbss"], sess["ips"], sess["ports"]), start=1
-        )
-    ]
+    columns = terminal_columns(ser)
+    if columns == 40:
+        lines = [
+            line
+            for index, (name, host, port) in enumerate(
+                zip(sess["bbss"], sess["ips"], sess["ports"]), start=1
+            )
+            for line in (f"{index:2d}] {name[:35]}", f"    {host[:29]}:{port}")
+        ]
+    else:
+        lines = [
+            f"{index:2d}] {name[:20]:<20} {host[:36]}:{port}"
+            for index, (name, host, port) in enumerate(
+                zip(sess["bbss"], sess["ips"], sess["ports"]), start=1
+            )
+        ]
+    page_capacity = 18 if columns == 40 else 19
     pages = [
-        lines[start:start + 19]
-        for start in range(0, len(lines), 19)
+        lines[start:start + page_capacity]
+        for start in range(0, len(lines), page_capacity)
     ]
     for page_index, page in enumerate(pages):
         if len(pages) > 1:

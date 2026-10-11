@@ -87,6 +87,56 @@ class BrowserTests(unittest.TestCase):
         lines = rsh_browser._wrap_text("word " * 40)
         self.assertTrue(all(len(line) <= rsh_browser.LINE_WIDTH for line in lines))
 
+    def test_40_column_browser_wraps_page_text_and_limits_page_size(self):
+        serial = FakeSerial()
+        RETRO_SERIAL_HUB.configure_screen_clearing(serial, columns=40)
+        session = self.create_session(serial)
+
+        self.assertEqual(session["line_width"], 38)
+        self.assertEqual(session["page_lines"], rsh_browser.NARROW_PAGE_LINES)
+        self.assertTrue(
+            all(
+                len(line) <= 38
+                for line in serial.output.decode("ascii").splitlines()
+                if line
+            )
+        )
+
+        with patch("rsh_browser.urlopen") as urlopen:
+            urlopen.return_value = FakeResponse(b"word " * 30)
+            _, lines, _, _, _ = rsh_browser._fetch_page(
+                "https://example.com", width=session["line_width"]
+            )
+        self.assertTrue(all(len(line) <= 38 for line in lines))
+
+    def test_40_column_browser_page_rendering_fits_screen_width(self):
+        serial = FakeSerial()
+        RETRO_SERIAL_HUB.configure_screen_clearing(serial, columns=40)
+        session = self.create_session(serial)
+        with patch("rsh_browser._fetch_page") as fetch_page:
+            fetch_page.return_value = (
+                "https://example.com/",
+                ["Readable browser page text"] * 30,
+                [],
+                [],
+                [],
+            )
+            rsh_browser._open_url(
+                session, "https://example.com/", serial, use_ansi=False
+            )
+
+        fetch_page.assert_called_once_with(
+            "https://example.com/",
+            method="GET",
+            form_data=None,
+            width=38,
+        )
+        self.assertEqual(session["page_lines"], rsh_browser.NARROW_PAGE_LINES)
+        lines = serial.output.decode("ascii").splitlines()
+        self.assertTrue(all(len(line) <= 40 for line in lines))
+        self.assertIn("Page 1/3", serial.output.decode("ascii"))
+        self.assertIn("Link number:", serial.output.decode("ascii"))
+
     def test_only_http_schemes_are_allowed(self):
         with self.assertRaises(ValueError):
             rsh_browser._normalize_url("file:///private/data")

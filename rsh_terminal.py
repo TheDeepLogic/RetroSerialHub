@@ -29,12 +29,43 @@ _CP437_ASCII = {
 }
 
 
-def configure_screen_clearing(ser, translate_ansi=False, clear_sequence=b"\x0c"):
-    """Attach the configured non-ANSI clear sequence to a serial connection."""
+def configure_screen_clearing(
+    ser, translate_ansi=False, clear_sequence=b"\x0c", columns=80
+):
+    """Attach terminal-specific clearing and width settings to a stream."""
     if isinstance(clear_sequence, str):
         clear_sequence = clear_sequence.encode("ascii")
     ser._rsh_translate_ansi = bool(translate_ansi)
     ser._rsh_clear_sequence = clear_sequence
+    ser._rsh_columns = columns
+
+
+def terminal_columns(ser):
+    """Return the configured terminal width, defaulting to the legacy 80 columns."""
+    columns = getattr(ser, "_rsh_columns", 80)
+    return columns if columns in (40, 80) else 80
+
+
+def format_numbered_list(items, columns=80, left_pad=38):
+    """Format menu entries as two columns at 80-wide or one at 40-wide."""
+    if columns == 40:
+        width = 35
+        return [
+            f"{index:2d}] {str(item)[:width]}"
+            for index, item in enumerate(items, start=1)
+        ]
+
+    half = (len(items) + 1) // 2
+    left, right = items[:half], items[half:]
+    lines = []
+    for index, item in enumerate(left):
+        left_text = f"{index + 1:2d}] {str(item)[:max(0, left_pad - 4)]}"
+        if index < len(right):
+            right_text = f"{index + half + 1:2d}] {str(right[index])[:37]}"
+            lines.append(f"{left_text:<{left_pad}}{right_text}")
+        else:
+            lines.append(left_text)
+    return lines
 
 
 def clear_terminal_screen(ser, use_ansi=True):

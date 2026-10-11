@@ -7,7 +7,7 @@ import posixpath
 import tempfile
 from pathlib import Path
 
-from rsh_terminal import clear_terminal_screen
+from rsh_terminal import clear_terminal_screen, terminal_columns
 
 
 DEFAULT_BOOKMARKS_PATH = Path(__file__).resolve().parent / "ftp_bookmarks.json"
@@ -76,11 +76,18 @@ def _render_bookmarks(ser, session, use_ansi=True, notice=None):
         _write(ser, "No FTP bookmarks saved.\r\n")
     for index, bookmark in enumerate(session["bookmarks"], start=1):
         scheme = "FTPS" if bookmark["secure"] else "FTP"
-        _write(
-            ser,
-            f"{index:2d}] {bookmark['name'][:24]:<24} "
-            f"{scheme} {bookmark['host']}:{bookmark['port']}\r\n",
-        )
+        if terminal_columns(ser) == 40:
+            _write(ser, f"{index:2d}] {bookmark['name'][:35]}\r\n")
+            _write(
+                ser,
+                f"    {scheme} {bookmark['host'][:24]}:{bookmark['port']}\r\n",
+            )
+        else:
+            _write(
+                ser,
+                f"{index:2d}] {bookmark['name'][:24]:<24} "
+                f"{scheme} {bookmark['host']}:{bookmark['port']}\r\n",
+            )
     _write(ser, "\r\nEnter a number to open, D<number> to delete, or Q to return.\r\n")
     _write(ser, "Command: ")
 

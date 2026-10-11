@@ -10,7 +10,7 @@ A multi-port serial hub that bridges vintage computers to modern TCP/IP networks
 > 
 > With that in-mind, I've leveraged GitHub Copilot to create or enhance the code within this repository and, outside of this notice, all related documentation. While I'd love to tell you that I pore over it all and make revisions, that just isn't the case. To prevent my behavior from keeping these tools from seeing the light of day, I've decided to do as little of that as possible! My workflow involves simply stating the need to GitHub Copilot, providing reference material where helpful, running the resulting code, and, if there is an actionable output, validating that it's correct. If I find a change I'd like to make, I describe it to Copilot. I've been leveraging the Agent CLI and it takes care of the core debugging.
 >
-> With all that being said, please keep in-mind that what you read and execute was created by Claude Sonnet 4.5. There may be mistakes. If you find an error, please feel free to submit a pull request with a correction!
+> The code and documentation are developed with assistance from GitHub Copilot, including its coding agents and tools available in the development environment. The specific agents and models may vary between changes. AI-assisted work can contain mistakes; please report issues or submit a pull request with a correction.
 
 ## Features
 
@@ -81,11 +81,20 @@ SERIAL_CONFIGS = {
         "ansi": False,            # Set to True when the local terminal supports ANSI
         "translate_ansi": False,  # Optional: translate incoming ANSI/VT100 for a non-ANSI terminal
         "ansi_clear_sequence": b"\x0c",  # Replacement bytes for supported clear requests
-        "ansi_home_clears_screen": False  # Optional: treat cursor-home as a screen clear
+        "ansi_home_clears_screen": False, # Optional: treat cursor-home as a screen clear
+        "columns": 80                    # 40- or 80-column terminal layout
     },
     # Add more computers as needed...
 }
 ```
+
+Set `columns` independently for each machine profile to `40` or `80`. This is
+the profile's default width; the main-menu **System → Columns** option can
+switch and save that profile's preference. The saved selection is stored in
+`terminal_columns.json` and takes precedence over `config.py`. At 40 columns,
+menus use a compact layout, browser pages wrap to the configured width, long
+labels are shortened to fit, and ANSI translation uses the configured terminal
+width. The default is 80 for profiles without this setting.
 
 Common baud rates for vintage systems:
 - Apple II with Super Serial Card: 300, 1200, 2400, 9600, 19200, or 115200
@@ -158,6 +167,33 @@ number or use `D` to delete it. Both connection types support `ATH` to hang up
 and `ATM` to return to the main menu. Incoming data uses the same configured
 ANSI translation and screen-clear behavior.
 
+### Inbound Telnet-Compatible Server (Optional)
+
+Retro Serial Hub can also accept incoming TCP terminal connections. Add a
+`TELNET_SERVER_CONFIGS` entry in `config.py` for each machine profile you want
+to expose, using a distinct port for each profile:
+
+```python
+TELNET_SERVER_CONFIGS = {
+    "APPLE2": {"host": "0.0.0.0", "port": 6400},
+    "IBM": {"host": "0.0.0.0", "port": 6401},
+}
+```
+
+The keys must match entries in `SERIAL_CONFIGS`. Set `host` to `0.0.0.0` to
+accept connections from other devices on the LAN, or `127.0.0.1` for local
+connections only. Start the hub, then connect a TCP terminal or Wi-Fi modem to
+the hub computer's IP address and the configured port (for example,
+`192.168.1.20:6400`). The selected profile controls the menu's ANSI behavior;
+the server works even if that profile's serial port is not connected.
+When a listener starts, the hub prints detected LAN IPv4 address(es) and ports
+to use for connecting.
+
+These sessions are unauthenticated and unencrypted. Keep the server disabled
+unless needed, restrict access with your firewall, and do not forward these
+ports from the Internet. The listener is disabled by default when
+`TELNET_SERVER_CONFIGS` is empty.
+
 ### AI Assistant Configuration (Optional)
 
 To enable the AI Assistant feature:
@@ -181,7 +217,12 @@ Run the hub from the command line:
 python RETRO_SERIAL_HUB.py
 ```
 
-The hub will attempt to open each configured serial port. Ports that are not present will be automatically skipped.
+The startup console shows each profile's serial-port and inbound TCP-listener
+status, connection addresses, and active remote-client counts. In an interactive
+terminal, the status dashboard updates live and uses color when supported.
+Serial ports that are not present are marked unavailable; enabled TCP listeners
+continue to run independently. When output is redirected, status changes and
+errors are printed as ordinary text without ANSI color codes.
 
 ### Connecting Your Vintage Computer
 
@@ -192,26 +233,32 @@ The hub will attempt to open each configured serial port. Ports that are not pre
 
 ### Main Menu
 
-When connected, you'll see the LogicNet BBS main menu with these options:
+The main menu groups features into:
 
-1. **Bulletin Boards**: Browse and connect to BBSs; enter `M` to add, edit, or delete directory entries
-2. **Web Browser**: Browse web pages as paginated text
-3. **Telnet**: Connect directly to a host and port, or open/delete saved Telnet bookmarks
-4. **FTP**: Connect to traditional FTP or explicit FTPS, browse directories, and choose whether a download is saved on the hub or sent directly to the terminal
-5. **File Transfers**: Send or receive files
-6. **Text Library**: View text files
-7. **AI Assistant**: Chat with ChatGPT (if configured)
-8. **Wargames**: WarGames-inspired interface
-9. **Notes**: Create and manage notes
-10. **COM Port Bridge**: Bridge to another serial port
-11. **Keyboard Bridge**: Type into the focused host application from the
-   serial terminal. Enter, Tab, and Backspace are supported; press **Ctrl+X**
-   to exit. Escape and Ctrl+] are also recognized when the terminal can send
-   them. This uses Windows' native input API on Windows and `pynput` on
-   macOS/Linux. Keep the intended application focused while using this mode.
-12. **Welcome Banner**: Set a persistent main-menu banner. The `WELCOME_BANNER`
-    value in `config.py` is the default; a banner set here is saved separately
-    and takes precedence until an empty entry resets it to the configured default.
+- **Accessories**: `1` Bulletin Boards, `2` Web Browser, `3` Telnet, and `4` FTP
+- **Bridging**: `5` COM Port and `6` Keyboard
+- **Tools**: `7` File Transfers, `8` Text Library, and `9` Notes
+- **Various**: `10` AI Assistant and `11` Wargames
+- **System**: `12` Welcome Banner and `13` switch between 40- and 80-column
+  layouts. The selection is saved for that machine profile. Remote TCP
+  terminal clients also see `14` Disconnect.
+
+At 80 columns, numbering proceeds down the left column (Accessories, Bridging,
+then Tools) and continues at the top of the right column (Various, then System).
+At 40 columns, the same numbering is used in section order, with options paired
+compactly within each section. The Keyboard option types into the focused host
+application. Enter, Tab, and Backspace are supported;
+press **Ctrl+X** to exit. Escape and Ctrl+] are also recognized when the
+terminal can send them. This uses Windows' native input API on Windows and
+`pynput` on macOS/Linux. Keep the intended application focused while using this
+mode.
+
+Welcome Banner sets a persistent main-menu banner. The `WELCOME_BANNER` value
+in `config.py` is the default; a banner set here is saved separately and takes
+precedence until an empty entry resets it to the configured default.
+
+The main menu status line shows the current local time, the number of open
+serial ports, and the number of connected remote Telnet clients.
 
 Type `ATM` at any time to return to the main menu and disconnect an active
 network or serial bridge session.
@@ -287,6 +334,7 @@ Retro-Serial-Hub/
 ├── config.py               # Configuration file (edit this!)
 ├── ai_config.json          # OpenAI API key (optional)
 ├── bbs_directory.json     # Managed BBS directory (created when first changed)
+├── terminal_columns.json  # Saved per-profile 40/80-column choices
 ├── telnet_bookmarks.json  # Telnet bookmarks (created when first saved)
 ├── ftp_bookmarks.json     # FTP/FTPS bookmarks (created when first saved)
 ├── requirements.txt       # Python dependencies
@@ -361,6 +409,20 @@ This design allows you to customize or extend features without modifying the cor
 
 ## Release Notes
 
+### v1.2
+
+- Added optional per-machine inbound TCP terminal servers for Wi-Fi modems and
+  other remote terminals, plus startup connection addresses and a live,
+  colorized console dashboard with serial, listener, and client status.
+- Added a remote-session-only **Disconnect** menu option and a main-menu status
+  line showing local time and active connections.
+- Added per-machine 40/80-column layouts with a persistent width toggle,
+  reorganized and renumbered the menu sections, and adapted browser pages and
+  other feature menus to the configured terminal width.
+- Added bracketed, consistent menu section headings and improved startup and
+  menu spacing for both display widths.
+- Centralized the displayed application version and updated it to v1.2.
+
 ### v1.1
 
 - Replaced the former URL Reader with a text-first Web Browser supporting
@@ -399,7 +461,7 @@ This project is provided as-is for use by the retro computing community. Feel fr
 
 - Inspired by classic BBS systems and the retro computing community
 - Special thanks to the maintainers of the various BBSs listed in the default configuration
-- Built with the assistance of GitHub Copilot and Claude Sonnet 4.5
+- Built with the assistance of GitHub Copilot and AI coding agents
 
 ## Support
 
