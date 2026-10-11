@@ -4,6 +4,8 @@
 
 A multi-port serial hub that bridges vintage computers to modern TCP/IP networks, providing access to bulletin board systems (BBS), file transfers, and other retro computing services through a unified menu interface.
 
+![Retro Serial Hub Screenshot](images/retroserialhub_screenshot.jpg)
+
 > **AI-Assisted Development Notice**
 > 
 > Hello, fellow human! My name is Aaron Smith. I've been in the IT field for nearly three decades and have extensive experience as both an engineer and architect. While I've had various projects in the past that have made their way into the public domain, I've always wanted to release more than I could. I write useful utilities all the time that aid me with my vintage computing and hobbyist electronic projects, but rarely publish them. I've had experience in both the public and private sectors and can unfortunately slip into treating each one of these as a fully polished cannonball ready for market. It leads to scope creep and never-ending updates to documentation.
