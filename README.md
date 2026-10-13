@@ -7,8 +7,6 @@ networks and accepts incoming Telnet-compatible connections. Systems using
 dedicated Wi-Fi modems can connect over the LAN and access the same BBS, file
 transfer, browser, and other retro-computing services through the hub's menu.
 
-![Retro Serial Hub Screenshot](images/retroserialhub_screenshot.jpg)
-
 > **AI-Assisted Development Notice**
 > 
 > Hello, fellow human! My name is Aaron Smith. I've been in the IT field for nearly three decades and have extensive experience as both an engineer and architect. While I've had various projects in the past that have made their way into the public domain, I've always wanted to release more than I could. I write useful utilities all the time that aid me with my vintage computing and hobbyist electronic projects, but rarely publish them. I've had experience in both the public and private sectors and can unfortunately slip into treating each one of these as a fully polished cannonball ready for market. It leads to scope creep and never-ending updates to documentation.
