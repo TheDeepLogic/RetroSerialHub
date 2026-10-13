@@ -75,7 +75,7 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"14] Welcome Banner", output)
         self.assertNotIn(b"15] Disconnect", output)
         from rsh_console import VERSION
-        version_banner = f"v{VERSION}, copyright (c) 2026".encode("ascii")
+        version_banner = f"v{VERSION}, copyright (c) 2025-2026".encode("ascii")
         self.assertIn(version_banner, output)
         self.assertIn(
             version_banner + b"\r\n\r\n[ Accessories ]",
@@ -289,7 +289,7 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"14] Welcome Banner", output)
         self.assertLessEqual(max(map(len, output.split(b"\r\n"))), 40)
         self.assertIn(
-            f"v{VERSION}, copyright (c) 2026\r\n\r\n[ Accessories ]\r\n".encode(),
+            f"v{VERSION}, copyright (c) 2025-2026\r\n\r\n[ Accessories ]\r\n".encode(),
             output,
         )
         self.assertLess(output.index(b"[ Accessories ]"), output.index(b"[ Bridging ]"))

@@ -99,9 +99,17 @@ class Shell:
             raise ValueError("A command name and callable handler are required.")
         self._commands[key] = handler
 
+    @staticmethod
+    def split_line(line: str) -> list[str]:
+        lex = shlex.shlex(line, posix=True)
+        lex.whitespace_split = True
+        lex.commenters = ""
+        lex.escape = ""
+        return list(lex)
+
     def execute(self, line: str):
         try:
-            parts = shlex.split(line)
+            parts = self.split_line(line)
         except ValueError as exc:
             return f"Syntax error: {exc}"
         if not parts:

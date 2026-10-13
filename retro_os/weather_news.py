@@ -5,24 +5,8 @@ from __future__ import annotations
 import datetime
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 
-
-def _clean_ascii(text: str) -> str:
-    """Convert common Unicode punctuation to ASCII equivalents and drop non-ASCII."""
-    replacements = {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-        "\u2013": "-",
-        "\u2014": "--",
-        "\u2026": "...",
-        "\u00b0": " deg",
-    }
-    for orig, rep in replacements.items():
-        text = text.replace(orig, rep)
-    return "".join(ch for ch in text if ord(ch) < 128)
+from .news import _clean_ascii, get_news
 
 
 def get_weather(location: str | None = None) -> str:
@@ -45,37 +29,6 @@ def get_weather(location: str | None = None) -> str:
             return cleaned
     except Exception as exc:
         return f"Weather lookup failed: {exc}"
-
-
-def get_news(source: str = "npr", count: int = 5) -> str:
-    """Fetch top headlines from clean RSS feeds."""
-    source_lower = source.strip().lower()
-    feed_urls = {
-        "npr": "https://feeds.npr.org/1001/rss.xml",
-        "tech": "https://news.ycombinator.com/rss",
-        "hn": "https://news.ycombinator.com/rss",
-        "bbc": "http://feeds.bbci.co.uk/news/rss.xml",
-    }
-    feed_url = feed_urls.get(source_lower, feed_urls["npr"])
-    source_name = "NPR Top News" if "npr" in feed_url else ("Hacker News" if "ycombinator" in feed_url else "BBC World")
-
-    req = urllib.request.Request(feed_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-    try:
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            xml_data = resp.read()
-            tree = ET.fromstring(xml_data)
-            items = tree.findall(".//item")[:count]
-            if not items:
-                return f"No news articles found from {source_name}."
-
-            lines = [f"--- {source_name} Headlines ---"]
-            for idx, item in enumerate(items, 1):
-                title_elem = item.find("title")
-                title = title_elem.text if title_elem is not None and title_elem.text else "No title"
-                lines.append(f"[{idx}] {_clean_ascii(title).strip()}")
-            return "\n".join(lines)
-    except Exception as exc:
-        return f"News retrieval failed: {exc}"
 
 
 def get_briefing(location: str | None = None, columns: int = 80) -> str:

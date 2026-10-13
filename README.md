@@ -20,13 +20,14 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Retro Serial OS Runtime**: Interactive command shell (`cli>` / `OS`) with hot-reloadable module system, event bus pub/sub, multi-client sessions, and keyboard bridge shortcut profiles
 - **Accordion Main Menu & Custom Shortcuts**: Fast categorized accordion flyout navigation with user-defined macros, arguments, and automatic flyout
 - **Host Terminal / Command Prompt**: Quick launch the host OS shell (`cmd.exe` on Windows, or `$SHELL` on macOS/Linux) with bidirectional console streaming, local echo, and line translation
+- **Console Pseudo Interface & Live User Activity**: Host console dashboard displays an interactive pseudo-interface view highlighting the menu items connected retro users are currently browsing in real time
 - **Real-Time Host System Monitor**: Live CPU load measurement, RAM, disk, and uptime metrics with automatic screen clearing and interactive controls (`top` / `sysinfo live`)
-- **Multi-Format Document Viewer**: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs
+- **Multi-Format Document Viewer**: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs with native Windows path handling
 - **Direct File Transfers**: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (`xsend`, `ysend`, `asend`, `xrecv`)
 - **Electronic Mail (Hub & Internet)**: Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
 - **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), and WarGames (W.O.P.R.) simulation
-- **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), and automated morning briefings (`briefing`)
-- **Background Task Scheduler**: Automated periodic task execution with broadcast notifications and cron-like intervals
+- **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (`briefing`), and interactive article reader (`news <num>`)
+- **Background Task Scheduler**: Automated periodic task execution with broadcast notifications and cron-like intervals; weather and news commands are available tasks (`weather Austin`, `news npr 6`)
 - **Terminal Hardware Settings**: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
 - **In-Hub Help & User Guide**: 9 built-in guide topics accessible directly from the menu (`HELP` or `?`)
 - **Multi-Port Serial Support**: Connect multiple vintage computers simultaneously, each with independent configurations
@@ -97,7 +98,7 @@ Enter `CLI` at the main menu to open the interactive command shell (`cli>`). Typ
 - `clip [text]` / `copy <text>` / `paste`: Reads the host OS clipboard or copies text to the host clipboard directly from your vintage terminal.
 - `media <play|pause|next|prev|stop>` and `vol <up|down|mute>`: Controls host media playback and volume without leaving your retro terminal.
 - `weather [city/zip]`: Fetches current conditions and ASCII weather forecast from wttr.in.
-- `news [npr|hn|bbc] [count]`: Parses and displays clean ASCII news headlines from RSS feeds.
+- `news [npr|hn|bbc] [count]` / `news <number>`: Parses and displays clean ASCII news headlines from RSS feeds. Type an article number (e.g. `news 1` or `news 1 full`) to read the article story summary or fetch the complete web article text.
 - `briefing [location]`: Generates a complete desk briefing combining weather forecast, top news headlines, and host hardware status.
 - `xsend <file>`, `ysend <file>`, `asend <file>`, `xrecv <dest>`: Initiates direct file transfers straight from the shell.
 - `caps <on|off>`: Toggles uppercase-only mode (Caps Mode) for vintage computers without lowercase ROMs (Apple II+, early TRS-80, PET 2001).
@@ -445,7 +446,8 @@ Retro-Serial-Hub/
 │   ├── scheduler.py       # Background periodic task scheduler
 │   ├── mail_service.py    # Hub mailbox and internet email backend
 │   ├── viewer.py          # Multi-format document text extraction pipeline
-│   ├── weather_news.py    # Live weather, RSS headlines, and desk briefings
+│   ├── news.py            # RSS news headlines
+│   ├── weather_news.py    # Live weather and combined desk briefings
 │   ├── help_data.py       # In-hub help system and user guide
 │   └── modules/           # Built-in OS modules (calc, games, mail, print, etc.)
 ├── files/                 # File transfer storage
@@ -505,6 +507,26 @@ This design allows you to customize or extend features without modifying the cor
 
 ## Release Notes
 
+### v2.1
+
+- **Document Viewer Windows Path Resolution**: Fixed an issue where Windows
+  backslashes were stripped during shell argument parsing (causing duplicated or
+  corrupted paths such as `OneDriveSoftware...`), allowing documents, images,
+  and local files to load seamlessly from local drives.
+- **Interactive News Article Reader**: Added interactive headline article selection
+  to Weather & News, allowing vintage terminals to type an article number directly
+  to read the complete summary and download full web article contents (`F` /
+  `news <num> full`).
+- **Dedicated News Task Scheduler Option**: Added news and weather command
+  scheduling to the background task scheduler (`schedule add <interval> news ...`),
+  listing them under `schedule modules`.
+- **Console Pseudo Interface & Connected User Highlighting**: Enhanced the live
+  host console dashboard with an interactive pseudo interface layout displaying
+  connected client activity and highlighting active menu items in real time.
+- **Updated Copyright Notices**: Updated all system banners, headers, and
+  documentation to 2025-2026.
+- Incremented application version to v2.1.
+
 ### v2.0
 
 - **Retro Serial OS Runtime**: Full host-side operating system extension with
@@ -531,7 +553,9 @@ This design allows you to customize or extend features without modifying the cor
 - **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news
   feeds (NPR, Hacker News, BBC), and automated morning briefings (`briefing`).
 - **Background Task Scheduler**: Automated periodic task execution with
-  terminal broadcast notifications and cron-like intervals.
+  terminal broadcast notifications and cron-like intervals. Weather and news
+  commands can be scheduled directly (for example, `weather Austin` or
+  `news npr 6`) and are listed by `schedule modules`.
 - **Terminal Hardware Settings & In-Hub Help**: Caps-Only mode for vintage
   uppercase-only ROMs (Apple II Plus, Commodore PET, TRS-80 Model I), serial
   character pacing delays (1-3ms), and 9 comprehensive in-hub help guide topics.

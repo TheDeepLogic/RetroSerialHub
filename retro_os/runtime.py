@@ -123,6 +123,10 @@ def install_core_commands(shell, context, loader):
         if not args:
             return "Usage: view <file_or_url>"
         target = args[0]
+        full_candidate = " ".join(args)
+        if len(args) > 1 and not pathlib.Path(target).exists() and pathlib.Path(full_candidate).exists():
+            target = full_candidate
+        target = target.strip("'\"")
         from .viewer import extract_text, extract_text_from_url, paginate_text
         if target.lower().startswith(("http://", "https://")):
             try:
@@ -302,8 +306,27 @@ def install_core_commands(shell, context, loader):
         return get_weather(loc)
 
     def news_cmd(args):
-        from .weather_news import get_news
-        src = args[0] if args else "npr"
+        from .news import (
+            get_news,
+            get_article_by_index,
+            get_full_article_by_index,
+        )
+        if not args:
+            return get_news("npr", count=5)
+        arg0 = args[0].strip().lower()
+        if arg0.isdigit():
+            idx = int(arg0)
+            full = len(args) > 1 and args[1].lower() in ("full", "-f", "--full")
+            if full:
+                return get_full_article_by_index(idx)
+            return get_article_by_index(idx)
+        if arg0 == "read" and len(args) > 1 and args[1].isdigit():
+            idx = int(args[1])
+            full = len(args) > 2 and args[2].lower() in ("full", "-f", "--full")
+            if full:
+                return get_full_article_by_index(idx)
+            return get_article_by_index(idx)
+        src = args[0]
         count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 5
         return get_news(src, count=count)
 

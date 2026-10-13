@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Aaron Smith.
+# Copyright (c) 2025-2026 Aaron Smith.
 """
 LogicNet Multi-port Serial <-> TCP bridge with BBS-style menus.
 
@@ -380,6 +380,31 @@ def console_log(message, level="info"):
         CONSOLE.log(message, level=level)
 
 
+def get_terminal_client_id(ser, default_name=None):
+    cid = getattr(ser, "_client_id", None)
+    if cid is not None:
+        return cid
+    if default_name:
+        return f"serial:{default_name}"
+    return id(ser)
+
+
+def set_terminal_activity(ser, action, user_label=None, default_name=None):
+    if CONSOLE:
+        cid = get_terminal_client_id(ser, default_name)
+        if user_label is None:
+            pname = getattr(ser, "_profile_name", default_name)
+            if not isinstance(ser, SocketTerminal) and pname:
+                user_label = pname
+        CONSOLE.set_user_activity(cid, action, user_label=user_label)
+
+
+def clear_terminal_activity(ser, default_name=None):
+    if CONSOLE:
+        cid = get_terminal_client_id(ser, default_name)
+        CONSOLE.clear_user_activity(cid)
+
+
 def get_active_connection_counts():
     """Return the number of open serial ports and connected remote clients."""
     with ACTIVE_REMOTE_CLIENTS_LOCK:
@@ -405,6 +430,10 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
         if auto_flyout and getattr(ser._rsh_flyout_menu, "auto_flyout_if_shortcuts", None):
             ser._rsh_flyout_menu.auto_flyout_if_shortcuts()
 
+    flyout = ser._rsh_flyout_menu
+    sec_idx = getattr(flyout, "active_section_idx", 0) if flyout else 0
+    set_terminal_activity(ser, f"section:{sec_idx}")
+
     serial_count, remote_count = get_active_connection_counts()
     if columns == 40:
         status = (
@@ -429,13 +458,14 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
 
 
 def show_legacy_main_menu(ser, use_ansi=True):
+    set_terminal_activity(ser, "section:0")
     columns = terminal_columns(ser)
     remote_client = isinstance(ser, SocketTerminal)
     clear_screen(ser, use_ansi)
     banner_prefix = "\r\n" if columns == 80 else ""
     version_spacing = "\r\n\r\n"
     write(ser, banner_prefix + WELCOME_BANNER + "\r\n")
-    write(ser, f"v{VERSION}, copyright (c) 2026" + version_spacing)
+    write(ser, f"v{VERSION}, copyright (c) 2025-2026" + version_spacing)
     options = {
         "Accessories": [
             ("1", "Bulletin Boards"),
@@ -647,6 +677,8 @@ def port_worker(name, cfg):
             )
             if CONSOLE:
                 CONSOLE.update_profile(name, serial="OPEN")
+            ser._client_id = f"serial:{name}"
+            ser._profile_name = name
             # Register active port
             try:
                 ACTIVE_PORTS[cfg['port'].upper()] = {'thread': name, 'serial': ser}
@@ -664,6 +696,7 @@ def port_worker(name, cfg):
                 )
             finally:
                 unregister_active_terminal(ser)
+                clear_terminal_activity(ser, default_name=name)
             # When bridge_loop exits normally, unregister
             try:
                 ACTIVE_PORTS.pop(cfg['port'].upper(), None)
@@ -728,6 +761,8 @@ def remote_client_worker(name, cfg, client_socket, address):
     terminal = SocketTerminal(client_socket)
     columns = configured_columns(name, cfg)
     client_id = id(client_socket)
+    terminal._client_id = client_id
+    terminal._profile_name = name
     with ACTIVE_REMOTE_CLIENTS_LOCK:
         ACTIVE_REMOTE_CLIENTS.add(client_id)
     if CONSOLE:
@@ -750,6 +785,7 @@ def remote_client_worker(name, cfg, client_socket, address):
             )
         finally:
             unregister_active_terminal(terminal)
+            clear_terminal_activity(terminal, default_name=name)
     except (OSError, ConnectionError) as exc:
         console_log(
             f"{name}: remote client {address[0]}:{address[1]} disconnected: {exc}",
@@ -765,6 +801,7 @@ def remote_client_worker(name, cfg, client_socket, address):
             ACTIVE_REMOTE_CLIENTS.discard(client_id)
         if CONSOLE:
             CONSOLE.remove_client(client_id)
+        clear_terminal_activity(terminal, default_name=name)
         terminal.close()
 
 
@@ -850,6 +887,12 @@ def bridge_loop(
     from retro_os.runtime import create_runtime
     from retro_os.core import Session
 
+    ser._profile_name = getattr(ser, "_profile_name", name)
+    if not hasattr(ser, "_client_id"):
+        if isinstance(ser, SocketTerminal):
+            ser._client_id = id(getattr(ser, "socket", ser))
+        else:
+            ser._client_id = f"serial:{name}"
     ser._rsh_translate_ansi = bool(translate_ansi)
     ser._rsh_menu_style = getattr(ser, "_rsh_menu_style", "flyout")
     from retro_os.menu import OSFlyoutMenu
@@ -1278,7 +1321,7 @@ def bridge_loop(
                 try:
                     chosen = found_files[int(f_idx) - 1]
                     write(ser, f"\r\nLoading {chosen.name}...\r\n")
-                    res = retro_shell.execute(f"view {chosen}")
+                    res = retro_shell.execute(f'view "{chosen}"')
                     render_shell_result(res)
                 except (ValueError, IndexError):
                     write(ser, "Invalid file selection.\r\n")
@@ -1290,7 +1333,8 @@ def bridge_loop(
                 fpath_input = read_input_line(ser).strip()
                 if fpath_input and fpath_input.upper() != "Q":
                     try:
-                        res = retro_shell.execute(f"view {fpath_input}")
+                        clean_path = fpath_input.strip("'\"")
+                        res = retro_shell.execute(f'view "{clean_path}"')
                         render_shell_result(res)
                     except Exception as exc:
                         write(ser, f"Viewer error: {exc}\r\n")
@@ -1301,7 +1345,8 @@ def bridge_loop(
                 if url_input and url_input.upper() != "Q":
                     write(ser, f"\r\nDownloading and extracting {url_input}...\r\n")
                     try:
-                        res = retro_shell.execute(f"view {url_input}")
+                        clean_url = url_input.strip("'\"")
+                        res = retro_shell.execute(f'view "{clean_url}"')
                         render_shell_result(res)
                     except Exception as exc:
                         write(ser, f"Download/viewer error: {exc}\r\n")
@@ -1685,7 +1730,8 @@ def bridge_loop(
                 fpath = read_input_line(ser).strip()
                 if fpath and fpath.upper() != "Q":
                     try:
-                        res = retro_shell.execute(f"print {fpath}")
+                        clean_path = fpath.strip("'\"")
+                        res = retro_shell.execute(f'print "{clean_path}"')
                         write(ser, f"\r\n{res}\r\n")
                     except Exception as exc:
                         write(ser, f"Print error: {exc}\r\n")
@@ -1723,7 +1769,7 @@ def bridge_loop(
                 try:
                     chosen = images[int(sel) - 1]
                     write(ser, f"\r\nRendering {chosen.name}...\r\n")
-                    res = retro_shell.execute(f"ascii {chosen}")
+                    res = retro_shell.execute(f'ascii "{chosen}"')
                     render_shell_result(res)
                 except (ValueError, IndexError):
                     write(ser, "Invalid image selection.\r\n")
@@ -1735,7 +1781,8 @@ def bridge_loop(
                 ipath = read_input_line(ser).strip()
                 if ipath and ipath.upper() != "Q":
                     try:
-                        res = retro_shell.execute(f"ascii {ipath}")
+                        clean_ipath = ipath.strip("'\"")
+                        res = retro_shell.execute(f'ascii "{clean_ipath}"')
                         render_shell_result(res)
                     except Exception as exc:
                         write(ser, f"ASCII viewer error: {exc}\r\n")
@@ -1770,7 +1817,7 @@ def bridge_loop(
                 t_name = read_input_line(ser).strip()
                 if not t_name or t_name.upper() == "Q":
                     continue
-                write(ser, "Command or URL (e.g. 'view https://wttr.in/Austin?format=3', 'mail inbox', or 'help'): ")
+                write(ser, "Command (e.g. 'weather Austin', 'news npr 6', 'mail inbox', or 'help'): ")
                 t_cmd = read_input_line(ser).strip()
                 if not t_cmd or t_cmd.upper() == "Q":
                     continue
@@ -2049,6 +2096,51 @@ def bridge_loop(
                 time.sleep(0.3)
 
     def run_weather_news_menu():
+        def show_news_interactive(source, label):
+            write(ser, f"\r\nFetching {label} headlines...\r\n")
+            try:
+                from retro_os.news import fetch_news_items, format_article
+                items = fetch_news_items(source, count=6)
+                if not items:
+                    write(ser, f"No articles found for {label}.\r\n")
+                    wait_for_key(ser)
+                    return
+
+                while True:
+                    src_display = items[0].get("source", label)
+                    lines = [f"--- {src_display} Headlines ---"]
+                    for it in items:
+                        lines.append(f"[{it['index']}] {it['title']}")
+                    render_shell_result("\n".join(lines))
+
+                    write(ser, f"\r\nEnter article number to read (1-{len(items)}), or Q to return: ")
+                    art_choice = read_input_line(ser).strip().upper()
+                    if not art_choice or art_choice in ("Q", "QUIT", "EXIT", "0"):
+                        break
+                    if art_choice.isdigit() and 1 <= int(art_choice) <= len(items):
+                        item = items[int(art_choice) - 1]
+                        art_display = format_article(item)
+                        render_shell_result(art_display)
+
+                        if item.get("link"):
+                            write(ser, "[F] Fetch Full Webpage | [Q/Enter] Back to Headlines\r\nAction: ")
+                            sub_choice = read_input_line(ser).strip().upper()
+                            if sub_choice == "F":
+                                write(ser, f"\r\nFetching full web article from {item['link']}...\r\n")
+                                try:
+                                    from retro_os.viewer import extract_text_from_url
+                                    full_text = extract_text_from_url(item["link"])
+                                    render_shell_result(full_text)
+                                except Exception as exc:
+                                    write(ser, f"\r\nCould not fetch full article: {exc}\r\n")
+                                wait_for_key(ser)
+                    else:
+                        write(ser, f"\r\nInvalid choice. Please enter a number 1-{len(items)}.\r\n")
+                        time.sleep(1)
+            except Exception as exc:
+                write(ser, f"News error: {exc}\r\n")
+                wait_for_key(ser)
+
         while True:
             write(ser, "\r\n--- LIVE WEATHER & NEWS ---\r\n")
             write(ser, "[1] Morning / Desk Briefing\r\n")
@@ -2067,9 +2159,32 @@ def bridge_loop(
                 try:
                     res = retro_shell.execute("briefing")
                     render_shell_result(res)
+                    from retro_os.news import get_cached_news_items, format_article
+                    items = get_cached_news_items()
+                    if items:
+                        write(ser, f"\r\nEnter article number to read (1-{len(items)}), or Enter to return: ")
+                        art_choice = read_input_line(ser).strip().upper()
+                        if art_choice.isdigit() and 1 <= int(art_choice) <= len(items):
+                            item = items[int(art_choice) - 1]
+                            art_display = format_article(item)
+                            render_shell_result(art_display)
+                            if item.get("link"):
+                                write(ser, "[F] Fetch Full Webpage | [Q/Enter] Continue\r\nAction: ")
+                                sub_choice = read_input_line(ser).strip().upper()
+                                if sub_choice == "F":
+                                    write(ser, f"\r\nFetching full web article from {item['link']}...\r\n")
+                                    try:
+                                        from retro_os.viewer import extract_text_from_url
+                                        full_text = extract_text_from_url(item["link"])
+                                        render_shell_result(full_text)
+                                    except Exception as exc:
+                                        write(ser, f"\r\nCould not fetch full article: {exc}\r\n")
+                                    wait_for_key(ser)
+                            else:
+                                wait_for_key(ser)
                 except Exception as exc:
                     write(ser, f"Briefing error: {exc}\r\n")
-                wait_for_key(ser)
+                    wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nFetching weather...\r\n")
                 try:
@@ -2090,29 +2205,11 @@ def bridge_loop(
                         write(ser, f"Weather error: {exc}\r\n")
                     wait_for_key(ser)
             elif choice == "4":
-                write(ser, "\r\nFetching NPR headlines...\r\n")
-                try:
-                    res = retro_shell.execute("news npr 6")
-                    render_shell_result(res)
-                except Exception as exc:
-                    write(ser, f"News error: {exc}\r\n")
-                wait_for_key(ser)
+                show_news_interactive("npr", "NPR")
             elif choice == "5":
-                write(ser, "\r\nFetching Hacker News headlines...\r\n")
-                try:
-                    res = retro_shell.execute("news hn 6")
-                    render_shell_result(res)
-                except Exception as exc:
-                    write(ser, f"News error: {exc}\r\n")
-                wait_for_key(ser)
+                show_news_interactive("hn", "Hacker News")
             elif choice == "6":
-                write(ser, "\r\nFetching BBC headlines...\r\n")
-                try:
-                    res = retro_shell.execute("news bbc 6")
-                    render_shell_result(res)
-                except Exception as exc:
-                    write(ser, f"News error: {exc}\r\n")
-                wait_for_key(ser)
+                show_news_interactive("bbc", "BBC")
 
     def run_terminal_settings_menu():
         nonlocal use_ansi
@@ -2609,6 +2706,7 @@ def bridge_loop(
                     mode = "CLI"
                     retro_session.cols = terminal_columns(ser)
                     retro_session.active_module = "shell"
+                    set_terminal_activity(ser, "cli", default_name=name)
                     write(ser, "\r\nRetro Serial Hub CLI. Type 'help' for commands, 'exit' for menu.\r\ncli> ")
                     continue
 
@@ -2797,6 +2895,9 @@ def bridge_loop(
                                 menu_action = "disconnect"
                             else:
                                 menu_action = MAIN_MENU_ACTIONS.get(upper)
+
+                    if menu_action is not None:
+                        set_terminal_activity(ser, menu_action, default_name=name)
 
                     if menu_action == "columns":
                         new_columns = 40 if terminal_columns(ser) == 80 else 80
@@ -3093,9 +3194,9 @@ def bridge_loop(
                         continue
                     elif menu_action == "view":
                         if line_str and line_str.upper().startswith("VIEW ") and len(line_str) > 5:
-                            file_name = line_str[5:].strip()
+                            file_name = line_str[5:].strip().strip("'\"")
                             try:
-                                response = retro_shell.execute(f"view {file_name}")
+                                response = retro_shell.execute(f'view "{file_name}"')
                                 render_shell_result(response)
                             except Exception as exc:
                                 write(ser, f"Viewer error: {exc}\r\n")
@@ -3359,6 +3460,9 @@ def bridge_loop(
                         show_main_menu(ser, use_ansi)
                         continue
                     else:
+                        flyout = getattr(ser, "_rsh_flyout_menu", None)
+                        sec_idx = getattr(flyout, "active_section_idx", 0) if flyout else 0
+                        set_terminal_activity(ser, f"section:{sec_idx}", default_name=name)
                         write(ser, "Invalid command\r\n")
                         write(ser, "Command: ")
                     continue

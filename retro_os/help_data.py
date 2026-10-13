@@ -77,7 +77,7 @@ Type 'CLI' or 'OS' at the main menu to enter the interactive command prompt:
   cli> media play|pause|next     Control host media playback
   cli> vol up|down|mute          Control host system volume
   cli> weather [location]        Fetch live ASCII weather from wttr.in
-  cli> news [npr|hn|bbc]         Read current news headlines
+  cli> news [src] | news <num>   Read news headlines or view article story
   cli> briefing [location]       Generate complete morning desk briefing
   cli> view <file|url>           Extract and paginate modern docs (PDF/DOCX/XLS)
   cli> fetch <url> [dest]        Download internet file to hub storage

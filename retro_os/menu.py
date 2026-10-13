@@ -203,11 +203,11 @@ class OSFlyoutMenu:
         lines = []
         if columns == 40:
             lines.append(welcome_banner[:40])
-            lines.append(f"v{version}, copyright (c) 2026")
+            lines.append(f"v{version}, copyright (c) 2025-2026")
             lines.append("")
         else:
             lines.append("\r\n" + welcome_banner)
-            lines.append(f"v{version}, copyright (c) 2026\r\n")
+            lines.append(f"v{version}, copyright (c) 2025-2026\r\n")
 
         # Shortcuts section (Section 0)
         indent = "    " if columns == 40 else "      "

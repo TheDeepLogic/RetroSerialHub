@@ -15,6 +15,16 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger("retro_os.scheduler")
 
 MODULE_USAGE_INFO: Dict[str, Dict[str, Any]] = {
+    "weather": {
+        "description": "Fetch current weather conditions and forecasts.",
+        "usage": "weather [location]",
+        "examples": ["weather", "weather Austin", "weather 90210"],
+    },
+    "news": {
+        "description": "Fetch current headlines or read news articles (NPR, Hacker News, BBC).",
+        "usage": "news [npr|hn|bbc] [count] | news <number>",
+        "examples": ["news", "news npr 6", "news 1", "news bbc 6"],
+    },
     "mail": {
         "description": "Host email sending and reading of local saved messages.",
         "usage": "mail inbox | mail read <message_number_or_name> | mail send <address> [subject]",

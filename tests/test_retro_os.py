@@ -18,6 +18,23 @@ class RetroOsCoreTests(unittest.TestCase):
         self.assertIn("Unknown command", shell.execute("missing"))
         self.assertIn("Syntax error", shell.execute('"unfinished'))
 
+    def test_shell_preserves_windows_paths_and_backslashes(self):
+        shell = Shell()
+        received = []
+        shell.register_command("view", lambda args: received.append(args) or "OK")
+
+        # Quoted Windows path with backslashes
+        shell.execute(r'view "D:\OneDrive\Software\text\TRS-80.txt"')
+        self.assertEqual(received[-1], [r"D:\OneDrive\Software\text\TRS-80.txt"])
+
+        # Quoted Windows path with spaces and backslashes
+        shell.execute(r'view "C:\Program Files\Vintage App\doc.txt"')
+        self.assertEqual(received[-1], [r"C:\Program Files\Vintage App\doc.txt"])
+
+        # Unquoted path with backslashes
+        shell.execute(r"view D:\Retro\README.txt")
+        self.assertEqual(received[-1], [r"D:\Retro\README.txt"])
+
     def test_event_bus_subscribe_publish_and_unsubscribe(self):
         bus = EventBus()
         events = []
@@ -145,6 +162,26 @@ class RetroOsCoreTests(unittest.TestCase):
             path = Path(directory) / "example.txt"
             path.write_text("text", encoding="utf-8")
             self.assertEqual(extract_text(path), "text")
+
+    def test_runtime_view_command_with_absolute_windows_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            doc = root / "TRS-80.txt"
+            doc.write_text("TRS-80 Model I documentation line 1\nLine 2", encoding="utf-8")
+
+            _, _, _, shell, _ = create_runtime(
+                {"notes": root / "notes", "text": root / "text", "files": root / "files"},
+                session=Session(cols=40),
+                profiles_path=root / "keyboard.json",
+            )
+
+            # Test viewing with exact string representation of Path (includes backslashes on Windows)
+            res = shell.execute(f'view "{doc}"')
+            self.assertIn("TRS-80 Model I documentation", res)
+
+            # Test viewing with unquoted path
+            res_unquoted = shell.execute(f'view {doc}')
+            self.assertIn("TRS-80 Model I documentation", res_unquoted)
 
 
 class ShortcutBridgeTests(unittest.TestCase):
@@ -658,8 +695,15 @@ class RetroWorkstationCompanionTests(unittest.TestCase):
             self.assertIn("Host media command sent: mute", shell.execute("vol mute"))
 
     def test_weather_news_and_briefing_clean_ascii(self):
-        from retro_os.weather_news import _clean_ascii, get_weather, get_news, get_briefing
+        from retro_os.news import _clean_ascii, get_news
+        from retro_os.weather_news import get_news as legacy_get_news
+        from retro_os.weather_news import get_weather, get_briefing
+        from retro_os.scheduler import MODULE_USAGE_INFO
         from unittest.mock import patch
+
+        self.assertIn("weather", MODULE_USAGE_INFO)
+        self.assertIn("news", MODULE_USAGE_INFO)
+        self.assertIs(legacy_get_news, get_news)
 
         # Clean ASCII translates special unicode quotes, degrees, and dashes
         dirty = "\u201cHello\u201d 72\u00b0F \u2014 world\u2026"
@@ -695,6 +739,94 @@ class RetroWorkstationCompanionTests(unittest.TestCase):
             brief_40 = get_briefing(columns=40)
             for line in brief_40.split("\n"):
                 self.assertLessEqual(len(line), 40)
+
+    def test_news_article_reading_and_shell_integration(self):
+        from retro_os.news import (
+            fetch_news_items,
+            get_news,
+            get_article_by_index,
+            get_full_article_by_index,
+            format_article,
+        )
+        from retro_os.runtime import create_runtime
+        from retro_os.core import Session
+        import tempfile
+        from unittest.mock import patch
+
+        fake_rss = b"""<?xml version="1.0"?>
+        <rss version="2.0">
+            <channel>
+                <item>
+                    <title>Apple II Breakthrough</title>
+                    <link>https://example.com/apple2</link>
+                    <description>&lt;p&gt;New expansion card released.&lt;/p&gt;</description>
+                    <pubDate>Mon, 12 Oct 2026 12:00:00 GMT</pubDate>
+                </item>
+                <item>
+                    <title>Commodore 64 Mod</title>
+                    <link>https://example.com/c64</link>
+                    <description>WiFi modem tested at 9600 baud.</description>
+                    <pubDate>Mon, 12 Oct 2026 13:00:00 GMT</pubDate>
+                </item>
+            </channel>
+        </rss>"""
+
+        with patch("urllib.request.urlopen") as mock_url:
+            mock_url.return_value.__enter__.return_value.read.return_value = fake_rss
+            items = fetch_news_items("npr", count=2)
+            self.assertEqual(len(items), 2)
+            self.assertEqual(items[0]["title"], "Apple II Breakthrough")
+            self.assertEqual(items[0]["summary"], "New expansion card released.")
+            self.assertEqual(items[0]["link"], "https://example.com/apple2")
+            self.assertEqual(items[1]["title"], "Commodore 64 Mod")
+
+            # Article formatting
+            art1 = format_article(items[0])
+            self.assertIn("Article [1]: Apple II Breakthrough", art1)
+            self.assertIn("New expansion card released.", art1)
+            self.assertIn("https://example.com/apple2", art1)
+
+            # Get article by index (1-based)
+            read_1 = get_article_by_index(1)
+            self.assertIn("Article [1]: Apple II Breakthrough", read_1)
+
+            read_2 = get_article_by_index(2)
+            self.assertIn("Commodore 64 Mod", read_2)
+            self.assertIn("WiFi modem tested at 9600 baud.", read_2)
+
+            read_invalid = get_article_by_index(99)
+            self.assertIn("Article [99] not found", read_invalid)
+
+            # Full article extraction using viewer mock
+            with patch("retro_os.viewer.extract_text_from_url", return_value="Detailed article web contents."):
+                full_art = get_full_article_by_index(1)
+                self.assertIn("Full Web Article [1]", full_art)
+                self.assertIn("Detailed article web contents.", full_art)
+
+        # Runtime shell command integration
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fs = {"notes": tmpdir, "text": tmpdir, "bookmarks": tmpdir, "files": tmpdir}
+            session = Session()
+            session, bus, host_env, shell, loader = create_runtime(fs, session=session)
+
+            with patch("urllib.request.urlopen") as mock_url:
+                mock_url.return_value.__enter__.return_value.read.return_value = fake_rss
+                headlines_res = shell.execute("news")
+                self.assertIn("Apple II Breakthrough", headlines_res)
+                self.assertIn("Commodore 64 Mod", headlines_res)
+
+                # Type article number directly in shell: 'news 1'
+                art1_res = shell.execute("news 1")
+                self.assertIn("Article [1]: Apple II Breakthrough", art1_res)
+
+                # 'news read 2'
+                art2_res = shell.execute("news read 2")
+                self.assertIn("Article [2]: Commodore 64 Mod", art2_res)
+
+                # 'news 1 full'
+                with patch("retro_os.viewer.extract_text_from_url", return_value="Webpage body text."):
+                    full_res = shell.execute("news 1 full")
+                    self.assertIn("Webpage body text.", full_res)
 
     def test_hardware_settings_commands_and_serial_tuning(self):
         from retro_os.runtime import create_runtime
