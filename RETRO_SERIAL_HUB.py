@@ -20,7 +20,7 @@ UX Design:
 - ATM cancels any active BBS connection and returns to main menu
 """
 
-import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile, json, platform
+import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile, json, platform, re
 from rsh_terminal import (
     AnsiToTextTranslator,
     clear_terminal_screen,
@@ -1817,19 +1817,25 @@ def bridge_loop(
                 t_name = read_input_line(ser).strip()
                 if not t_name or t_name.upper() == "Q":
                     continue
-                write(ser, "Command (e.g. 'weather Austin', 'news npr 6', 'mail inbox', or 'help'): ")
+                write(ser, "Command (e.g. 'news : weather Austin : broadcast Good Morning', or 'help'): ")
                 t_cmd = read_input_line(ser).strip()
                 if not t_cmd or t_cmd.upper() == "Q":
                     continue
                 if t_cmd.lower() in ("help", "modules"):
                     res = retro_shell.execute("schedule modules")
                     render_shell_result(res)
-                    write(ser, "Enter command to schedule: ")
+                    write(ser, "Enter command to schedule (chain with ' : '): ")
                     t_cmd = read_input_line(ser).strip()
                     if not t_cmd or t_cmd.upper() == "Q":
                         continue
-                if t_cmd.startswith(("http://", "https://")):
-                    t_cmd = f"view {t_cmd}"
+                raw_segments = [c.strip() for c in re.split(r"\s+:\s+|\s*;\s*", t_cmd) if c.strip()]
+                norm_segments = []
+                for seg in raw_segments:
+                    if seg.startswith(("http://", "https://")):
+                        norm_segments.append(f"view {seg}")
+                    else:
+                        norm_segments.append(seg)
+                t_cmd = " : ".join(norm_segments)
                 write(ser, "Schedule Frequency:\r\n")
                 write(ser, "  [1] Interval (every X minutes)\r\n")
                 write(ser, "  [2] Hourly (every hour at specified minute)\r\n")

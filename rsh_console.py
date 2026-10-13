@@ -10,7 +10,7 @@ import time
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-VERSION = "2.1"
+VERSION = "2.2"
 
 MENU_SECTIONS = [
     (

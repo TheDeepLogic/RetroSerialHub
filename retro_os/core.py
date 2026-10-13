@@ -121,7 +121,11 @@ class Shell:
         return "" if result is None else str(result)
 
     def help(self):
-        return "Commands: " + ", ".join(sorted(self._commands))
+        return "Commands: " + ", ".join(self.command_names())
+
+    def command_names(self) -> tuple[str, ...]:
+        """Return the commands currently available in this shell."""
+        return tuple(sorted(self._commands))
 
 
 class ModuleLoader:

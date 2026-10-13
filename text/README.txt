@@ -52,7 +52,7 @@ Features
 * Electronic Mail (Hub & Internet): Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
 * Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike), and WarGames (W.O.P.R.) simulation
 * Ambient Desk Companion: Live ASCII weather forecasts (wttr.in), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (briefing), and interactive article reader (news <num>)
-* Background Task Scheduler: Automated periodic task execution with broadcast notifications and cron-like intervals; weather and news commands are available tasks (weather Austin, news npr 6)
+* Background Task Scheduler: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. news : weather Austin : broadcast Morning briefing complete)
 * Terminal Hardware Settings: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
 * In-Hub Help & User Guide: 9 built-in guide topics accessible directly from the menu (HELP or ?)
 * Multi-Port Serial Support: Connect multiple vintage computers simultaneously, each with independent configurations
@@ -487,6 +487,28 @@ Garbled Text
 * Try a different cable
 
 Release Notes
+
+v2.2
+
+* Task Scheduler Command Chaining: Scheduled tasks can now chain multiple
+  commands in a single scheduled event using ' : ' (or ';'), executing them
+  sequentially and compiling the outputs cleanly (for example:
+  news : weather Austin : broadcast Morning briefing complete).
+* Resilient Chained Task Execution: If an individual command in a chain
+  encounters an error or is unrecognized, subsequent chained commands continue
+  to run and report output without halting the sequence.
+* Dynamic Scheduler CLI Command Discovery: schedule modules now dynamically
+  enumerates all shell commands available in the active runtime rather than a
+  static list, and schedule info <cmd> provides detailed syntax and chaining
+  guidance for any registered command.
+* Scheduler Alert & Broadcast Integration: Added explicit scheduler
+  documentation and module usage info for real-time messaging commands
+  (broadcast, notify, msg, alert), enabling scheduled tasks to push
+  instant notifications to all connected terminals.
+* Enhanced Scheduler Menu & URL Handling: Updated the interactive menu
+  ([2] Add New Scheduled Task) with command chaining support, helpful chaining
+  prompts, and automatic URL detection and wrapping for web endpoints.
+* Incremented application version to v2.2.
 
 v2.1
 

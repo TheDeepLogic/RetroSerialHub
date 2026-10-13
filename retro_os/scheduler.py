@@ -120,6 +120,29 @@ MODULE_USAGE_INFO: Dict[str, Dict[str, Any]] = {
         "usage": "shortcut [list | add <name> <command...> | del <id> | run <id>]",
         "examples": ["shortcut list", "shortcut run 1", "shortcut add Weather view https://wttr.in/?0"],
     },
+    "broadcast": {
+        "description": "Send a real-time message or alert to all connected terminals.",
+        "usage": "broadcast <message> | msg <message> | alert <message>",
+        "examples": [
+            "broadcast System update complete",
+            "news : weather Austin : broadcast Morning briefing complete",
+        ],
+    },
+    "notify": {
+        "description": "Send a real-time notification to connected terminals.",
+        "usage": "notify <message>",
+        "examples": ["notify System backup starting"],
+    },
+    "msg": {
+        "description": "Send a real-time message to connected terminals.",
+        "usage": "msg <message>",
+        "examples": ["msg Hello terminals"],
+    },
+    "alert": {
+        "description": "Send a real-time alert to connected terminals.",
+        "usage": "alert <message>",
+        "examples": ["alert Scheduled maintenance in 5 minutes"],
+    },
 }
 
 

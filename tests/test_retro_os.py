@@ -82,6 +82,111 @@ class RetroOsCoreTests(unittest.TestCase):
             bus.publish("notify", "hello")
             self.assertEqual(received, ["hello"])
 
+    def test_scheduler_lists_and_runs_every_cli_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, bus, host_env, shell, _ = create_runtime(
+                {
+                    "notes": root / "notes",
+                    "text": root / "text",
+                    "files": root / "files",
+                    "tasks": root / "scheduled_tasks.json",
+                },
+                session=Session(),
+                profiles_path=root / "keyboard.json",
+            )
+            received = []
+            bus.subscribe("notify", received.append)
+
+            command_listing = shell.execute("schedule modules")
+            for command_name in shell.command_names():
+                self.assertIn(command_name, command_listing)
+            self.assertIn("Command: broadcast", shell.execute("schedule info broadcast"))
+
+            task = host_env.scheduler.add_task(
+                name="Scheduled Broadcast",
+                command="broadcast hello from scheduler",
+                schedule_type="interval",
+                params={"every": 15},
+            )
+            self.assertEqual(
+                shell.execute(f"schedule run {task['id']}"),
+                "hello from scheduler",
+            )
+            self.assertEqual(received[-1]["message"], "hello from scheduler")
+
+            chained_task = host_env.scheduler.add_task(
+                name="Scheduled Update",
+                command="calc 1 + 1 : calc 2 + 2 : broadcast update complete",
+                schedule_type="interval",
+                params={"every": 15},
+            )
+            self.assertEqual(
+                shell.execute(f"schedule run {chained_task['id']}"),
+                "2\n\n4\n\nupdate complete",
+            )
+            self.assertEqual(received[-1]["message"], "update complete")
+
+    def test_scheduler_chained_news_weather_and_broadcast(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, bus, host_env, shell, _ = create_runtime(
+                {
+                    "notes": root / "notes",
+                    "text": root / "text",
+                    "files": root / "files",
+                    "tasks": root / "scheduled_tasks.json",
+                },
+                session=Session(),
+                profiles_path=root / "keyboard.json",
+            )
+            broadcast_events = []
+            bus.subscribe("scheduler.broadcast", broadcast_events.append)
+            notify_events = []
+            bus.subscribe("notify", notify_events.append)
+
+            # Override news and weather with predictable outputs for this shell
+            shell.register_command("news", lambda _args: "Top Headlines:\n1. Retro Revival")
+            shell.register_command("weather", lambda args: f"{' '.join(args)}: +72F, Sunny" if args else "Austin: +72F, Sunny")
+
+            add_res = shell.execute(
+                "schedule add MorningBriefing 30 news : weather Austin : broadcast Morning briefing complete"
+            )
+            self.assertIn("Scheduled task 'MorningBriefing'", add_res)
+
+            run_res = shell.execute("schedule run 1")
+            self.assertIn("Top Headlines:\n1. Retro Revival", run_res)
+            self.assertIn("Austin: +72F, Sunny", run_res)
+            self.assertIn("Morning briefing complete", run_res)
+
+            self.assertEqual(notify_events[-1]["message"], "Morning briefing complete")
+            self.assertEqual(len(broadcast_events), 1)
+            self.assertIn("Top Headlines", broadcast_events[0]["output"])
+            self.assertIn("Austin: +72F, Sunny", broadcast_events[0]["output"])
+            self.assertIn("Morning briefing complete", broadcast_events[0]["output"])
+
+            semi_task = host_env.scheduler.add_task(
+                name="Semi Task",
+                command="calc 5 * 5 ; calc 10 * 10",
+                schedule_type="interval",
+                params={"every": 15},
+            )
+            self.assertEqual(
+                shell.execute(f"schedule run {semi_task['id']}"),
+                "25\n\n100",
+            )
+
+            resilient_task = host_env.scheduler.add_task(
+                name="Resilient Task",
+                command="badcommand1234 : calc 3 * 3",
+                schedule_type="interval",
+                params={"every": 15},
+            )
+            self.assertEqual(
+                shell.execute(f"schedule run {resilient_task['id']}"),
+                "Unknown command: badcommand1234. Type 'help' for commands.\n\n9",
+            )
+
     def test_runtime_commands_keep_their_own_client_context(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
