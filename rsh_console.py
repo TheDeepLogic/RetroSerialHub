@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-VERSION = "1.5"
+VERSION = "2.0"
 
 
 class ConsoleDashboard:
@@ -195,8 +195,6 @@ class ConsoleDashboard:
         rows.append((self._status_line(), "cyan"))
         for message, level in self._events:
             rows.append((f"Event: {message}", level))
-        while len(rows) < len(self.profiles) + 6:
-            rows.append(("", ""))
         width = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns - 1)
         return [
             self._paint(row[:width], color) if color else row[:width]
@@ -209,6 +207,8 @@ class ConsoleDashboard:
             sys.stdout.write(f"\x1b[{self._frame_lines}A")
         for row in rows:
             sys.stdout.write("\r\x1b[2K" + row + "\r\n")
+        if len(rows) < self._frame_lines:
+            sys.stdout.write("\x1b[J")
         sys.stdout.flush()
         self._frame_lines = len(rows)
 

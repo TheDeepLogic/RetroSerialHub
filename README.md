@@ -19,18 +19,27 @@ transfer, browser, and other retro-computing services through the hub's menu.
 
 ## Features
 
+- **Retro Serial OS Runtime**: Interactive command shell (`cli>` / `OS`) with hot-reloadable module system, event bus pub/sub, multi-client sessions, and keyboard bridge shortcut profiles
+- **Accordion Main Menu & Custom Shortcuts**: Fast categorized accordion flyout navigation with user-defined macros, arguments, and automatic flyout
+- **Host Terminal / Command Prompt**: Quick launch the host OS shell (`cmd.exe` on Windows, or `$SHELL` on macOS/Linux) with bidirectional console streaming, local echo, and line translation
+- **Real-Time Host System Monitor**: Live CPU load measurement, RAM, disk, and uptime metrics with automatic screen clearing and interactive controls (`top` / `sysinfo live`)
+- **Multi-Format Document Viewer**: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs
+- **Direct File Transfers**: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (`xsend`, `ysend`, `asend`, `xrecv`)
+- **Electronic Mail (Hub & Internet)**: Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
+- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), and WarGames (W.O.P.R.) simulation
+- **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), and automated morning briefings (`briefing`)
+- **Background Task Scheduler**: Automated periodic task execution with broadcast notifications and cron-like intervals
+- **Terminal Hardware Settings**: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
+- **In-Hub Help & User Guide**: 9 built-in guide topics accessible directly from the menu (`HELP` or `?`)
 - **Multi-Port Serial Support**: Connect multiple vintage computers simultaneously, each with independent configurations
 - **BBS Directory**: Browse, connect to, and manage saved BBS destinations
 - **Telnet**: Connect to a host and port directly; manage Telnet bookmarks or add destinations to the BBS directory
 - **FTP/FTPS**: Browse FTP servers and save downloads to the hub or transfer them directly to the connected terminal
-- **File Transfers**: Send and receive files using XMODEM, YMODEM, or ASCII protocols
-- **Text Library**: Browse and read text files with pagination; includes starter
-  articles on classic computers
+- **Text Library**: Browse and read text files with pagination; includes starter articles on classic computers
 - **Web Browser**: Browse paginated text pages, follow numbered links, and manage bookmarks
 - **Notes System**: Create, read, and manage text notes
 - **COM Port Bridge**: Bridge between different serial ports for direct computer-to-computer communication
-- **Keyboard Bridge**: Type serial input into the focused host application
-- **WarGames Mode**: Nostalgic WarGames movie-inspired interface (proof-of-concept)
+- **Keyboard Bridge**: Type serial input into the focused host application with customizable key profiles
 - **AI Assistant**: Optional ChatGPT-powered assistant accessible from vintage terminals
 - **Hot-Reload Modules**: Edit feature modules without restarting the hub
 - **ANSI Support**: Automatic detection and handling of ANSI escape codes for compatible terminals
@@ -66,6 +75,62 @@ transfer, browser, and other retro-computing services through the hub's menu.
    ```bash
    python RETRO_SERIAL_HUB.py
    ```
+
+## Main Menu Navigation and Command Shell (CLI)
+
+Retro Serial Hub features an accordion flyout main menu organized into 6 purposeful pillars optimized for 40- and 80-column retro terminals:
+- **Sections (0–6)**: Only the selected category is expanded, showing its available actions (`[A]–[G]`, `[+]`, `[-]`), while other categories remain collapsed as headers:
+  - `[0] Shortcuts`: User-defined quick shortcuts to commands and tools with custom arguments (e.g., weather feeds, favorite BBS connections, games, calculations). If any shortcuts are populated, this section automatically flies out upon opening the main menu.
+  - `[1] Communications`: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client, Electronic Mail (Integrated Hub Mailbox & Internet Email)
+  - `[2] Host Connectivity`: Host Applications, Launch Host App, Keyboard Bridge, COM Port Bridge, Host Terminal / Prompt (cmd/powershell/bash), System Monitor & Media
+  - `[3] Files & Media`: File Transfers (XMODEM/YMODEM/ASCII), Document Viewer, Text Library, ASCII Image Viewer
+  - `[4] Games`: Dedicated Retro Games (Minesweeper, Solitaire, WarGames W.O.P.R.)
+  - `[5] Accessories`: Notepad (Notes), Calculator, Live Weather & News, AI Assistant, Host Printing
+  - `[6] System`: Command Shell (CLI), Task Scheduler, Terminal Hardware Settings, Keyboard Profiles, Help & User Guide, Welcome Banner, Disconnect
+- **Navigation**: Enter `0`–`6` (or section names such as `GAMES`, `CONNECTIVITY`, `SYS`) to expand that section. Enter `A`–`G`, `+`, or `-` to run the item within the currently active section.
+- **Shortcuts Management**: In the Shortcuts section, press `+` to add a shortcut with custom arguments (saved to `user_shortcuts.json`), or `-` to remove an existing shortcut. You can also manage shortcuts from the CLI via `shortcut add <name> <cmd>`, `shortcut list`, `shortcut run <id>`, or `shortcut del <id>`.
+- **Help & User Guide**: Comprehensive multi-topic documentation is accessible directly inside the hub by pressing `HELP`, `H`, or `?` at the main menu, selecting `[E]` under System, or typing `help <topic>` in the CLI.
+- **Direct Commands**: You can enter commands directly from the main menu prompt, such as `CLI` (or `OS`), `HELP` (or `?`), `SYSINFO`, `CLIP`, `VOL`, `MEDIA`, `WEATHER`, `NEWS`, `BRIEFING`, `SHORTCUT`, `APPS`, `VIEW`, `FETCH`, `LAUNCH`, `TERMINAL`, `CALC`, `MAIL`, `MAILTO`, `MINES`, `SOLITAIRE`, `WARGAMES`, `PRINT`, `KB`, `SCHEDULE`, `CAPS`, `PACE`, or `ATM` to return/refresh.
+
+### Command Shell (CLI)
+
+Enter `CLI` at the main menu to open the interactive command shell (`cli>`). Type `help` for commands or `exit` to return to the menu:
+- `sysinfo` (aliases `sys`, `top`): Displays host CPU cores, memory load, disk capacity, uptime, and OS platform information formatted cleanly for 40- or 80-column screens.
+- `clip [text]` / `copy <text>` / `paste`: Reads the host OS clipboard or copies text to the host clipboard directly from your vintage terminal.
+- `media <play|pause|next|prev|stop>` and `vol <up|down|mute>`: Controls host media playback and volume without leaving your retro terminal.
+- `weather [city/zip]`: Fetches current conditions and ASCII weather forecast from wttr.in.
+- `news [npr|hn|bbc] [count]`: Parses and displays clean ASCII news headlines from RSS feeds.
+- `briefing [location]`: Generates a complete desk briefing combining weather forecast, top news headlines, and host hardware status.
+- `xsend <file>`, `ysend <file>`, `asend <file>`, `xrecv <dest>`: Initiates direct file transfers straight from the shell.
+- `caps <on|off>`: Toggles uppercase-only mode (Caps Mode) for vintage computers without lowercase ROMs (Apple II+, early TRS-80, PET 2001).
+- `pace <milliseconds>`: Adjusts inter-character serial pacing delay (e.g. `pace 2` for 2ms/char) to prevent buffer overflows on flow-control-less UARTs.
+- `terminal [cmd|powershell|bash]`: Opens an interactive bidirectional console session into the host machine's command interpreter.
+- `apps [refresh | <letter> | <filter>]`: Scans the host's applications. You can filter by initial letter (e.g., `apps c`) or search term (e.g., `apps note`). Interactive output supports pagination (`Enter`=Next, `Q`=Quit, `A-Z`=Skip to letter).
+- `launch <app> [args...]`: Starts a host application by name, stem, or path. On Windows hosts, forward slashes (`/`) typed on Apple II keyboards (which lack a backslash key) are automatically translated to backslashes (`\`). Use `-k` for keyboard bridge mode or `-b` for background execution.
+- `view <file/url>`: Extracts text and paginates supported document formats (TXT, PDF, DOC/DOCX, XLS/XLSX, CSV) or downloads and parses web pages.
+- `kb profile <name>` and `kb map <key> <action>`: Selects or configures shortcut mappings in `keyboard_profiles.json` (e.g., mapping `CTRL+W` to `WIN` or `CTRL+M` to `WIN+R`).
+- `calc <expr>`, `mail [inbox|hub|net|read|send|mode|popup|mailto]`, `mines [new|r|f]`, `solitaire [new|draw|auto]`, `wargames`, `print <file/text>`, `ascii <image>`: Access host and retro utilities directly from the CLI.
+- Modular feature commands (`notes`, `textlib`, `bbs`, `browser`, `telnet`, `ftp`, `files`, and `ai`) open their interactive module screens. Type `ATM` at any time to return to the main menu.
+
+### Electronic Mail (Hub Mail & Internet Email)
+
+Retro Serial Hub provides a dual-mode electronic mail system accessible from the menu (`1E`) or shell (`mail`):
+1. **Integrated Hub Mailbox**: A shared local message spool stored on the hub. Every message is stamped with the originating user name and connection type (e.g. `APPLE2 [Serial]`, `Terminal [Telnet]`, or `Host System [Local]`). Any vintage terminal or host user can compose messages to other machines, read unread messages, and delete notes.
+2. **Internet Email (IMAP/SMTP)**: Connect to any standard email provider. Lists and paginates IMAP inboxes on 40- and 80-column screens and delivers outbound messages via secure SMTP (STARTTLS or SSL).
+3. **Host Desktop Auth Window**: Launch a GUI configuration window directly on the host PC desktop (`mail popup` or `python -m retro_os.mail_gui`) to configure server hostnames, ports, and app credentials without typing sensitive passwords over unencrypted serial or telnet connections.
+4. **Instant Mode Toggle**: Toggle between Hub Mailbox and Internet Email at any time via `mail mode` or option `[4]` in the Mail menu.
+5. **Host Mailto Trigger**: Open the host computer's default desktop mail client using `mail mailto <address> [subject]`.
+
+### Dedicated Retro Games
+
+All games feature clean ASCII board rendering optimized for both 40- and 80-column displays:
+- **Minesweeper** (`mines`): Text-mode minefield with first-click safety, reveal (`r row col`), flag toggle (`f row col`), and customizable board dimensions.
+- **Klondike Solitaire** (`solitaire`): Full card tableau with stock/waste piles, card movement, and automatic foundation moves (`f`).
+- **WarGames (W.O.P.R.)** (`wargames`): Interactive NORAD defense computer simulation inspired by the 1983 film.
+
+### Built-in Help & User Guide
+
+An interactive multi-topic guide is accessible anywhere by typing `HELP`, `H`, or `?` at the main menu or selecting `[E]` under System. Topics cover hub capabilities, navigation, shell commands, hardware settings, games, and emergency hotkeys with built-in `--More--` paging.
 
 ## Configuration
 
@@ -241,22 +306,19 @@ errors are printed as ordinary text without ANSI color codes.
 
 ### Main Menu
 
-The main menu groups features into:
+The main menu features an interactive accordion flyout layout designed for vintage 40- and 80-column terminals:
 
-- **Accessories**: `1` Bulletin Boards, `2` Web Browser, `3` Telnet, and `4` Notes
-- **Bridging**: `5` COM Port and `6` Keyboard
-- **Files**: `7` File Transfers, `8` Text Library, and `9` FTP
-- **Various**: `10` AI Assistant and `11` Wargames
-- **System**: `12` toggle ANSI translation, `13` switch between 40- and
-  80-column layouts, and `14` Welcome Banner.
-  The selection is saved for that machine profile. Remote TCP terminal clients
-  also see `15` Disconnect.
+- **[0] Shortcuts**: User-defined command macros with custom arguments. Automatically flies out when populated. Press `+` to add a shortcut or `-` to remove one.
+- **[1] Communications**: `A` Bulletin Boards, `B` Telnet, `C` Web Browser, `D` FTP, and `E` Electronic Mail (Hub & Internet).
+- **[2] Host Connectivity**: `A` Host Applications, `B` Launch with Keyboard Bridge, `C` Keyboard Bridge Profiles, `D` Serial COM Port Bridge, `E` Host Terminal / Prompt (`cmd.exe`/`powershell`/unix shell), and `F` System Monitor & Media Controls.
+- **[3] Files & Media**: `A` File Transfers (XMODEM, YMODEM, ASCII), `B` Document Viewer (PDF, DOCX, XLSX, CSV, Markdown, Web), `C` Text Library, and `D` ASCII Image Viewer.
+- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), and `C` WarGames (W.O.P.R.).
+- **[5] Accessories**: `A` Notes, `B` Calculator, `C` Live Weather & News Briefings, `D` AI Assistant, and `E` Host Printing.
+- **[6] System**: `A` Command Shell (`cli>` / `OS`), `B` Background Task Scheduler, `C` Terminal Hardware Settings (40/80 cols, Caps-Only, Serial Pacing, ANSI), `D` Welcome Banner, and `E` Help & User Guide (`HELP` or `?`). Remote TCP clients also see `F` Disconnect.
 
-At 80 columns, numbering proceeds down the left column (Accessories, Bridging,
-then Files) and continues at the top of the right column (Various, then System).
-At 40 columns, the same numbering is used in section order, with options paired
-compactly within each section. The Keyboard option types into the focused host
-application. Enter, Tab, and Backspace are supported;
+Enter a section number (`0`-`6`) or name (`GAMES`, `SYS`, `HOST`, etc.) to expand it, then enter the letter (`A`-`F`) to activate an option. You can also switch between the accordion flyout and the legacy numbered menu layout.
+
+The Keyboard option types into the focused host application. Enter, Tab, and Backspace are supported;
 press **Ctrl+X** to exit. Escape and Ctrl+] are also recognized when the
 terminal can send them. This uses Windows' native input API on Windows and
 `pynput` on macOS/Linux. Keep the intended application focused while using this
@@ -356,9 +418,11 @@ Retro-Serial-Hub/
 ├── config.py               # Configuration file (edit this!)
 ├── ai_config.json          # OpenAI API key (optional)
 ├── bbs_directory.json     # Managed BBS directory (created when first changed)
+├── user_shortcuts.json    # User-configured shortcuts (created when first added)
 ├── terminal_columns.json  # Saved per-profile 40/80-column choices
 ├── telnet_bookmarks.json  # Telnet bookmarks (created when first saved)
 ├── ftp_bookmarks.json     # FTP/FTPS bookmarks (created when first saved)
+├── keyboard_profiles.json # Retro keyboard mapping profiles (Apple II, C64, etc.)
 ├── requirements.txt       # Python dependencies
 ├── rsh_ai.py              # AI Assistant module
 ├── rsh_bbs.py             # BBS directory and management module
@@ -374,6 +438,18 @@ Retro-Serial-Hub/
 ├── rsh_text.py            # Text library module
 ├── rsh_wargames.py        # WarGames module
 ├── rsh_welcome.py         # Persistent welcome banner
+├── retro_os/              # Retro Serial OS core, runtime, shell, and services
+│   ├── core.py            # Shell, EventBus, Session model, ModuleLoader
+│   ├── runtime.py         # Runtime initialization and built-in command handlers
+│   ├── host_env.py        # Host OS integration, app scanner, clipboard, sysinfo
+│   ├── menu.py            # Accordion flyout menu engine
+│   ├── shortcuts.py       # User-defined command shortcuts manager
+│   ├── scheduler.py       # Background periodic task scheduler
+│   ├── mail_service.py    # Hub mailbox and internet email backend
+│   ├── viewer.py          # Multi-format document text extraction pipeline
+│   ├── weather_news.py    # Live weather, RSS headlines, and desk briefings
+│   ├── help_data.py       # In-hub help system and user guide
+│   └── modules/           # Built-in OS modules (calc, games, mail, print, etc.)
 ├── files/                 # File transfer storage
 ├── text/                  # Text library files, README, and starter articles
 ├── notes/                 # Notes storage
@@ -430,6 +506,38 @@ This design allows you to customize or extend features without modifying the cor
 - Try a different cable
 
 ## Release Notes
+
+### v2.0
+
+- **Retro Serial OS Runtime**: Full host-side operating system extension with
+  an interactive command prompt (`cli>` / `OS`), hot-reloadable module system,
+  event bus publish/subscribe architecture, multi-client session tracking, and
+  programmable keyboard bridge shortcut profiles.
+- **Accordion Main Menu & Custom Shortcuts**: Fast categorized accordion flyout
+  menu layout optimized for 40- and 80-column terminals, complete with a
+  user-defined command shortcut macro system with automatic flyout.
+- **Host Terminal & Quick Shell**: Bidirectional streaming console session to
+  the host OS (`cmd.exe`, `powershell`, or unix shells) with configurable local
+  echo, newline translation, and interactive parameters.
+- **Real-Time Host System Monitor**: Live CPU load measurement, memory, disk,
+  and uptime monitor with continuous screen clearing, pause/resume, and
+  adjustable refresh rates (`top` / `sysinfo live`).
+- **Modern Document Viewer Pipeline**: Automatic text extraction and pagination
+  for modern file formats including PDF, Word (.docx), Excel (.xlsx / .csv),
+  plain text, Markdown, HTML, and web URLs.
+- **Integrated Hub Mail & Internet Email**: Central inter-terminal hub mailbox
+  identifying senders by hardware/connection, along with full IMAP/SMTP internet
+  email support and host desktop configuration GUI.
+- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike),
+  and WarGames (W.O.P.R.) simulation.
+- **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news
+  feeds (NPR, Hacker News, BBC), and automated morning briefings (`briefing`).
+- **Background Task Scheduler**: Automated periodic task execution with
+  terminal broadcast notifications and cron-like intervals.
+- **Terminal Hardware Settings & In-Hub Help**: Caps-Only mode for vintage
+  uppercase-only ROMs (Apple II Plus, Commodore PET, TRS-80 Model I), serial
+  character pacing delays (1-3ms), and 9 comprehensive in-hub help guide topics.
+- Incremented application version to v2.0.
 
 ### v1.5
 

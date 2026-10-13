@@ -13,7 +13,86 @@ SPECIAL_KEYS = {
     "ENTER": 0x0D,
     "BACKSPACE": 0x08,
     "TAB": 0x09,
+    "ESC": 0x1B,
+    "SPACE": 0x20,
+    "WIN": 0x5B,
+    "CTRL": 0x11,
+    "ALT": 0x12,
+    "SHIFT": 0x10,
 }
+SHORTCUT_MODIFIERS = {"WIN", "CTRL", "ALT", "SHIFT"}
+
+
+def _key_code(key_name):
+    if key_name in SPECIAL_KEYS:
+        return SPECIAL_KEYS[key_name]
+    if len(key_name) == 1 and key_name.isalnum():
+        return ord(key_name.upper())
+    raise ValueError(f"Unsupported shortcut key: {key_name}")
+
+
+def _send_windows_shortcut(action):
+    keys = action.upper().split("+")
+    modifiers = [key for key in keys[:-1] if key in SHORTCUT_MODIFIERS]
+    key = keys[-1]
+    virtual_keys = [
+        0x5B if modifier == "WIN" else _key_code(modifier)
+        for modifier in modifiers
+    ]
+    virtual_keys.append(_key_code(key))
+    for virtual_key in virtual_keys:
+        _send_keyboard_input(_KeybdInput(virtual_key, 0, 0, 0, 0))
+    for virtual_key in reversed(virtual_keys):
+        _send_keyboard_input(
+            _KeybdInput(virtual_key, 0, KEYEVENTF_KEYUP, 0, 0)
+        )
+
+
+def _pynput_shortcut_sender():
+    try:
+        keyboard = importlib.import_module("pynput.keyboard")
+    except ImportError as exc:
+        raise OSError(
+            "The keyboard bridge on macOS and Linux requires pynput. "
+            "Install it with: python -m pip install pynput"
+        ) from exc
+    controller = keyboard.Controller()
+    platform_modifier = getattr(keyboard.Key, "cmd", None) or getattr(
+        keyboard.Key, "super", None
+    )
+    modifier_keys = {
+        "WIN": platform_modifier,
+        "CTRL": keyboard.Key.ctrl,
+        "ALT": keyboard.Key.alt,
+        "SHIFT": keyboard.Key.shift,
+    }
+
+    def send_shortcut(action):
+        keys = action.upper().split("+")
+        pressed = []
+        try:
+            for modifier in keys[:-1]:
+                key = modifier_keys.get(modifier)
+                if key is None:
+                    raise ValueError(f"Unsupported shortcut modifier: {modifier}")
+                controller.press(key)
+                pressed.append(key)
+            key_name = keys[-1]
+            special = {
+                "ENTER": keyboard.Key.enter,
+                "TAB": keyboard.Key.tab,
+                "BACKSPACE": keyboard.Key.backspace,
+                "ESC": keyboard.Key.esc,
+                "SPACE": keyboard.Key.space,
+            }
+            key = special.get(key_name, key_name.lower())
+            controller.press(key)
+            controller.release(key)
+        finally:
+            for key in reversed(pressed):
+                controller.release(key)
+
+    return send_shortcut
 
 
 class _MouseInput(ctypes.Structure):
@@ -50,6 +129,15 @@ class _Input(ctypes.Structure):
         ("type", wintypes.DWORD),
         ("union", _InputUnion),
     ]
+
+
+def send_shortcut(action):
+    """Inject one modifier/key chord using the current host platform."""
+    if sys.platform == "win32":
+        return _send_windows_shortcut(action)
+    if sys.platform == "darwin" or sys.platform.startswith("linux"):
+        return _pynput_shortcut_sender()(action)
+    raise OSError(f"Shortcut injection is not supported on {sys.platform}.")
 
 
 def _send_keyboard_input(keyboard_input):
@@ -121,7 +209,14 @@ def _pynput_senders():
 class KeyboardBridge:
     """Translate serial ASCII input to host keyboard events."""
 
-    def __init__(self, send_character=None, send_key=None):
+    def __init__(
+        self,
+        send_character=None,
+        send_key=None,
+        send_shortcut=None,
+        shortcut_mappings=None,
+        on_shortcut=None,
+    ):
         if sys.platform == "win32":
             default_character_sender = _send_unicode_character
             default_key_sender = _send_special_key
@@ -133,6 +228,14 @@ class KeyboardBridge:
             )
         self._send_character = send_character or default_character_sender
         self._send_key = send_key or default_key_sender
+        if send_shortcut is not None:
+            self._send_shortcut = send_shortcut
+        elif sys.platform == "win32":
+            self._send_shortcut = _send_windows_shortcut
+        else:
+            self._send_shortcut = None
+        self._shortcut_mappings = shortcut_mappings or {}
+        self._on_shortcut = on_shortcut
         self._skip_line_feed = False
 
     def feed(self, data):
@@ -140,6 +243,28 @@ class KeyboardBridge:
         for byte in data:
             if byte in (0x18, 0x1B, 0x1D):
                 return True
+            if 0x01 <= byte <= 0x1A:
+                shortcut = f"CTRL+{chr(byte + 0x40)}"
+                mappings = (
+                    self._shortcut_mappings()
+                    if callable(self._shortcut_mappings)
+                    else self._shortcut_mappings
+                )
+                action = mappings.get(shortcut)
+                if action:
+                    if self._send_shortcut is None:
+                        if sys.platform == "darwin" or sys.platform.startswith("linux"):
+                            self._send_shortcut = _pynput_shortcut_sender()
+                        else:
+                            raise OSError(
+                                "Shortcut injection is not supported on this platform."
+                            )
+                    self._send_shortcut(action)
+                    if self._on_shortcut:
+                        self._on_shortcut(shortcut, action)
+                    if byte == 0x0D:
+                        self._skip_line_feed = True
+                    continue
             if byte == 0x0A and self._skip_line_feed:
                 self._skip_line_feed = False
                 continue

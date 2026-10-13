@@ -42,11 +42,22 @@ request with a correction.
 
 Features
 
+* Retro Serial OS Runtime: Interactive command shell (cli> / OS) with hot-reloadable module system, event bus pub/sub, multi-client sessions, and keyboard bridge shortcut profiles
+* Accordion Main Menu & Custom Shortcuts: Fast categorized accordion flyout navigation with user-defined macros, arguments, and automatic flyout
+* Host Terminal / Command Prompt: Quick launch the host OS shell (cmd.exe on Windows, or $SHELL on macOS/Linux) with bidirectional console streaming, local echo, and line translation
+* Real-Time Host System Monitor: Live CPU load measurement, RAM, disk, and uptime metrics with automatic screen clearing and interactive controls (top / sysinfo live)
+* Multi-Format Document Viewer: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs
+* Direct File Transfers: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (xsend, ysend, asend, xrecv)
+* Electronic Mail (Hub & Internet): Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
+* Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike), and WarGames (W.O.P.R.) simulation
+* Ambient Desk Companion: Live ASCII weather forecasts (wttr.in), RSS news feeds (NPR, Hacker News, BBC), and automated morning briefings (briefing)
+* Background Task Scheduler: Automated periodic task execution with broadcast notifications and cron-like intervals
+* Terminal Hardware Settings: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
+* In-Hub Help & User Guide: 9 built-in guide topics accessible directly from the menu (HELP or ?)
 * Multi-Port Serial Support: Connect multiple vintage computers simultaneously, each with independent configurations
 * BBS Directory: Browse, connect to, and manage saved BBS destinations
 * Telnet: Connect to a host and port directly; manage Telnet bookmarks or add destinations to the BBS directory
 * FTP/FTPS: Browse FTP servers and save downloads to the hub or transfer them directly to the connected terminal
-* File Transfers: Send and receive files using XMODEM, YMODEM, or ASCII protocols
 * Text Library: Browse and read text files with pagination; includes starter
   articles on classic computers
 * Web Browser: Browse paginated text pages, follow numbered links, and manage bookmarks
@@ -475,6 +486,38 @@ Garbled Text
 * Try a different cable
 
 Release Notes
+
+v2.0
+
+* Retro Serial OS Runtime: Full host-side operating system extension with
+  an interactive command prompt (cli> / OS), hot-reloadable module system,
+  event bus publish/subscribe architecture, multi-client session tracking,
+  and programmable keyboard bridge shortcut profiles.
+* Accordion Main Menu & Custom Shortcuts: Fast categorized accordion flyout
+  menu layout optimized for 40- and 80-column terminals, complete with a
+  user-defined command shortcut macro system with automatic flyout.
+* Host Terminal & Quick Shell: Bidirectional streaming console session to
+  the host OS (cmd.exe, powershell, or unix shells) with configurable local
+  echo, newline translation, and interactive parameters.
+* Real-Time Host System Monitor: Live CPU load measurement, memory, disk,
+  and uptime monitor with continuous screen clearing, pause/resume, and
+  adjustable refresh rates (top / sysinfo live).
+* Modern Document Viewer Pipeline: Automatic text extraction and pagination
+  for modern file formats including PDF, Word (.docx), Excel (.xlsx / .csv),
+  plain text, Markdown, HTML, and web URLs.
+* Integrated Hub Mail & Internet Email: Central inter-terminal hub mailbox
+  identifying senders by hardware/connection, along with full IMAP/SMTP
+  internet email support and host desktop configuration GUI.
+* Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike),
+  and WarGames (W.O.P.R.) simulation.
+* Ambient Desk Companion: Live ASCII weather forecasts (wttr.in), RSS news
+  feeds (NPR, Hacker News, BBC), and automated morning briefings (briefing).
+* Background Task Scheduler: Automated periodic task execution with
+  terminal broadcast notifications and cron-like intervals.
+* Terminal Hardware Settings & In-Hub Help: Caps-Only mode for vintage
+  uppercase-only ROMs (Apple II Plus, Commodore PET, TRS-80 Model I), serial
+  character pacing delays (1-3ms), and 9 comprehensive in-hub help guide topics.
+* Incremented application version to v2.0.
 
 v1.5
 

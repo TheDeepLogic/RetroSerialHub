@@ -1,0 +1,8 @@
+{
+  "default": {
+    "CTRL+W": "WIN"
+  },
+  "apple2": {
+    "CTRL+W": "WIN"
+  }
+}

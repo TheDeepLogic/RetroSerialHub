@@ -20,7 +20,7 @@ UX Design:
 - ATM cancels any active BBS connection and returns to main menu
 """
 
-import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile, json
+import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile, json, platform
 from rsh_terminal import (
     AnsiToTextTranslator,
     clear_terminal_screen,
@@ -66,9 +66,42 @@ PORTS[:] = [entry["port"] for entry in _bbs_entries]
 ACTIVE_PORTS = {}
 ACTIVE_REMOTE_CLIENTS = set()
 ACTIVE_REMOTE_CLIENTS_LOCK = threading.Lock()
+ACTIVE_TERMINALS = set()
+ACTIVE_TERMINALS_LOCK = threading.Lock()
 CONSOLE = None
 # Ports that have been surrendered/taken over by a COM-bridge request. Worker threads should stop retrying if their port is surrendered.
 SURRENDERED_PORTS = set()
+
+def register_active_terminal(terminal):
+    with ACTIVE_TERMINALS_LOCK:
+        ACTIVE_TERMINALS.add(terminal)
+
+def unregister_active_terminal(terminal):
+    with ACTIVE_TERMINALS_LOCK:
+        ACTIVE_TERMINALS.discard(terminal)
+
+def broadcast_to_terminals(text):
+    """Send text in real-time to all connected serial and TCP terminals."""
+    with ACTIVE_TERMINALS_LOCK:
+        terminals = list(ACTIVE_TERMINALS)
+    for term in terminals:
+        try:
+            write(term, text)
+        except Exception:
+            pass
+
+def broadcast_scheduler_event(task, output):
+    """Broadcast a scheduled task result to all connected terminals in real time."""
+    task_name = task.get("name", "Task")
+    show_output = task.get("show_output", True)
+    cmd = task.get("command", "")
+    notice = f"\r\n\r\n*** [SCHEDULED EVENT: {task_name.upper()}] ***\r\n"
+    if show_output and output and str(output).strip():
+        notice += f"{str(output).strip()}\r\n"
+    else:
+        notice += f"Executed: {cmd}\r\n"
+    notice += "*** [END EVENT] ***\r\n\r\n"
+    broadcast_to_terminals(notice)
 
 MAIN_MENU_ACTIONS = {
     "1": "bbs",
@@ -85,6 +118,39 @@ MAIN_MENU_ACTIONS = {
     "12": "translate_ansi",
     "13": "columns",
     "14": "welcome_banner",
+}
+RETRO_OS_MENU_ACTIONS = {
+    "bbs": "bbs",
+    "browser": "browser",
+    "telnet": "telnet",
+    "notes": "notes",
+    "files": "files",
+    "textlib": "text",
+    "ftp": "ftp",
+    "ai": "ai",
+    "wargames": "wargames",
+    "keyboard": "keyboard",
+    "com_bridge": "com_bridge",
+    "calc": "calc",
+    "mail": "mail",
+    "mailto": "mailto",
+    "apps": "apps",
+    "launch": "launch",
+    "view": "view",
+    "games": "games",
+    "mines": "mines",
+    "solitaire": "solitaire",
+    "help_menu": "help_menu",
+    "ascii_viewer": "ascii_viewer",
+    "print": "print",
+    "kb": "kb",
+    "cli": "cli",
+    "scheduler": "scheduler",
+    "host_terminal": "host_terminal",
+    "host_media": "host_media",
+    "sysinfo": "sysinfo",
+    "weather_news": "weather_news",
+    "terminal_settings": "terminal_settings",
 }
 
 # ---------------- Paths ----------------
@@ -149,7 +215,7 @@ def load_ansi_translation_preferences(path):
         not isinstance(name, str) or not isinstance(value, bool)
         for name, value in preferences.items()
     ):
-        raise ValueError(f"Invalid ANSI translation settings in {path}.")
+        raise ValueError(f"Invalid ANSI translation settings in {path}."        )
     return preferences
 
 
@@ -208,7 +274,20 @@ def clear_screen(ser, use_ansi=True):
     clear_terminal_screen(ser, use_ansi)
 
 def write(ser, s):
-    ser.write(s.encode('ascii', errors='ignore'))
+    if not isinstance(s, str):
+        s = str(s)
+    if getattr(ser, "_rsh_caps_only", None) is True:
+        s = s.upper()
+    if '\n' in s:
+        s = s.replace('\r\n', '\n').replace('\n', '\r\n')
+    pace = getattr(ser, "_rsh_pace_delay", 0.0)
+    data = s.encode('ascii', errors='ignore')
+    if isinstance(pace, (int, float)) and pace > 0.0:
+        for b in data:
+            ser.write(bytes((b,)))
+            time.sleep(pace)
+    else:
+        ser.write(data)
 
 def write_bytes(ser, b):
     ser.write(b)
@@ -237,6 +316,33 @@ def wait_for_key(ser, quit_msg=False):
             except Exception:
                 return ""
         time.sleep(0.05)
+
+
+def read_input_line(ser):
+    """Read a line of interactive terminal input with echo and backspace."""
+    buf = b""
+    while True:
+        if ser.in_waiting:
+            ch = ser.read(1)
+            if not ch:
+                if getattr(ser, "_eof", False):
+                    return ""
+                continue
+            if ch in (b"\r", b"\n"):
+                write(ser, "\r\n")
+                break
+            if ch in (b"\x03", b"\x1b", b"\x18"):
+                write(ser, "^C\r\n")
+                return ""
+            if ch in (b"\x08", b"\x7f"):
+                if buf:
+                    buf = buf[:-1]
+                    ser.write(b"\x08 \x08")
+            elif ch[0] >= 32:
+                buf += ch
+                ser.write(ch)
+        time.sleep(0.02)
+    return buf.decode(errors="ignore").strip()
 
 def paginate_lines(ser, lines, page_lines=22, quit_msg=False):
     count = 0
@@ -281,7 +387,48 @@ def get_active_connection_counts():
     return len(ACTIVE_PORTS), remote_count
 
 
-def show_main_menu(ser, use_ansi=True):
+def show_main_menu(ser, use_ansi=True, auto_flyout=True):
+    if getattr(ser, "_rsh_menu_style", "flyout") == "legacy":
+        return show_legacy_main_menu(ser, use_ansi)
+    columns = terminal_columns(ser)
+    remote_client = isinstance(ser, SocketTerminal)
+    clear_screen(ser, use_ansi)
+    from retro_os.menu import OSFlyoutMenu
+    from retro_os.shortcuts import ShortcutsManager
+    if not hasattr(ser, "_rsh_shortcuts_manager"):
+        ser._rsh_shortcuts_manager = ShortcutsManager(BASE_DIR / "user_shortcuts.json")
+    if not hasattr(ser, "_rsh_flyout_menu"):
+        ser._rsh_flyout_menu = OSFlyoutMenu(shortcuts_manager=ser._rsh_shortcuts_manager)
+    else:
+        if getattr(ser._rsh_flyout_menu, "shortcuts_manager", None):
+            ser._rsh_flyout_menu.shortcuts_manager.load()
+        if auto_flyout and getattr(ser._rsh_flyout_menu, "auto_flyout_if_shortcuts", None):
+            ser._rsh_flyout_menu.auto_flyout_if_shortcuts()
+
+    serial_count, remote_count = get_active_connection_counts()
+    if columns == 40:
+        status = (
+            f"{time.strftime('%H:%M')} | Serial {serial_count} "
+            f"Telnet {remote_count}"
+        )
+    else:
+        status = (
+            f"Status: {time.strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"Serial ports: {serial_count} | Telnet clients: {remote_count}"
+        )
+
+    output = ser._rsh_flyout_menu.render(
+        columns=columns,
+        translate_ansi=getattr(ser, "_rsh_translate_ansi", False),
+        welcome_banner=WELCOME_BANNER,
+        version=VERSION,
+        is_remote=remote_client,
+        status=status,
+    )
+    write(ser, output)
+
+
+def show_legacy_main_menu(ser, use_ansi=True):
     columns = terminal_columns(ser)
     remote_client = isinstance(ser, SocketTerminal)
     clear_screen(ser, use_ansi)
@@ -506,14 +653,17 @@ def port_worker(name, cfg):
             except Exception:
                 pass
             # Run bridge loop until it throws (e.g. port disappears)
-            bridge_loop(
-                name,
-                ser,
-                cfg.get("ansi", True),
-                translate_ansi=cfg.get("translate_ansi", False),
-                ansi_clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
-                ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
-            )
+            try:
+                bridge_loop(
+                    name,
+                    ser,
+                    cfg.get("ansi", True),
+                    translate_ansi=cfg.get("translate_ansi", False),
+                    ansi_clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+                    ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
+                )
+            finally:
+                unregister_active_terminal(ser)
             # When bridge_loop exits normally, unregister
             try:
                 ACTIVE_PORTS.pop(cfg['port'].upper(), None)
@@ -530,7 +680,8 @@ def port_worker(name, cfg):
             if "FileNotFoundError" in str(e) or "cannot find the file" in str(e):
                 if CONSOLE:
                     CONSOLE.update_profile(name, serial="MISSING")
-                console_log(f"{name}: serial port {cfg['port']} is not present.")
+                else:
+                    console_log(f"{name}: serial port {cfg['port']} is not present.")
                 return
             else:
                 # If this port was surrendered for COM bridge takeover, wait until it's returned
@@ -588,14 +739,17 @@ def remote_client_worker(name, cfg, client_socket, address):
             clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
             columns=columns,
         )
-        bridge_loop(
-            name,
-            terminal,
-            cfg.get("ansi", True),
-            translate_ansi=cfg.get("translate_ansi", False),
-            ansi_clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
-            ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
-        )
+        try:
+            bridge_loop(
+                name,
+                terminal,
+                cfg.get("ansi", True),
+                translate_ansi=cfg.get("translate_ansi", False),
+                ansi_clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
+                ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
+            )
+        finally:
+            unregister_active_terminal(terminal)
     except (OSError, ConnectionError) as exc:
         console_log(
             f"{name}: remote client {address[0]}:{address[1]} disconnected: {exc}",
@@ -693,13 +847,1464 @@ def bridge_loop(
     ansi_home_clears_screen=False,
 ):
     global ANSI_TRANSLATION_PREFERENCES, COLUMN_PREFERENCES
+    from retro_os.runtime import create_runtime
+    from retro_os.core import Session
+
     ser._rsh_translate_ansi = bool(translate_ansi)
+    ser._rsh_menu_style = getattr(ser, "_rsh_menu_style", "flyout")
+    from retro_os.menu import OSFlyoutMenu
+    from retro_os.shortcuts import ShortcutsManager
+    if not hasattr(ser, "_rsh_shortcuts_manager"):
+        ser._rsh_shortcuts_manager = ShortcutsManager(BASE_DIR / "user_shortcuts.json")
+    shortcuts_mgr = ser._rsh_shortcuts_manager
+    if not hasattr(ser, "_rsh_flyout_menu"):
+        ser._rsh_flyout_menu = OSFlyoutMenu(shortcuts_manager=shortcuts_mgr)
+    else:
+        ser._rsh_flyout_menu.shortcuts_manager = shortcuts_mgr
     tcp_sock = None
     # For COM Port Bridge mode: separate serial to bridge
     bridge_serial = None
     pending_bridge = None
     input_buffer = b""
     mode = "MENU"  # MENU, TELNET, BBS, FILES, TEXT, BROWSER
+    retro_session = Session(
+        client_type="telnet" if isinstance(ser, SocketTerminal) else "serial",
+        cols=terminal_columns(ser),
+    )
+    shell_requested_module = []
+
+    def activate_retro_module(module_name):
+        shell_requested_module.append(module_name)
+
+    register_active_terminal(ser)
+    retro_session, event_bus, host_env, retro_shell, _module_loader = create_runtime(
+        {
+            "notes": NOTES_DIR,
+            "text": TEXT_DIR,
+            "files": FILES_DIR,
+            "bookmarks": BASE_DIR / "browser_bookmarks.json",
+            "mail": BASE_DIR / "mail",
+            "tasks": BASE_DIR / "scheduled_tasks.json",
+            "shortcuts": BASE_DIR / "user_shortcuts.json",
+        },
+        session=retro_session,
+        activate_module=activate_retro_module,
+        profiles_path=BASE_DIR / "keyboard_profiles.json",
+        shortcuts_path=BASE_DIR / "user_shortcuts.json",
+    )
+    host_env.shortcuts_manager = shortcuts_mgr
+    if hasattr(host_env, "scheduler") and host_env.scheduler:
+        host_env.scheduler.broadcaster = broadcast_scheduler_event
+
+    def render_shell_result(result):
+        from retro_os.viewer import paginate_text
+
+        text = str(result)
+        cols = getattr(retro_session, "cols", terminal_columns(ser))
+        rows = getattr(retro_session, "rows", 24)
+        pages = paginate_text(text, cols, page_lines=max(1, rows - 2))
+
+        page_index = 0
+        while page_index < len(pages):
+            for output_line in pages[page_index]:
+                write(ser, output_line + "\r\n")
+            if page_index + 1 < len(pages):
+                prompt = f"-- More [{page_index + 1}/{len(pages)}] (Space/Enter=Next, Q=Quit, A-Z=Skip) --"
+                write(ser, prompt)
+                ch = ""
+                while True:
+                    if ser.in_waiting:
+                        raw = ser.read(1)
+                        try:
+                            ch = raw.decode(errors="ignore").upper()
+                        except Exception:
+                            ch = ""
+                        break
+                    time.sleep(0.05)
+                write(ser, "\r\n")
+                if ch in ("Q", "\x1b", "\x18", "\x03"):
+                    break
+                if "A" <= ch <= "Z" and ch != "Q":
+                    target_page = None
+                    for p_idx in range(len(pages)):
+                        for line in pages[p_idx]:
+                            stripped = line.strip()
+                            if stripped and stripped[0].upper() == ch:
+                                target_page = p_idx
+                                break
+                        if target_page is not None:
+                            break
+                    if target_page is not None:
+                        page_index = target_page
+                        continue
+                    else:
+                        write(ser, f"(No entries starting with '{ch}')\r\n")
+            page_index += 1
+
+    def shortcut_mappings():
+        return host_env.keyboard_profiles.get(retro_session.kb_profile)
+
+    def publish_shortcut(shortcut, action):
+        event_bus.publish(
+            "kb.shortcut",
+            {"session": retro_session, "shortcut": shortcut, "action": action},
+        )
+
+    def on_send_keys_event(evt):
+        if not isinstance(evt, dict):
+            return
+        target_session = evt.get("session")
+        if target_session is not None and target_session != retro_session:
+            return
+        raw_text = evt.get("text", "")
+        if not raw_text:
+            return
+        from retro_os.runtime import parse_and_chunk_keystrokes
+        actions = parse_and_chunk_keystrokes(raw_text)
+        for act, val in actions:
+            if act == "wait":
+                time.sleep(val)
+            elif act == "send":
+                if tcp_sock:
+                    try:
+                        tcp_sock.sendall(val)
+                    except Exception:
+                        pass
+                elif bridge_session and bridge_module:
+                    bs = bridge_session.get("bridge_serial") if isinstance(bridge_session, dict) else None
+                    if bs:
+                        try:
+                            bs.write(val)
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        ser.write(val)
+                    except Exception:
+                        pass
+
+    event_bus.subscribe("session.send_keys", on_send_keys_event)
+
+    def on_notify_event(evt):
+        if not isinstance(evt, dict):
+            return
+        sender = evt.get("sender") or "Host"
+        msg = evt.get("message", "")
+        # Avoid double-broadcast if sent from automated scheduler task
+        if msg and evt.get("session") is not None:
+            broadcast_to_terminals(f"\r\n*** [ALERT from {sender}] {msg} ***\r\n")
+
+    event_bus.subscribe("notify", on_notify_event)
+
+    def run_mail_menu():
+        while True:
+            try:
+                from retro_os.modules.mail import get_mail_manager
+                mgr = get_mail_manager()
+                cur_mode = mgr.get_mode() if mgr else "hub"
+            except Exception:
+                cur_mode = "hub"
+            mode_desc = "Hub Mailbox (Inter-Terminal)" if cur_mode == "hub" else "Internet Email (IMAP/SMTP)"
+
+            write(ser, f"\r\n--- ELECTRONIC MAIL [{mode_desc}] ---\r\n")
+            write(ser, "[1] View Inbox\r\n")
+            write(ser, "[2] Read Message\r\n")
+            write(ser, "[3] Compose & Send Message\r\n")
+            write(ser, "[4] Toggle Mail Mode (Hub Mail <-> Internet)\r\n")
+            write(ser, "[5] Configure Internet Mail (Host Desktop GUI)\r\n")
+            write(ser, "[6] Open Mailto Link on Host PC\r\n")
+            write(ser, "[7] Delete Message\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                write(ser, "\r\n")
+                try:
+                    res = retro_shell.execute("mail inbox")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"Mail error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nMessage ID or Number (Q to cancel): ")
+                mid = read_input_line(ser).strip()
+                if mid and mid.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"mail read {mid}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"Mail error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "3":
+                if cur_mode == "internet":
+                    write(ser, "\r\nTo (recipient email address, Q to cancel): ")
+                    to_addr = read_input_line(ser).strip()
+                    if not to_addr or to_addr.upper() == "Q":
+                        continue
+                else:
+                    write(ser, "\r\nRecipient or Machine (leave blank for All, Q to cancel): ")
+                    to_addr = read_input_line(ser).strip()
+                    if to_addr.upper() == "Q":
+                        continue
+                    if not to_addr:
+                        to_addr = "All"
+                write(ser, "Subject: ")
+                subj = read_input_line(ser).strip()
+                write(ser, "Body: ")
+                body = read_input_line(ser).strip()
+                try:
+                    res = retro_shell.execute(f"mail send {to_addr} {subj} | {body}")
+                    write(ser, f"\r\n{res}\r\n")
+                except Exception as exc:
+                    write(ser, f"Mail error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "4":
+                try:
+                    res = retro_shell.execute("mail mode")
+                    write(ser, f"\r\n{res}\r\n")
+                except Exception as exc:
+                    write(ser, f"Mail error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "5":
+                write(ser, "\r\nOpening configuration window on host desktop...\r\n")
+                try:
+                    res = retro_shell.execute("mail popup")
+                    write(ser, f"{res}\r\n")
+                except Exception as exc:
+                    write(ser, f"Mail error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "6":
+                write(ser, "\r\nEnter email address (Q to cancel): ")
+                addr = read_input_line(ser).strip()
+                if addr and addr.upper() != "Q":
+                    write(ser, "Subject (optional): ")
+                    subj = read_input_line(ser).strip()
+                    try:
+                        cmd = f"mail mailto {addr} {subj}" if subj else f"mail mailto {addr}"
+                        res = retro_shell.execute(cmd)
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Mail error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "7":
+                write(ser, "\r\nMessage ID or Number to delete (Q to cancel): ")
+                mid = read_input_line(ser).strip()
+                if mid and mid.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"mail delete {mid}")
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Mail error: {exc}\r\n")
+                    wait_for_key(ser)
+
+    def run_minesweeper_session():
+        write(ser, "\r\n--- MINESWEEPER ---\r\n")
+        res = retro_shell.execute("mines")
+        write(ser, res + "\r\n")
+        while True:
+            write(ser, "\r\nMines [r/f row col, new, q]> ")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                break
+            if cmd.upper() in ("NEW", "RESTART"):
+                res = retro_shell.execute("mines new")
+                write(ser, "\r\n" + res + "\r\n")
+            else:
+                clean_cmd = cmd
+                if clean_cmd.lower().startswith("minesweeper "):
+                    clean_cmd = clean_cmd[12:].strip()
+                elif clean_cmd.lower().startswith("mines "):
+                    clean_cmd = clean_cmd[6:].strip()
+                res = retro_shell.execute(f"mines {clean_cmd}")
+                write(ser, "\r\n" + res + "\r\n")
+                if "Game over" in res or "You win" in res:
+                    write(ser, "Press any key to continue...\r\n")
+                    wait_for_key(ser)
+                    break
+
+    def run_solitaire_session():
+        write(ser, "\r\n--- SOLITAIRE ---\r\n")
+        res = retro_shell.execute("solitaire")
+        write(ser, res + "\r\n")
+        while True:
+            write(ser, "\r\nSolitaire [cmd, new, q]> ")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                break
+            if cmd.upper() in ("NEW", "RESTART"):
+                res = retro_shell.execute("solitaire new")
+                write(ser, "\r\n" + res + "\r\n")
+            else:
+                clean_cmd = cmd
+                if clean_cmd.lower().startswith("solitaire "):
+                    clean_cmd = clean_cmd[10:].strip()
+                elif clean_cmd.lower().startswith("sol "):
+                    clean_cmd = clean_cmd[4:].strip()
+                res = retro_shell.execute(f"solitaire {clean_cmd}")
+                write(ser, "\r\n" + res + "\r\n")
+                if "You win" in res:
+                    write(ser, "Press any key to continue...\r\n")
+                    wait_for_key(ser)
+                    break
+
+    def run_games_menu():
+        while True:
+            write(ser, "\r\n--- RETRO GAMES ---\r\n")
+            write(ser, "[1] Minesweeper\r\n")
+            write(ser, "[2] Solitaire\r\n")
+            write(ser, "[3] WarGames (W.O.P.R.)\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                return None
+            elif choice in ("3", "W", "WAR", "WARGAMES", "WOPR"):
+                return "wargames"
+            elif choice in ("1", "M", "MINES", "MINESWEEPER"):
+                run_minesweeper_session()
+            elif choice in ("2", "S", "SOL", "SOLITAIRE"):
+                run_solitaire_session()
+
+    def run_help_menu():
+        from retro_os.help_data import get_help_topics, get_topic_content
+        topics = get_help_topics()
+        while True:
+            write(ser, "\r\n--- RETRO SERIAL HUB HELP & USER GUIDE ---\r\n")
+            for tid, title in topics:
+                write(ser, f"[{tid}] {title}\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Select topic (1-9, or Q): ")
+            choice = read_input_line(ser).strip()
+            if not choice or choice.upper() in ("Q", "QUIT", "EXIT", "0"):
+                break
+            content = get_topic_content(choice)
+            write(ser, "\r\n")
+            render_shell_result(content)
+            wait_for_key(ser)
+
+    def run_calc_session():
+        write(ser, "\r\n--- RETRO CALCULATOR ---\r\n")
+        write(ser, "Enter expressions (e.g. 15 * 24, sqrt(144), 0x1F + 10).\r\n")
+        write(ser, "Type 'q' or 'exit' to return to Main Menu.\r\n")
+        while True:
+            write(ser, "Calc> ")
+            expr = read_input_line(ser).strip()
+            if not expr or expr.upper() in ("Q", "QUIT", "EXIT"):
+                break
+            try:
+                res = retro_shell.execute(f"calc {expr}")
+                write(ser, f"Result: {res}\r\n")
+            except Exception as exc:
+                write(ser, f"Error: {exc}\r\n")
+
+    def run_keyboard_profiles_menu():
+        while True:
+            prof = getattr(retro_session, "kb_profile", "default")
+            write(ser, f"\r\n--- KEYBOARD BRIDGE PROFILES ---\r\n")
+            write(ser, f"Active Profile: {prof}\r\n")
+            write(ser, "[1] List Available Profiles\r\n")
+            write(ser, "[2] Switch Active Profile\r\n")
+            write(ser, "[3] Map Key to Shortcut\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                write(ser, "\r\n")
+                try:
+                    res = retro_shell.execute("kb profiles")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"KB profile error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nProfile name to activate (Q to cancel): ")
+                pname = read_input_line(ser).strip()
+                if pname and pname.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"kb profile {pname}")
+                        write(ser, f"{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"KB profile error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "3":
+                write(ser, "\r\nKey to map (e.g. CTRL+W, Q to cancel): ")
+                k = read_input_line(ser).strip()
+                if not k or k.upper() == "Q":
+                    continue
+                write(ser, "Host action/shortcut (e.g. WIN or WIN+R): ")
+                a = read_input_line(ser).strip()
+                if a:
+                    try:
+                        res = retro_shell.execute(f"kb map {k} {a}")
+                        write(ser, f"{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"KB map error: {exc}\r\n")
+                    wait_for_key(ser)
+
+    def run_document_viewer_menu():
+        while True:
+            write(ser, "\r\n--- DOCUMENT VIEWER ---\r\n")
+            write(ser, "Formats: PDF, DOCX, XLSX, CSV, TXT, MD, HTML, Web URLs\r\n")
+            write(ser, "[1] Browse Local Files (files/ and text/)\r\n")
+            write(ser, "[2] Enter Local File Path\r\n")
+            write(ser, "[3] Download and View from Internet (URL)\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                found_files = []
+                for p in [FILES_DIR, TEXT_DIR]:
+                    if p.exists() and p.is_dir():
+                        for item in sorted(p.iterdir()):
+                            if item.is_file() and not item.name.startswith("."):
+                                found_files.append(item)
+                if not found_files:
+                    write(ser, "\r\nNo files found in files/ or text/ directories.\r\n")
+                    wait_for_key(ser)
+                    continue
+                write(ser, "\r\nAvailable Files:\r\n")
+                for idx, fpath in enumerate(found_files, 1):
+                    write(ser, f"[{idx}] {fpath.name} ({fpath.parent.name}/)\r\n")
+                write(ser, "Select file number (Q to cancel): ")
+                f_idx = read_input_line(ser).strip()
+                if not f_idx or f_idx.upper() == "Q":
+                    continue
+                try:
+                    chosen = found_files[int(f_idx) - 1]
+                    write(ser, f"\r\nLoading {chosen.name}...\r\n")
+                    res = retro_shell.execute(f"view {chosen}")
+                    render_shell_result(res)
+                except (ValueError, IndexError):
+                    write(ser, "Invalid file selection.\r\n")
+                except Exception as exc:
+                    write(ser, f"Viewer error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nEnter local file path (Q to cancel): ")
+                fpath_input = read_input_line(ser).strip()
+                if fpath_input and fpath_input.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"view {fpath_input}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"Viewer error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "3":
+                write(ser, "\r\nEnter URL to download and view (e.g. https://wttr.in/Austin?format=3, Q to cancel):\r\nURL: ")
+                url_input = read_input_line(ser).strip()
+                if url_input and url_input.upper() != "Q":
+                    write(ser, f"\r\nDownloading and extracting {url_input}...\r\n")
+                    try:
+                        res = retro_shell.execute(f"view {url_input}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"Download/viewer error: {exc}\r\n")
+                    wait_for_key(ser)
+
+    def run_keyboard_bridge_session(target_app=None, app_args=None):
+        if target_app:
+            write(ser, f"\r\nLaunching {target_app} on host...\r\n")
+            try:
+                host_env.launch_app(target_app, app_args or [], interactive=False)
+            except Exception as exc:
+                write(ser, f"*** Failed to launch app: {exc} ***\r\n")
+                wait_for_key(ser)
+                return
+            time.sleep(0.5)
+
+        try:
+            keyboard_module = importlib.import_module("rsh_keyboard")
+            kb = keyboard_module.KeyboardBridge(
+                shortcut_mappings=shortcut_mappings,
+                on_shortcut=publish_shortcut,
+            )
+        except Exception as e:
+            write(ser, f"\r\n*** Keyboard Bridge unavailable: {e} ***\r\n")
+            wait_for_key(ser)
+            return
+
+        clear_screen(ser, use_ansi)
+        if target_app:
+            write(ser, f"--- KEYBOARD BRIDGE: {target_app} ---\r\n")
+        else:
+            write(ser, "--- KEYBOARD BRIDGE ACTIVE ---\r\n")
+        write(ser, "Characters typed on the retro terminal are sent to the active host window.\r\n")
+        write(ser, "Enter, Tab, Backspace and configured shortcuts (e.g. CTRL+W -> WIN) are supported.\r\n")
+        write(ser, "Press Ctrl+X (or Esc) to exit and return to Retro Serial Hub.\r\n")
+        write(ser, "----------------------------------------------------------------------\r\n\r\n")
+
+        while True:
+            if ser.in_waiting:
+                data = ser.read(ser.in_waiting)
+                if not data and isinstance(ser, SocketTerminal):
+                    break
+                kb._shortcut_mappings = shortcut_mappings
+                kb._on_shortcut = publish_shortcut
+                try:
+                    if kb.feed(data):
+                        break
+                except Exception as exc:
+                    write(ser, f"\r\n[Keyboard injection error: {exc}]\r\n")
+            time.sleep(0.01)
+
+        write(ser, "\r\n*** Keyboard Bridge closed. Returning to Retro Serial Hub. ***\r\n")
+        time.sleep(0.3)
+
+    def run_interactive_app(target_app, app_args=None, local_echo=True, crlf_mode=True, work_dir=None):
+        if host_env.is_gui_app(target_app):
+            write(ser, f"\r\nNotice: '{target_app}' is a GUI application (no text console stream).\r\n")
+            write(ser, "Starting Keyboard Bridge so you can type into the application window...\r\n")
+            time.sleep(0.5)
+            run_keyboard_bridge_session(target_app, app_args)
+            return
+
+        write(ser, f"\r\nStarting console terminal session for {target_app}...\r\n")
+        try:
+            proc = host_env.launch_app(target_app, app_args or [], interactive=True, cwd=work_dir)
+        except Exception as exc:
+            write(ser, f"*** Failed to launch console app: {exc} ***\r\n")
+            wait_for_key(ser)
+            return
+
+        if not hasattr(proc, "stdin") or proc.stdin is None:
+            run_keyboard_bridge_session(target_app, app_args)
+            return
+
+        clear_screen(ser, use_ansi)
+        write(ser, f"--- Host Terminal: {target_app} ---\r\n")
+        echo_str = "ON" if local_echo else "OFF"
+        crlf_str = "CRLF" if crlf_mode else "LF"
+        write(ser, f"Streaming I/O (Echo: {echo_str}, Translation: {crlf_str}).\r\n")
+        write(ser, "Type host commands. Press Ctrl+X to exit terminal.\r\n")
+        write(ser, "--------------------------------------------------------\r\n\r\n")
+
+        stop_event = threading.Event()
+
+        def stdout_reader():
+            last_was_cr = False
+            while not stop_event.is_set():
+                try:
+                    chunk = proc.stdout.read(256)
+                    if not chunk:
+                        break
+                    out = bytearray()
+                    for b in chunk:
+                        if b == 10:  # \n
+                            if not last_was_cr:
+                                out.extend(b"\r\n")
+                            else:
+                                out.append(10)
+                            last_was_cr = False
+                        elif b == 13:  # \r
+                            out.append(13)
+                            last_was_cr = True
+                        else:
+                            out.append(b)
+                            last_was_cr = False
+                    ser.write(bytes(out))
+                except Exception:
+                    break
+
+        reader_thread = threading.Thread(target=stdout_reader, daemon=True)
+        reader_thread.start()
+
+        try:
+            while True:
+                if proc.poll() is not None:
+                    time.sleep(0.2)
+                    break
+                if ser.in_waiting:
+                    data = ser.read(ser.in_waiting)
+                    if not data and isinstance(ser, SocketTerminal):
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
+                    if b"\x18" in data:  # Ctrl+X
+                        write(ser, "\r\n*** Console session terminated by user (Ctrl+X). ***\r\n")
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
+                    # Local echo for retro serial terminal
+                    if local_echo:
+                        for b in data:
+                            if b in (8, 127):
+                                ser.write(b"\x08 \x08")
+                            elif b in (10, 13):
+                                ser.write(b"\r\n")
+                            elif b >= 32:
+                                ser.write(bytes((b,)))
+                    if crlf_mode:
+                        normalized = (
+                            data.replace(b"\r\n", b"\n")
+                            .replace(b"\r", b"\n")
+                            .replace(b"\n", b"\r\n")
+                        )
+                    else:
+                        normalized = data.replace(b"\r", b"\n")
+                    try:
+                        proc.stdin.write(normalized)
+                        proc.stdin.flush()
+                    except Exception:
+                        break
+                time.sleep(0.01)
+        finally:
+            stop_event.set()
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+            reader_thread.join(timeout=1.0)
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    proc.wait(timeout=1.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            exit_code = proc.poll()
+            write(ser, f"\r\n[Process finished (exit code {exit_code})]\r\n")
+            wait_for_key(ser)
+
+    def launch_with_keyboard_bridge(target_app, app_args=None):
+        run_keyboard_bridge_session(target_app, app_args)
+
+    def prompt_and_launch_app(app_name):
+        is_gui = host_env.is_gui_app(app_name)
+        write(ser, f"\r\nSelect Launch Mode for '{app_name}':\r\n")
+        if is_gui:
+            write(ser, "  [1] Keyboard Bridge (launch & type into host window) [Default]\r\n")
+            write(ser, "  [2] Background (run on host without terminal interaction)\r\n")
+            write(ser, "Choice [1-2, default=1]: ")
+            l_mode = read_input_line(ser).strip()
+            if l_mode in ("2", "B", "BG", "BACKGROUND"):
+                try:
+                    res = retro_shell.execute(f"launch -b {app_name}")
+                    write(ser, f"\r\n{res}\r\n")
+                except Exception as exc:
+                    write(ser, f"Launch error: {exc}\r\n")
+                wait_for_key(ser)
+            else:
+                run_keyboard_bridge_session(app_name)
+        else:
+            write(ser, "  [1] Console Terminal (stream app output to terminal) [Default]\r\n")
+            write(ser, "  [2] Keyboard Bridge (launch & type into host window)\r\n")
+            write(ser, "  [3] Background (run on host without terminal interaction)\r\n")
+            write(ser, "Choice [1-3, default=1]: ")
+            l_mode = read_input_line(ser).strip()
+            if l_mode in ("2", "K", "KEYBOARD"):
+                run_keyboard_bridge_session(app_name)
+            elif l_mode in ("3", "B", "BG", "BACKGROUND"):
+                try:
+                    res = retro_shell.execute(f"launch -b {app_name}")
+                    write(ser, f"\r\n{res}\r\n")
+                except Exception as exc:
+                    write(ser, f"Launch error: {exc}\r\n")
+                wait_for_key(ser)
+            else:
+                run_interactive_app(app_name)
+
+    def run_apps_menu(launch_first=False):
+        if launch_first:
+            write(ser, "\r\nApplication name or path to launch (Q to cancel): ")
+            app_to_launch = read_input_line(ser).strip()
+            if app_to_launch and app_to_launch.upper() != "Q":
+                prompt_and_launch_app(app_to_launch)
+            return
+
+        while True:
+            write(ser, "\r\n--- HOST APPLICATIONS ---\r\n")
+            write(ser, "[1] List All Applications (A-Z Paginated)\r\n")
+            write(ser, "[2] Search Applications by Name\r\n")
+            write(ser, "[3] Launch Application\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                write(ser, "\r\n")
+                try:
+                    res = retro_shell.execute("apps")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"Apps error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nSearch term or letter (Q to cancel): ")
+                term = read_input_line(ser).strip()
+                if term and term.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"apps {term}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"Apps error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "3":
+                write(ser, "\r\nApplication name to launch (Q to cancel): ")
+                app_name = read_input_line(ser).strip()
+                if app_name and app_name.upper() != "Q":
+                    prompt_and_launch_app(app_name)
+
+    def run_host_terminal_menu(initial_cmd=None):
+        import platform
+        shell_info = host_env.get_host_shell()
+        target_shell = shell_info["default_shell"]
+        target_args = list(shell_info["default_args"])
+        target_name = shell_info["default_name"]
+        alt_shell = shell_info.get("alt_shell")
+        alt_args = list(shell_info.get("alt_args", []))
+        alt_name = shell_info.get("alt_name", "Alternative Shell")
+        system_name = shell_info.get("system", platform.system())
+
+        if initial_cmd:
+            parts = initial_cmd.strip().split()
+            if len(parts) > 1 and parts[0].upper() in ("CMD", "TERMINAL", "HOSTCMD", "HOSTSH", "PROMPT"):
+                sub = parts[1].lower()
+                if sub in ("powershell", "ps") and alt_shell:
+                    run_interactive_app(alt_shell, alt_args + parts[2:], local_echo=False)
+                    return
+                elif sub in ("cmd", "cmd.exe"):
+                    run_interactive_app("cmd.exe", ["/q"] + parts[2:], local_echo=True)
+                    return
+                else:
+                    run_interactive_app(parts[1], parts[2:], local_echo=True)
+                    return
+
+        local_echo = True
+        crlf_mode = True
+        current_workdir = None
+
+        while True:
+            clear_screen(ser, use_ansi)
+            write(ser, "========================================\r\n")
+            write(ser, "   Host Terminal / Command Prompt\r\n")
+            write(ser, "========================================\r\n")
+            write(ser, f"Host OS : {system_name} ({platform.machine()})\r\n")
+            write(ser, f"Target  : {target_name}\r\n")
+            echo_status = "ON" if local_echo else "OFF"
+            crlf_status = "CRLF" if crlf_mode else "LF"
+            write(ser, f"Settings: Echo: {echo_status} | Translation: {crlf_status}\r\n\r\n")
+
+            write(ser, "  [1] Quick Launch (Default Shell) [Enter]\r\n")
+            if alt_shell:
+                write(ser, f"  [2] Switch Shell ({alt_name})\r\n")
+            else:
+                write(ser, "  [2] Switch Shell\r\n")
+            write(ser, f"  [3] Toggle Local Echo ({echo_status})\r\n")
+            write(ser, f"  [4] Toggle Line Translation ({crlf_status})\r\n")
+            write(ser, "  [5] Custom Command / Shell\r\n")
+            write(ser, "  [Q] Return to Main Menu\r\n\r\n")
+            write(ser, "Choice [1-5, Enter=Quick Launch]: ")
+
+            choice = read_input_line(ser).strip()
+            if not choice or choice in ("1", "L", "LAUNCH", "QUICK", "START"):
+                run_interactive_app(
+                    target_shell,
+                    target_args,
+                    local_echo=local_echo,
+                    crlf_mode=crlf_mode,
+                    work_dir=current_workdir,
+                )
+                break
+            elif choice in ("2", "SWITCH", "SHELL"):
+                if alt_shell and target_shell == shell_info["default_shell"]:
+                    target_shell = alt_shell
+                    target_args = list(alt_args)
+                    target_name = alt_name
+                    if "powershell" in target_shell.lower():
+                        local_echo = False
+                else:
+                    target_shell = shell_info["default_shell"]
+                    target_args = list(shell_info["default_args"])
+                    target_name = shell_info["default_name"]
+                    local_echo = True
+                continue
+            elif choice in ("3", "ECHO"):
+                local_echo = not local_echo
+                continue
+            elif choice in ("4", "CRLF", "TRANSLATE"):
+                crlf_mode = not crlf_mode
+                continue
+            elif choice in ("5", "CUSTOM", "CMD"):
+                write(ser, "\r\nEnter custom command or shell (Q to cancel): ")
+                custom_cmd = read_input_line(ser).strip()
+                if custom_cmd and custom_cmd.upper() != "Q":
+                    c_parts = custom_cmd.split()
+                    c_app = c_parts[0]
+                    c_args = c_parts[1:]
+                    run_interactive_app(
+                        c_app,
+                        c_args,
+                        local_echo=local_echo,
+                        crlf_mode=crlf_mode,
+                        work_dir=current_workdir,
+                    )
+                    break
+                continue
+            elif choice.upper() in ("Q", "QUIT", "EXIT", "MENU", "0"):
+                break
+
+    def run_print_menu():
+        while True:
+            write(ser, "\r\n--- HOST PRINTING ---\r\n")
+            write(ser, "[1] Print Text Message\r\n")
+            write(ser, "[2] Print File from Disk\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                write(ser, "\r\nText to print on host printer (Q to cancel): ")
+                txt = read_input_line(ser).strip()
+                if txt and txt.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"print {txt}")
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Print error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nPath of file to print (Q to cancel): ")
+                fpath = read_input_line(ser).strip()
+                if fpath and fpath.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"print {fpath}")
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Print error: {exc}\r\n")
+                    wait_for_key(ser)
+
+    def run_ascii_viewer_menu():
+        while True:
+            write(ser, "\r\n--- ASCII IMAGE VIEWER ---\r\n")
+            write(ser, "Preview images as terminal ASCII art\r\n")
+            write(ser, "[1] Browse Files Directory for Images\r\n")
+            write(ser, "[2] Enter Image Path Directly\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                img_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+                images = []
+                if FILES_DIR.exists() and FILES_DIR.is_dir():
+                    for item in sorted(FILES_DIR.iterdir()):
+                        if item.is_file() and item.suffix.lower() in img_exts:
+                            images.append(item)
+                if not images:
+                    write(ser, "\r\nNo image files found in files/ directory.\r\n")
+                    wait_for_key(ser)
+                    continue
+                write(ser, "\r\nAvailable Images:\r\n")
+                for idx, img in enumerate(images, 1):
+                    write(ser, f"[{idx}] {img.name}\r\n")
+                write(ser, "Select image number (Q to cancel): ")
+                sel = read_input_line(ser).strip()
+                if not sel or sel.upper() == "Q":
+                    continue
+                try:
+                    chosen = images[int(sel) - 1]
+                    write(ser, f"\r\nRendering {chosen.name}...\r\n")
+                    res = retro_shell.execute(f"ascii {chosen}")
+                    render_shell_result(res)
+                except (ValueError, IndexError):
+                    write(ser, "Invalid image selection.\r\n")
+                except Exception as exc:
+                    write(ser, f"ASCII viewer error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nEnter image path (Q to cancel): ")
+                ipath = read_input_line(ser).strip()
+                if ipath and ipath.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"ascii {ipath}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"ASCII viewer error: {exc}\r\n")
+                    wait_for_key(ser)
+
+    def run_scheduler_menu():
+        sched = getattr(host_env, "scheduler", None)
+        while True:
+            write(ser, "\r\n--- TASK SCHEDULER ---\r\n")
+            write(ser, "[1] List Scheduled Tasks\r\n")
+            write(ser, "[2] Add New Scheduled Task\r\n")
+            write(ser, "[3] Run Task Now\r\n")
+            write(ser, "[4] Toggle Task (Enable/Disable)\r\n")
+            write(ser, "[5] Delete Scheduled Task\r\n")
+            write(ser, "[6] View Available Modules & Usage\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                write(ser, "\r\n")
+                try:
+                    res = retro_shell.execute("schedule list")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"Scheduler error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\n--- ADD SCHEDULED TASK ---\r\n")
+                write(ser, "Task Name (e.g. Morning News, Q to cancel): ")
+                t_name = read_input_line(ser).strip()
+                if not t_name or t_name.upper() == "Q":
+                    continue
+                write(ser, "Command or URL (e.g. 'view https://wttr.in/Austin?format=3', 'mail inbox', or 'help'): ")
+                t_cmd = read_input_line(ser).strip()
+                if not t_cmd or t_cmd.upper() == "Q":
+                    continue
+                if t_cmd.lower() in ("help", "modules"):
+                    res = retro_shell.execute("schedule modules")
+                    render_shell_result(res)
+                    write(ser, "Enter command to schedule: ")
+                    t_cmd = read_input_line(ser).strip()
+                    if not t_cmd or t_cmd.upper() == "Q":
+                        continue
+                if t_cmd.startswith(("http://", "https://")):
+                    t_cmd = f"view {t_cmd}"
+                write(ser, "Schedule Frequency:\r\n")
+                write(ser, "  [1] Interval (every X minutes)\r\n")
+                write(ser, "  [2] Hourly (every hour at specified minute)\r\n")
+                write(ser, "  [3] Daily (every day at specified time)\r\n")
+                write(ser, "  [4] Weekly (on day of week at specified time)\r\n")
+                write(ser, "  [5] Monthly (on day of month at specified time)\r\n")
+                write(ser, "Choice [1-5]: ")
+                freq_choice = read_input_line(ser).strip()
+                freq_map = {"1": "interval", "2": "hourly", "3": "daily", "4": "weekly", "5": "monthly"}
+                freq = freq_map.get(freq_choice, "interval")
+                interval_mins = 60
+                run_time = "08:00"
+                dow = None
+                dom = None
+                if freq == "interval":
+                    write(ser, "Every how many minutes? [default 15]: ")
+                    mins_str = read_input_line(ser).strip()
+                    try:
+                        interval_mins = int(mins_str) if mins_str else 15
+                    except ValueError:
+                        interval_mins = 15
+                elif freq == "hourly":
+                    write(ser, "At minute of each hour (0-59) [default 0]: ")
+                    min_str = read_input_line(ser).strip()
+                    run_time = f":{int(min_str):02d}" if min_str and min_str.isdigit() else ":00"
+                elif freq == "daily":
+                    write(ser, "Run time (HH:MM 24-hr) [default 08:00]: ")
+                    t_str = read_input_line(ser).strip()
+                    run_time = t_str if t_str else "08:00"
+                elif freq == "weekly":
+                    write(ser, "Day of week (mon/tue/wed/thu/fri/sat/sun) [default mon]: ")
+                    dow_str = read_input_line(ser).strip().lower()
+                    dow = dow_str if dow_str in ("mon", "tue", "wed", "thu", "fri", "sat", "sun") else "mon"
+                    write(ser, "Run time (HH:MM 24-hr) [default 08:00]: ")
+                    t_str = read_input_line(ser).strip()
+                    run_time = t_str if t_str else "08:00"
+                elif freq == "monthly":
+                    write(ser, "Day of month (1-31) [default 1]: ")
+                    dom_str = read_input_line(ser).strip()
+                    try:
+                        dom = int(dom_str) if dom_str else 1
+                    except ValueError:
+                        dom = 1
+                    write(ser, "Run time (HH:MM 24-hr) [default 08:00]: ")
+                    t_str = read_input_line(ser).strip()
+                    run_time = t_str if t_str else "08:00"
+
+                write(ser, "Broadcast output to all connected terminals? (Y/N) [default Y]: ")
+                bcast_input = read_input_line(ser).strip().upper()
+                bcast = False if bcast_input in ("N", "NO") else True
+
+                try:
+                    if sched:
+                        task = sched.add_task(
+                            name=t_name,
+                            command=t_cmd,
+                            frequency=freq,
+                            interval_minutes=interval_mins,
+                            run_time=run_time,
+                            day_of_week=dow,
+                            day_of_month=dom,
+                            show_output=True,
+                            broadcast=bcast,
+                        )
+                        write(ser, f"\r\nTask '{task['name']}' added! ID: {task['id']}, Next run: {task['next_run']}\r\n")
+                    else:
+                        write(ser, "\r\nScheduler service not initialized.\r\n")
+                except Exception as exc:
+                    write(ser, f"\r\nError adding task: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "3":
+                write(ser, "\r\nTask ID to run immediately (Q to cancel): ")
+                tid = read_input_line(ser).strip()
+                if tid and tid.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"schedule run {tid}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"Error running task: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "4":
+                write(ser, "\r\nTask ID to toggle enabled/disabled (Q to cancel): ")
+                tid = read_input_line(ser).strip()
+                if tid and tid.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"schedule toggle {tid}")
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Error toggling task: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "5":
+                write(ser, "\r\nTask ID to delete (Q to cancel): ")
+                tid = read_input_line(ser).strip()
+                if tid and tid.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"schedule delete {tid}")
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Error deleting task: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "6":
+                write(ser, "\r\n")
+                try:
+                    res = retro_shell.execute("schedule modules")
+                    render_shell_result(res)
+                    write(ser, "\r\nView detailed info for a module (name or Enter to skip): ")
+                    mod_name = read_input_line(ser).strip()
+                    if mod_name:
+                        info_res = retro_shell.execute(f"schedule info {mod_name}")
+                        render_shell_result(info_res)
+                except Exception as exc:
+                    write(ser, f"Error viewing modules: {exc}\r\n")
+                wait_for_key(ser)
+
+    def run_sysinfo_display(realtime=True, clear_on_update=True, interval=2.0, max_iterations=None):
+        cols = terminal_columns(ser)
+        if not realtime:
+            try:
+                res = retro_shell.execute("sysinfo")
+                render_shell_result(res)
+            except Exception as exc:
+                write(ser, f"System info error: {exc}\r\n")
+            write(ser, "\r\nPress any key to return...\r\n")
+            wait_for_key(ser)
+            return
+
+        clear_active = clear_on_update
+        rate = max(1.0, float(interval))
+        paused = False
+        iteration = 0
+
+        while True:
+            iteration += 1
+            if clear_active:
+                clear_screen(ser, use_ansi)
+            else:
+                write(ser, "\r\n")
+
+            try:
+                content = host_env.format_sysinfo(cols=cols)
+            except Exception:
+                try:
+                    content = retro_shell.execute("sysinfo")
+                except Exception as exc:
+                    content = f"System info error: {exc}"
+
+            for line in str(content).splitlines():
+                write(ser, line + "\r\n")
+
+            status_note = "PAUSED (Snapshot)" if paused else f"Live ({rate:g}s)"
+            clr_note = "ON" if clear_active else "OFF"
+            if cols == 40:
+                write(ser, f"[{status_note}] Clr:{clr_note}\r\n")
+                write(ser, "[Q]Exit [C]Clr [+/-]Rate [S]Pause\r\n")
+            else:
+                write(ser, f"\r\n--- [{status_note}]  Clear Screen: {clr_note}  |  Refresh Rate: {rate:g}s ---\r\n")
+                write(ser, "Commands: [Q] Return  |  [C] Toggle Clear Screen  |  [+/-] Rate  |  [S] Pause/Resume  |  [Space] Refresh\r\n")
+
+            if not hasattr(ser, "in_waiting") or (max_iterations is not None and iteration >= max_iterations):
+                break
+
+            start_t = time.time()
+            while True:
+                if ser.in_waiting:
+                    raw = ser.read(1)
+                    try:
+                        ch = raw.decode(errors="ignore").upper()
+                    except Exception:
+                        ch = ""
+                    if not ch and getattr(ser, "_eof", False):
+                        return
+                    if ch in ("Q", "\x1b", "\x03", "\x18"):
+                        return
+                    elif ch == "C":
+                        clear_active = not clear_active
+                        break
+                    elif ch in ("+", "="):
+                        rate = max(1.0, rate - 1.0)
+                        break
+                    elif ch in ("-", "_"):
+                        rate = min(10.0, rate + 1.0)
+                        break
+                    elif ch in ("S", "P"):
+                        paused = not paused
+                        break
+                    elif ch in (" ", "R"):
+                        break
+
+                if paused:
+                    time.sleep(0.05)
+                    continue
+
+                if time.time() - start_t >= rate:
+                    break
+                time.sleep(0.05)
+
+    def run_host_media_menu():
+        while True:
+            write(ser, "\r\n--- SYSTEM MONITOR & MEDIA ---\r\n")
+            write(ser, "[1] Host System Monitor (Real-Time Live)\r\n")
+            write(ser, "[2] View Host Clipboard\r\n")
+            write(ser, "[3] Set Host Clipboard\r\n")
+            write(ser, "[4] Media: Play / Pause\r\n")
+            write(ser, "[5] Media: Next Track\r\n")
+            write(ser, "[6] Media: Previous Track\r\n")
+            write(ser, "[7] Media: Stop\r\n")
+            write(ser, "[8] Volume Up\r\n")
+            write(ser, "[9] Volume Down\r\n")
+            write(ser, "[0] Volume Mute Toggle\r\n")
+            write(ser, "[S] System Status Snapshot (Single View)\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT"):
+                break
+            elif choice in ("1", "LIVE", "MONITOR"):
+                run_sysinfo_display(realtime=True)
+            elif choice in ("S", "SNAP", "SNAPSHOT", "STATUS"):
+                run_sysinfo_display(realtime=False)
+            elif choice == "2":
+                try:
+                    res = retro_shell.execute("clip")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"Clipboard error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "3":
+                write(ser, "\r\nEnter text to copy to host clipboard (Q to cancel): ")
+                clip_text = read_input_line(ser).strip()
+                if clip_text and clip_text.upper() != "Q":
+                    try:
+                        res = retro_shell.execute(f"clip {clip_text}")
+                        write(ser, f"\r\n{res}\r\n")
+                    except Exception as exc:
+                        write(ser, f"Clipboard error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "4":
+                res = retro_shell.execute("media play")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+            elif choice == "5":
+                res = retro_shell.execute("media next")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+            elif choice == "6":
+                res = retro_shell.execute("media prev")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+            elif choice == "7":
+                res = retro_shell.execute("media stop")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+            elif choice == "8":
+                res = retro_shell.execute("vol up")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+            elif choice == "9":
+                res = retro_shell.execute("vol down")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+            elif choice == "0":
+                res = retro_shell.execute("vol mute")
+                write(ser, f"\r\n{res}\r\n")
+                time.sleep(0.3)
+
+    def run_weather_news_menu():
+        while True:
+            write(ser, "\r\n--- LIVE WEATHER & NEWS ---\r\n")
+            write(ser, "[1] Morning / Desk Briefing\r\n")
+            write(ser, "[2] Live Weather Forecast (Auto Location)\r\n")
+            write(ser, "[3] Live Weather (Specify City / Zip)\r\n")
+            write(ser, "[4] NPR News Headlines\r\n")
+            write(ser, "[5] Hacker News Headlines\r\n")
+            write(ser, "[6] BBC News Headlines\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                write(ser, "\r\nGenerating briefing...\r\n")
+                try:
+                    res = retro_shell.execute("briefing")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"Briefing error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                write(ser, "\r\nFetching weather...\r\n")
+                try:
+                    res = retro_shell.execute("weather")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"Weather error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "3":
+                write(ser, "\r\nEnter city or zip code (e.g. Austin, 90210, London; Q to cancel): ")
+                loc = read_input_line(ser).strip()
+                if loc and loc.upper() != "Q":
+                    write(ser, f"\r\nFetching weather for {loc}...\r\n")
+                    try:
+                        res = retro_shell.execute(f"weather {loc}")
+                        render_shell_result(res)
+                    except Exception as exc:
+                        write(ser, f"Weather error: {exc}\r\n")
+                    wait_for_key(ser)
+            elif choice == "4":
+                write(ser, "\r\nFetching NPR headlines...\r\n")
+                try:
+                    res = retro_shell.execute("news npr 6")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"News error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "5":
+                write(ser, "\r\nFetching Hacker News headlines...\r\n")
+                try:
+                    res = retro_shell.execute("news hn 6")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"News error: {exc}\r\n")
+                wait_for_key(ser)
+            elif choice == "6":
+                write(ser, "\r\nFetching BBC headlines...\r\n")
+                try:
+                    res = retro_shell.execute("news bbc 6")
+                    render_shell_result(res)
+                except Exception as exc:
+                    write(ser, f"News error: {exc}\r\n")
+                wait_for_key(ser)
+
+    def run_terminal_settings_menu():
+        nonlocal use_ansi
+        while True:
+            cur_cols = terminal_columns(ser)
+            cur_caps = getattr(ser, "_rsh_caps_only", None) is True
+            cur_pace = getattr(ser, "_rsh_pace_delay", 0.0)
+            if not isinstance(cur_pace, (int, float)):
+                cur_pace = 0.0
+            cur_ansi = getattr(ser, "_rsh_translate_ansi", use_ansi)
+            if not isinstance(cur_ansi, bool):
+                cur_ansi = bool(use_ansi)
+            pace_ms = int(cur_pace * 1000)
+
+            write(ser, "\r\n--- TERMINAL HARDWARE SETTINGS ---\r\n")
+            write(ser, f"Screen Width:    {cur_cols} columns\r\n")
+            write(ser, f"Caps-Only Mode:  {'ON (Apple II / PET)' if cur_caps else 'OFF (Standard ASCII)'}\r\n")
+            write(ser, f"Serial Pacing:   {pace_ms} ms/char ({'None' if pace_ms == 0 else 'Throttled'})\r\n")
+            write(ser, f"ANSI Code Strip: {'ON (Filter color codes)' if cur_ansi else 'OFF (Pass-through)'}\r\n")
+            write(ser, "----------------------------------\r\n")
+            write(ser, "[1] Toggle Screen Width (40 / 80 cols)\r\n")
+            write(ser, "[2] Toggle Caps-Only Mode (Uppercase)\r\n")
+            write(ser, "[3] Adjust Serial Pacing Delay\r\n")
+            write(ser, "[4] Toggle ANSI Code Filter\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                break
+            elif choice == "1":
+                new_cols = 40 if cur_cols == 80 else 80
+                try:
+                    with COLUMN_PREFERENCES_LOCK:
+                        save_column_preference(
+                            COLUMN_SETTINGS_FILE,
+                            COLUMN_PREFERENCES,
+                            name,
+                            new_cols,
+                        )
+                except Exception:
+                    pass
+                if name in SERIAL_CONFIGS:
+                    SERIAL_CONFIGS[name]["columns"] = new_cols
+                ser._rsh_columns = new_cols
+                retro_session.cols = new_cols
+                if inbound_translator:
+                    inbound_translator.columns = new_cols
+                write(ser, f"\r\nTerminal width set to {new_cols} columns.\r\n")
+                wait_for_key(ser)
+            elif choice == "2":
+                new_caps = not cur_caps
+                ser._rsh_caps_only = new_caps
+                retro_session.caps_only = new_caps
+                write(ser, f"\r\nCaps-Only mode set to {'ON' if new_caps else 'OFF'}.\r\n")
+                wait_for_key(ser)
+            elif choice == "3":
+                write(ser, f"\r\nCurrent pacing: {pace_ms} ms/char.\r\n")
+                write(ser, "Pacing adds a slight delay after each character to prevent buffer overruns on vintage UARTs.\r\n")
+                write(ser, "Enter delay in milliseconds (0=off, 2=low, 5=medium, Q to cancel): ")
+                p_str = read_input_line(ser).strip()
+                if p_str and p_str.upper() != "Q":
+                    try:
+                        ms = max(0.0, float(p_str))
+                        sec = ms / 1000.0
+                        ser._rsh_pace_delay = sec
+                        retro_session.pace_delay = sec
+                        write(ser, f"Pacing set to {int(ms)} ms/character.\r\n")
+                    except ValueError:
+                        write(ser, "Invalid pacing delay.\r\n")
+                    wait_for_key(ser)
+            elif choice == "4":
+                new_ansi = not cur_ansi
+                try:
+                    with ANSI_TRANSLATION_PREFERENCES_LOCK:
+                        save_ansi_translation_preference(
+                            ANSI_TRANSLATION_SETTINGS_FILE,
+                            ANSI_TRANSLATION_PREFERENCES,
+                            name,
+                            new_ansi,
+                        )
+                except Exception:
+                    pass
+                if name in SERIAL_CONFIGS:
+                    SERIAL_CONFIGS[name]["translate_ansi"] = new_ansi
+                ser._rsh_translate_ansi = new_ansi
+                use_ansi = new_ansi
+                write(ser, f"\r\nANSI translation set to {'ON' if new_ansi else 'OFF'}.\r\n")
+                wait_for_key(ser)
+
+    def handle_shell_action(requested_module):
+        nonlocal mode, tcp_sock, use_ansi
+        if isinstance(requested_module, tuple):
+            act = requested_module[0]
+            if act in ("bbs_connect", "telnet_connect"):
+                connect_type, host, port = requested_module
+                write(ser, f"\r\nConnecting to {host}:{port}...\r\n")
+                tcp_sock = connect_host(host, int(port), ser)
+                if tcp_sock:
+                    mode = "BBS" if connect_type == "bbs_connect" else "TELNET"
+                    if inbound_translator:
+                        inbound_translator.reset()
+                    return True
+                else:
+                    write(ser, f"Failed to connect to {host}:{port}.\r\n")
+                    return False
+            elif act in ("app_interactive", "host_terminal"):
+                _, target, app_args = requested_module
+                echo_opt = False if "powershell" in str(target).lower() else True
+                run_interactive_app(target, app_args, local_echo=echo_opt)
+                return False
+            elif act == "app_keyboard":
+                _, target, app_args = requested_module
+                launch_with_keyboard_bridge(target, app_args)
+                return False
+            elif act == "file_transfer":
+                _, transfer_action, fname = requested_module
+                try:
+                    importlib.invalidate_caches()
+                    fm = importlib.import_module("rsh_files")
+                    importlib.reload(fm)
+                    fpath = pathlib.Path(fname)
+                    if not fpath.is_absolute():
+                        fpath = FILES_DIR / fname
+                    if transfer_action == "XMODEM_SEND":
+                        if not fpath.exists():
+                            write(ser, f"\r\nFile not found: {fpath}\r\n")
+                        else:
+                            fm.xmodem_send(ser, str(fpath), fpath.name)
+                    elif transfer_action == "YMODEM_SEND":
+                        if not fpath.exists():
+                            write(ser, f"\r\nFile not found: {fpath}\r\n")
+                        else:
+                            fm.ymodem_send(ser, str(fpath))
+                    elif transfer_action == "ASCII_SEND":
+                        if not fpath.exists():
+                            write(ser, f"\r\nFile not found: {fpath}\r\n")
+                        else:
+                            fm.ascii_send(ser, str(fpath))
+                    elif transfer_action == "XMODEM_RECV":
+                        dest = FILES_DIR / fpath.name
+                        fm.xmodem_receive(ser, str(dest))
+                except Exception as exc:
+                    write(ser, f"\r\nFile transfer error: {exc}\r\n")
+                return False
+            elif act == "set_caps":
+                ser._rsh_caps_only = requested_module[1]
+                retro_session.caps_only = requested_module[1]
+                return False
+            elif act == "set_pace":
+                ser._rsh_pace_delay = requested_module[1]
+                retro_session.pace_delay = requested_module[1]
+                return False
+            elif act == "set_columns":
+                new_cols = requested_module[1]
+                try:
+                    with COLUMN_PREFERENCES_LOCK:
+                        save_column_preference(
+                            COLUMN_SETTINGS_FILE,
+                            COLUMN_PREFERENCES,
+                            name,
+                            new_cols,
+                        )
+                except Exception:
+                    pass
+                if name in SERIAL_CONFIGS:
+                    SERIAL_CONFIGS[name]["columns"] = new_cols
+                ser._rsh_columns = new_cols
+                retro_session.cols = new_cols
+                if inbound_translator:
+                    inbound_translator.columns = new_cols
+                return False
+            elif act == "set_ansi":
+                new_ansi = requested_module[1]
+                try:
+                    with ANSI_TRANSLATION_PREFERENCES_LOCK:
+                        save_ansi_translation_preference(
+                            ANSI_TRANSLATION_SETTINGS_FILE,
+                            ANSI_TRANSLATION_PREFERENCES,
+                            name,
+                            new_ansi,
+                        )
+                except Exception:
+                    pass
+                if name in SERIAL_CONFIGS:
+                    SERIAL_CONFIGS[name]["translate_ansi"] = new_ansi
+                ser._rsh_translate_ansi = new_ansi
+                use_ansi = new_ansi
+                return False
+            elif act == "sysinfo_live":
+                run_sysinfo_display(realtime=True)
+                return False
+        return None
     # dynamic module handles (loaded on demand)
     wargames_module = None
     wargames_session = None
@@ -763,6 +2368,49 @@ def bridge_loop(
     files_module = None
     files_session = None
 
+    def run_add_shortcut_flow():
+        write(ser, "\r\n--- ADD SHORTCUT ---\r\n")
+        write(ser, "Enter a short label/name (Q to cancel): ")
+        name = read_input_line(ser).strip()
+        if not name or name.upper() in ("Q", "QUIT", "CANCEL"):
+            write(ser, "Cancelled.\r\n")
+            wait_for_key(ser)
+            return
+        write(ser, "\r\nEnter command and arguments.\r\n")
+        write(ser, "Examples: 'view https://news.ycombinator.com', 'calc 50*12',\r\n")
+        write(ser, "          'games mines 9 9 10', 'mail inbox', 'launch notepad.exe'\r\n")
+        write(ser, "Command: ")
+        cmd = read_input_line(ser).strip()
+        if not cmd or cmd.upper() in ("Q", "QUIT", "CANCEL"):
+            write(ser, "Cancelled.\r\n")
+            wait_for_key(ser)
+            return
+        sc = shortcuts_mgr.add_shortcut(name, cmd)
+        write(ser, f"\r\nShortcut '{sc['name']}' added!\r\n")
+        wait_for_key(ser)
+
+    def run_remove_shortcut_flow():
+        write(ser, "\r\n--- REMOVE SHORTCUT ---\r\n")
+        shortcuts = shortcuts_mgr.list_shortcuts()
+        if not shortcuts:
+            write(ser, "No shortcuts configured to remove.\r\n")
+            wait_for_key(ser)
+            return
+        for idx, sc in enumerate(shortcuts):
+            letter = chr(ord("A") + idx)
+            write(ser, f"[{letter}] {sc['name']}: {sc['command']}\r\n")
+        write(ser, "\r\nEnter letter or number to remove (Q to cancel): ")
+        choice = read_input_line(ser).strip().upper()
+        if not choice or choice in ("Q", "QUIT", "CANCEL"):
+            write(ser, "Cancelled.\r\n")
+            wait_for_key(ser)
+            return
+        if shortcuts_mgr.delete_shortcut(choice):
+            write(ser, "Shortcut removed.\r\n")
+        else:
+            write(ser, "Shortcut not found.\r\n")
+        wait_for_key(ser)
+
     def return_to_connection_menu():
         nonlocal mode, bbs_session
         try:
@@ -787,10 +2435,14 @@ def bridge_loop(
             data = ser.read(ser.in_waiting)
             if not data and isinstance(ser, SocketTerminal):
                 console_log(f"{name}: remote terminal disconnected.", level="yellow")
+                retro_session.state = "disconnected"
+                event_bus.publish("session.disconnected", retro_session)
                 return
 
             if mode == "KEYBOARD":
                 try:
+                    keyboard_bridge._shortcut_mappings = shortcut_mappings
+                    keyboard_bridge._on_shortcut = publish_shortcut
                     if keyboard_bridge.feed(data):
                         keyboard_bridge = None
                         mode = "MENU"
@@ -948,8 +2600,47 @@ def bridge_loop(
                             pass
                         return
                     mode = "MENU"
+                    retro_session.active_module = None
                     show_main_menu(ser, use_ansi)
                     continue
+
+                menu_action = None
+                if mode == "MENU" and upper in ("CLI", "SHELL", "OS"):
+                    mode = "CLI"
+                    retro_session.cols = terminal_columns(ser)
+                    retro_session.active_module = "shell"
+                    write(ser, "\r\nRetro Serial Hub CLI. Type 'help' for commands, 'exit' for menu.\r\ncli> ")
+                    continue
+
+                if mode in ("SHELL", "CLI"):
+                    write(ser, "\r\n")
+                    if upper in ("EXIT", "QUIT", "MENU"):
+                        mode = "MENU"
+                        retro_session.active_module = None
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    if line_str:
+                        try:
+                            response = retro_shell.execute(line_str)
+                        except Exception as exc:
+                            response = f"Command failed: {exc}"
+                        if response:
+                            render_shell_result(response)
+                    if shell_requested_module:
+                        requested_module = shell_requested_module.pop()
+                        handled = handle_shell_action(requested_module)
+                        if handled:
+                            continue
+                        elif handled is False:
+                            write(ser, "cli> ")
+                            continue
+                        else:
+                            retro_session.active_module = requested_module
+                            mode = "MENU"
+                            menu_action = requested_module
+                    else:
+                        write(ser, "cli> ")
+                        continue
 
                 if (
                     mode == "MENU"
@@ -957,6 +2648,8 @@ def bridge_loop(
                     and isinstance(ser, SocketTerminal)
                 ):
                     write(ser, "\r\nDisconnecting from Retro Serial Hub.\r\n")
+                    retro_session.state = "disconnected"
+                    event_bus.publish("session.disconnected", retro_session)
                     return
 
                 if mode == "WELCOME_BANNER":
@@ -984,8 +2677,127 @@ def bridge_loop(
                     continue
 
                 if mode == "MENU":
-                    # Echo full command line
-                    menu_action = MAIN_MENU_ACTIONS.get(upper)
+                    if menu_action is None:
+                        if not line_str:
+                            show_main_menu(ser, use_ansi)
+                            continue
+
+                        if getattr(ser, "_rsh_menu_style", "flyout") != "legacy":
+                            flyout = getattr(ser, "_rsh_flyout_menu", None)
+                            if flyout is None:
+                                from retro_os.menu import OSFlyoutMenu
+                                ser._rsh_flyout_menu = OSFlyoutMenu(shortcuts_manager=shortcuts_mgr)
+                                flyout = ser._rsh_flyout_menu
+
+                            # Check section switch (0-5 or section name)
+                            if flyout.select_section(upper):
+                                show_main_menu(ser, use_ansi, auto_flyout=False)
+                                continue
+
+                            # Check item key (A-F, +) in active section
+                            menu_action = flyout.get_action_for_key(
+                                upper, is_remote=isinstance(ser, SocketTerminal)
+                            )
+
+                        # Direct command strings
+                        if menu_action is None:
+                            if upper in ("CLI", "SHELL", "OS"):
+                                menu_action = "cli"
+                            elif upper in ("SHORTCUT", "SHORTCUTS") or upper.startswith("SHORTCUT ") or upper.startswith("SHORTCUTS "):
+                                if upper in ("SHORTCUT", "SHORTCUTS"):
+                                    flyout = getattr(ser, "_rsh_flyout_menu", None)
+                                    if flyout:
+                                        flyout.select_section("0")
+                                        show_main_menu(ser, use_ansi, auto_flyout=False)
+                                        continue
+                                else:
+                                    try:
+                                        response = retro_shell.execute(line_str)
+                                        render_shell_result(response)
+                                    except Exception as exc:
+                                        write(ser, f"Shortcut error: {exc}\r\n")
+                                    wait_for_key(ser)
+                                    show_main_menu(ser, use_ansi)
+                                    continue
+                            elif upper in ("+", "ADD"):
+                                menu_action = "shortcut_add"
+                            elif upper in ("-", "DEL", "DELETE"):
+                                menu_action = "shortcut_del"
+                            elif upper in ("BBS", "BOARDS"):
+                                menu_action = "bbs"
+                            elif upper in ("BROWSER", "WEB"):
+                                menu_action = "browser"
+                            elif upper in ("TELNET",):
+                                menu_action = "telnet"
+                            elif upper in ("NOTES", "NOTE"):
+                                menu_action = "notes"
+                            elif upper in ("CALC", "CALCULATOR") or upper.startswith("CALC "):
+                                menu_action = "calc"
+                            elif upper in ("MAIL", "EMAIL") or upper.startswith("MAIL "):
+                                menu_action = "mail"
+                            elif upper in ("APPS", "APPLICATIONS") or upper.startswith("APPS "):
+                                menu_action = "apps"
+                            elif upper == "LAUNCH" or upper.startswith("LAUNCH "):
+                                menu_action = "launch"
+                            elif upper in ("TERMINAL", "CMD", "PROMPT", "HOSTCMD", "HOSTSH") or upper.startswith("TERMINAL ") or upper.startswith("CMD ") or upper.startswith("HOSTCMD ") or upper.startswith("HOSTSH "):
+                                menu_action = "host_terminal"
+                            elif upper in ("KEYBOARD",):
+                                menu_action = "keyboard"
+                            elif upper in ("KB",) or upper.startswith("KB "):
+                                menu_action = "kb"
+                            elif upper in ("COMBRIDGE", "BRIDGE", "COM"):
+                                menu_action = "com_bridge"
+                            elif upper in ("FILES", "FILE"):
+                                menu_action = "files"
+                            elif upper in ("TEXT", "TEXTLIB", "LIBRARY"):
+                                menu_action = "text"
+                            elif upper == "VIEW" or upper.startswith("VIEW "):
+                                menu_action = "view"
+                            elif upper in ("FTP",):
+                                menu_action = "ftp"
+                            elif upper in ("AI", "CHAT"):
+                                menu_action = "ai"
+                            elif upper in ("MINES", "MINESWEEPER") or upper.startswith("MINES "):
+                                menu_action = "mines"
+                            elif upper in ("SOLITAIRE", "SOL") or upper.startswith("SOLITAIRE ") or upper.startswith("SOL "):
+                                menu_action = "solitaire"
+                            elif upper in ("GAMES", "GAME"):
+                                menu_action = "games"
+                            elif upper in ("HELP", "MAN", "GUIDE", "?") or upper.startswith("HELP "):
+                                menu_action = "help_menu"
+                            elif upper in ("MAILTO",) or upper.startswith("MAILTO "):
+                                menu_action = "mailto"
+                            elif upper in ("ASCII", "ASCII_VIEWER"):
+                                menu_action = "ascii_viewer"
+                            elif upper in ("PRINT", "PRINTER"):
+                                menu_action = "print"
+                            elif upper in ("SYS", "SYSINFO", "TOP") or upper.startswith("SYSINFO "):
+                                menu_action = "sysinfo"
+                            elif upper in ("CLIP", "PASTE", "COPY", "MEDIA", "VOL", "VOLUME") or upper.startswith("CLIP ") or upper.startswith("COPY ") or upper.startswith("MEDIA ") or upper.startswith("VOL "):
+                                menu_action = "host_media"
+                            elif upper in ("WEATHER", "NEWS", "BRIEFING") or upper.startswith("WEATHER ") or upper.startswith("NEWS ") or upper.startswith("BRIEFING "):
+                                menu_action = "weather_news"
+                            elif upper in ("TERMINAL_SETTINGS", "SETTINGS", "CAPS", "PACE") or upper.startswith("CAPS ") or upper.startswith("PACE "):
+                                menu_action = "terminal_settings"
+                            elif upper.startswith("XSEND ") or upper.startswith("YSEND ") or upper.startswith("ASEND ") or upper.startswith("XRECV ") or upper == "XRECV":
+                                menu_action = "direct_transfer"
+                            elif upper in ("SCHEDULE", "SCHEDULER", "TASKS", "CRON") or upper.startswith("SCHEDULE ") or upper.startswith("SCHEDULER "):
+                                menu_action = "scheduler"
+                            elif upper in ("FETCH", "DOWNLOAD") or upper.startswith("FETCH ") or upper.startswith("DOWNLOAD "):
+                                menu_action = "fetch"
+                            elif upper in ("WARGAMES",):
+                                menu_action = "wargames"
+                            elif upper in ("COLUMNS", "WIDTH"):
+                                menu_action = "columns"
+                            elif upper in ("ANSI",):
+                                menu_action = "translate_ansi"
+                            elif upper in ("BANNER",):
+                                menu_action = "welcome_banner"
+                            elif upper in ("DISCONNECT", "QUIT", "15") and isinstance(ser, SocketTerminal):
+                                menu_action = "disconnect"
+                            else:
+                                menu_action = MAIN_MENU_ACTIONS.get(upper)
+
                     if menu_action == "columns":
                         new_columns = 40 if terminal_columns(ser) == 80 else 80
                         try:
@@ -998,6 +2810,7 @@ def bridge_loop(
                                 )
                             SERIAL_CONFIGS[name]["columns"] = new_columns
                             ser._rsh_columns = new_columns
+                            retro_session.cols = new_columns
                             if inbound_translator:
                                 inbound_translator.columns = new_columns
                         except (OSError, ValueError) as exc:
@@ -1110,7 +2923,7 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "FILES"
-                    elif menu_action == "text":
+                    elif menu_action in ("text", "textlib"):
                         # Load text module on demand so it can be edited without restarting the hub
                         try:
                             importlib.invalidate_caches()
@@ -1152,37 +2965,9 @@ def bridge_loop(
                             continue
                         mode = "NOTES"
                     elif menu_action == "keyboard":
-                        try:
-                            keyboard_module = importlib.import_module(
-                                'rsh_keyboard'
-                            )
-                            keyboard_bridge = keyboard_module.KeyboardBridge()
-                        except Exception as e:
-                            keyboard_bridge = None
-                            write(
-                                ser,
-                                f"\r\n*** Keyboard Bridge unavailable: {e} ***\r\n",
-                            )
-                            show_main_menu(ser, use_ansi)
-                            continue
-                        clear_screen(ser, use_ansi)
-                        write(ser, "\r\nKeyboard Bridge is active.\r\n")
-                        write(
-                            ser,
-                            "Characters are sent to the currently focused "
-                            "host application.\r\n",
-                        )
-                        write(
-                            ser,
-                            "Enter, Tab, and Backspace are supported. "
-                            "Press Ctrl+X to exit.\r\n",
-                        )
-                        write(
-                            ser,
-                            "Keep this terminal focused only when you want "
-                            "the Apple II to type there.\r\n",
-                        )
-                        mode = "KEYBOARD"
+                        run_keyboard_bridge_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
                     elif menu_action == "welcome_banner":
                         clear_screen(ser, use_ansi)
                         write(ser, "\r\nWelcome Banner\r\n")
@@ -1251,6 +3036,328 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "AI"
+                    elif menu_action == "cli":
+                        mode = "CLI"
+                        retro_session.cols = terminal_columns(ser)
+                        retro_session.active_module = "shell"
+                        write(ser, "\r\nRetro Serial Hub CLI. Type 'help' for commands, 'exit' for menu.\r\ncli> ")
+                        continue
+                    elif menu_action in ("disconnect", "exit_hub"):
+                        write(ser, "\r\nDisconnecting from Retro Serial Hub.\r\n")
+                        retro_session.state = "disconnected"
+                        event_bus.publish("session.disconnected", retro_session)
+                        return
+                    elif menu_action == "apps":
+                        if line_str and line_str.upper().startswith("APPS ") and len(line_str) > 5:
+                            write(ser, "\r\n")
+                            try:
+                                response = retro_shell.execute(line_str)
+                                render_shell_result(response)
+                            except Exception as exc:
+                                write(ser, f"Apps error: {exc}\r\n")
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_apps_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "launch":
+                        if line_str and line_str.upper().startswith("LAUNCH ") and len(line_str) > 7:
+                            app_name = line_str[7:].strip()
+                            try:
+                                response = retro_shell.execute(f"launch {app_name}")
+                                write(ser, "\r\n" + response + "\r\n")
+                            except Exception as exc:
+                                write(ser, f"Launch error: {exc}\r\n")
+                            if shell_requested_module:
+                                requested_module = shell_requested_module.pop()
+                                if isinstance(requested_module, tuple) and requested_module[0] in ("app_interactive", "host_terminal"):
+                                    _, target, app_args = requested_module
+                                    echo_opt = False if "powershell" in str(target).lower() else True
+                                    run_interactive_app(target, app_args, local_echo=echo_opt)
+                                    show_main_menu(ser, use_ansi)
+                                    continue
+                                elif isinstance(requested_module, tuple) and requested_module[0] == "app_keyboard":
+                                    _, target, app_args = requested_module
+                                    launch_with_keyboard_bridge(target, app_args)
+                                    show_main_menu(ser, use_ansi)
+                                    continue
+                            wait_for_key(ser)
+                        else:
+                            run_apps_menu(launch_first=True)
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "host_terminal":
+                        run_host_terminal_menu(line_str)
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "view":
+                        if line_str and line_str.upper().startswith("VIEW ") and len(line_str) > 5:
+                            file_name = line_str[5:].strip()
+                            try:
+                                response = retro_shell.execute(f"view {file_name}")
+                                render_shell_result(response)
+                            except Exception as exc:
+                                write(ser, f"Viewer error: {exc}\r\n")
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_document_viewer_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "calc":
+                        if line_str and line_str.upper().startswith("CALC ") and len(line_str) > 5:
+                            expr = line_str[5:].strip()
+                            try:
+                                response = retro_shell.execute(f"calc {expr}")
+                                write(ser, f"\r\nResult: {response}\r\n")
+                            except Exception as exc:
+                                write(ser, f"Calc error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_calc_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "mail":
+                        if line_str and line_str.upper().startswith("MAIL ") and len(line_str) > 5:
+                            try:
+                                response = retro_shell.execute(line_str)
+                                render_shell_result(response)
+                            except Exception as exc:
+                                write(ser, f"Mail error: {exc}\r\n")
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_mail_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "games":
+                        sub = run_games_menu()
+                        if sub == "wargames":
+                            try:
+                                importlib.invalidate_caches()
+                                wg = importlib.import_module('rsh_wargames')
+                                importlib.reload(wg)
+                                wargames_module = wg
+                                try:
+                                    wargames_session = wg.create_session(ser, use_ansi)
+                                except AttributeError:
+                                    wargames_session = wg.enter(ser, use_ansi)
+                            except Exception as e:
+                                write(ser, f"\r\n*** Wargames module load error: {e} ***\r\n")
+                                wait_for_key(ser)
+                                show_main_menu(ser, use_ansi)
+                                continue
+                            mode = "WARGAMES"
+                            continue
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "mines":
+                        if line_str and line_str.upper().startswith("MINES ") and len(line_str) > 6:
+                            sub = line_str[6:].strip()
+                            res = retro_shell.execute(f"mines {sub}")
+                            render_shell_result(res)
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_minesweeper_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "solitaire":
+                        if line_str and (line_str.upper().startswith("SOLITAIRE ") or line_str.upper().startswith("SOL ")):
+                            sub = line_str.split(" ", 1)[1]
+                            res = retro_shell.execute(f"solitaire {sub}")
+                            render_shell_result(res)
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_solitaire_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "help_menu":
+                        if line_str and line_str.upper().startswith("HELP ") and len(line_str) > 5:
+                            from retro_os.help_data import get_topic_content
+                            topic = line_str[5:].strip()
+                            content = get_topic_content(topic)
+                            write(ser, "\r\n")
+                            render_shell_result(content)
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_help_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "mailto":
+                        if line_str and line_str.upper().startswith("MAILTO "):
+                            parts = line_str.split(" ", 2)
+                            addr = parts[1]
+                            subj = parts[2] if len(parts) > 2 else ""
+                            cmd = f"mail mailto {addr} {subj}" if subj else f"mail mailto {addr}"
+                        else:
+                            write(ser, "\r\nEnter email address for host mailto (Q to cancel): ")
+                            addr = read_input_line(ser).strip()
+                            if not addr or addr.upper() == "Q":
+                                show_main_menu(ser, use_ansi)
+                                continue
+                            write(ser, "Subject (optional): ")
+                            subj = read_input_line(ser).strip()
+                            cmd = f"mail mailto {addr} {subj}" if subj else f"mail mailto {addr}"
+                        try:
+                            res = retro_shell.execute(cmd)
+                            write(ser, f"\r\n{res}\r\n")
+                        except Exception as exc:
+                            write(ser, f"Mailto error: {exc}\r\n")
+                        wait_for_key(ser)
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "ascii_viewer":
+                        if line_str and line_str.upper().startswith("ASCII ") and len(line_str) > 6:
+                            img_path = line_str[6:].strip()
+                            try:
+                                response = retro_shell.execute(f"ascii {img_path}")
+                                render_shell_result(response)
+                            except Exception as exc:
+                                write(ser, f"ASCII viewer error: {exc}\r\n")
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_ascii_viewer_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "print":
+                        if line_str and line_str.upper().startswith("PRINT ") and len(line_str) > 6:
+                            p_text = line_str[6:].strip()
+                            try:
+                                response = retro_shell.execute(f"print {p_text}")
+                                write(ser, "\r\n" + response + "\r\n")
+                            except Exception as exc:
+                                write(ser, f"Print error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_print_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "kb":
+                        if line_str and line_str.upper().startswith("KB ") and len(line_str) > 3:
+                            try:
+                                response = retro_shell.execute(line_str)
+                                render_shell_result(response)
+                            except Exception as exc:
+                                write(ser, f"KB profile error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_keyboard_profiles_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "scheduler":
+                        if line_str and (line_str.upper().startswith("SCHEDULE ") or line_str.upper().startswith("SCHEDULER ")):
+                            cmd = "schedule " + line_str.split(" ", 1)[1]
+                            try:
+                                response = retro_shell.execute(cmd)
+                                render_shell_result(response)
+                            except Exception as exc:
+                                write(ser, f"Scheduler error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_scheduler_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "fetch":
+                        if line_str and (line_str.upper().startswith("FETCH ") or line_str.upper().startswith("DOWNLOAD ")):
+                            try:
+                                response = retro_shell.execute(line_str)
+                                write(ser, f"\r\n{response}\r\n")
+                            except Exception as exc:
+                                write(ser, f"Fetch error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_document_viewer_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "shortcut_add":
+                        run_add_shortcut_flow()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "shortcut_del":
+                        run_remove_shortcut_flow()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif isinstance(menu_action, str) and menu_action.startswith("shortcut_run:"):
+                        cmd_to_run = menu_action.split(":", 1)[1].strip()
+                        write(ser, f"\r\nExecuting: {cmd_to_run}\r\n")
+                        try:
+                            response = retro_shell.execute(cmd_to_run)
+                        except Exception as exc:
+                            response = f"Command failed: {exc}"
+                        if response:
+                            render_shell_result(response)
+                        if shell_requested_module:
+                            requested_module = shell_requested_module.pop()
+                            handled = handle_shell_action(requested_module)
+                            if handled:
+                                continue
+                            elif handled is None:
+                                retro_session.active_module = requested_module
+                                mode = "MENU"
+                                menu_action = requested_module
+                                continue
+                        else:
+                            write(ser, "\r\n")
+                            wait_for_key(ser)
+                            show_main_menu(ser, use_ansi)
+                            continue
+                    elif menu_action in ("host_media", "sysinfo"):
+                        if menu_action == "sysinfo" or (line_str and any(line_str.upper().split()[0] in ("SYS", "SYSINFO", "TOP") for _ in [0] if line_str.strip())):
+                            is_snapshot = bool(line_str and any(flag in line_str.upper().split() for flag in ("SNAPSHOT", "SNAP", "STATIC", "-S")))
+                            run_sysinfo_display(realtime=not is_snapshot)
+                        elif line_str and any(line_str.upper().startswith(p) for p in ("CLIP ", "COPY ", "MEDIA ", "VOL ")):
+                            try:
+                                res = retro_shell.execute(line_str)
+                                render_shell_result(res)
+                            except Exception as exc:
+                                write(ser, f"Error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_host_media_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "weather_news":
+                        if line_str and any(line_str.upper().startswith(p) for p in ("WEATHER ", "NEWS ", "BRIEFING ")):
+                            try:
+                                res = retro_shell.execute(line_str)
+                                render_shell_result(res)
+                            except Exception as exc:
+                                write(ser, f"Error: {exc}\r\n")
+                            wait_for_key(ser)
+                        else:
+                            run_weather_news_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "terminal_settings":
+                        if line_str and (line_str.upper().startswith("CAPS ") or line_str.upper().startswith("PACE ")):
+                            try:
+                                res = retro_shell.execute(line_str)
+                                render_shell_result(res)
+                            except Exception as exc:
+                                write(ser, f"Settings error: {exc}\r\n")
+                            if shell_requested_module:
+                                handle_shell_action(shell_requested_module.pop())
+                            wait_for_key(ser)
+                        else:
+                            run_terminal_settings_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "direct_transfer":
+                        try:
+                            res = retro_shell.execute(line_str)
+                            write(ser, f"\r\n{res}\r\n")
+                        except Exception as exc:
+                            write(ser, f"Transfer error: {exc}\r\n")
+                        if shell_requested_module:
+                            handle_shell_action(shell_requested_module.pop())
+                        wait_for_key(ser)
+                        show_main_menu(ser, use_ansi)
+                        continue
                     else:
                         write(ser, "Invalid command\r\n")
                         write(ser, "Command: ")

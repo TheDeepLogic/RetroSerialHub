@@ -47,6 +47,7 @@ class ScreenClearingTests(unittest.TestCase):
         import RETRO_SERIAL_HUB
 
         ser = FakeSerial()
+        ser._rsh_menu_style = "legacy"
         RETRO_SERIAL_HUB.show_main_menu(ser, use_ansi=False)
         output = b"".join(ser.writes)
 
@@ -73,7 +74,8 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"13] Switch to 40 Columns", output)
         self.assertIn(b"14] Welcome Banner", output)
         self.assertNotIn(b"15] Disconnect", output)
-        version_banner = b"v1.5, copyright (c) 2026"
+        from rsh_console import VERSION
+        version_banner = f"v{VERSION}, copyright (c) 2026".encode("ascii")
         self.assertIn(version_banner, output)
         self.assertIn(
             version_banner + b"\r\n\r\n[ Accessories ]",
@@ -128,6 +130,7 @@ class ScreenClearingTests(unittest.TestCase):
 
             client, peer = socket.socketpair()
             terminal = SocketTerminal(client)
+            terminal._rsh_menu_style = "legacy"
             peer.sendall(
                 b"4\rC\rMy Note\rfirst line\rsecond line\rEND\r"
                 b"C\rCancelled Note\rQ\rQ\r9\rQ\r15\r"
@@ -175,6 +178,7 @@ class ScreenClearingTests(unittest.TestCase):
 
             client, peer = socket.socketpair()
             terminal = SocketTerminal(client)
+            terminal._rsh_menu_style = "legacy"
             peer.sendall(b"4\r1\rQ\r9\rQ\r15\r")
             read_lines = []
 
@@ -211,9 +215,9 @@ class ScreenClearingTests(unittest.TestCase):
 
         client, peer = socket.socketpair()
         try:
-            RETRO_SERIAL_HUB.show_main_menu(
-                RETRO_SERIAL_HUB.SocketTerminal(client), use_ansi=False
-            )
+            term = RETRO_SERIAL_HUB.SocketTerminal(client)
+            term._rsh_menu_style = "legacy"
+            RETRO_SERIAL_HUB.show_main_menu(term, use_ansi=False)
             output = peer.recv(4096)
         finally:
             client.close()
@@ -269,6 +273,7 @@ class ScreenClearingTests(unittest.TestCase):
         from rsh_console import VERSION
 
         ser = FakeSerial()
+        ser._rsh_menu_style = "legacy"
         configure_screen_clearing(ser, columns=40)
         RETRO_SERIAL_HUB.show_main_menu(ser, use_ansi=False)
         output = b"".join(ser.writes)
@@ -339,6 +344,7 @@ class ScreenClearingTests(unittest.TestCase):
         import RETRO_SERIAL_HUB
 
         serial = FakeSerial()
+        serial._rsh_menu_style = "legacy"
         configure_screen_clearing(serial, columns=80)
         serial._rsh_translate_ansi = True
         RETRO_SERIAL_HUB.show_main_menu(serial, use_ansi=False)
@@ -354,6 +360,7 @@ class ScreenClearingTests(unittest.TestCase):
             settings_path = Path(temp_directory) / "ansi.json"
             client, peer = socket.socketpair()
             terminal = SocketTerminal(client)
+            terminal._rsh_menu_style = "legacy"
             peer.sendall(b"12\r15\r")
             with (
                 patch.object(
@@ -425,9 +432,9 @@ class ScreenClearingTests(unittest.TestCase):
 
         client, peer = socket.socketpair()
         try:
-            RETRO_SERIAL_HUB.show_main_menu(
-                RETRO_SERIAL_HUB.SocketTerminal(client), use_ansi=False
-            )
+            term = RETRO_SERIAL_HUB.SocketTerminal(client)
+            term._rsh_menu_style = "legacy"
+            RETRO_SERIAL_HUB.show_main_menu(term, use_ansi=False)
             output = peer.recv(4096)
         finally:
             client.close()
@@ -492,6 +499,55 @@ class ScreenClearingTests(unittest.TestCase):
         ser.writes.clear()
         rsh_wargames.handle_input(session, "term", ser, use_ansi=False)
         self.assertEqual(ser.writes[0], b"\x1bv")
+
+    def test_default_main_menu_is_accordion_flyout(self):
+        import RETRO_SERIAL_HUB
+
+        ser = FakeSerial()
+        RETRO_SERIAL_HUB.show_main_menu(ser, use_ansi=False)
+        output = b"".join(ser.writes)
+        self.assertIn(b"[1] > COMMUNICATIONS <", output)
+        self.assertIn(b"[2]   HOST CONNECTIVITY", output)
+        self.assertIn(b"[3]   FILES & MEDIA", output)
+        self.assertIn(b"[4]   GAMES", output)
+        self.assertIn(b"[5]   ACCESSORIES", output)
+        self.assertIn(b"[6]   SYSTEM", output)
+        self.assertIn(b"A] Bulletin Boards", output)
+        self.assertIn(b"B] Telnet Terminal", output)
+        self.assertIn(b"C] Web Browser", output)
+        self.assertIn(b"Select [1-6] for section, [A-G] for item", output)
+
+    def test_accordion_menu_section_expansion(self):
+        import RETRO_SERIAL_HUB
+        from retro_os.menu import OSFlyoutMenu
+
+        ser = FakeSerial()
+        ser._rsh_flyout_menu = OSFlyoutMenu(1)  # Section 2: Host Connectivity
+        RETRO_SERIAL_HUB.show_main_menu(ser, use_ansi=False)
+        output = b"".join(ser.writes)
+        self.assertIn(b"[1]   COMMUNICATIONS", output)
+        self.assertIn(b"[2] > HOST CONNECTIVITY <", output)
+        self.assertIn(b"A] Host Applications", output)
+        self.assertIn(b"B] Launch Host App", output)
+        self.assertIn(b"C] Keyboard Bridge", output)
+
+    def test_accordion_menu_remote_disconnect_in_system(self):
+        import socket
+        import RETRO_SERIAL_HUB
+        from retro_os.menu import OSFlyoutMenu
+
+        client, peer = socket.socketpair()
+        try:
+            term = RETRO_SERIAL_HUB.SocketTerminal(client)
+            term._rsh_flyout_menu = OSFlyoutMenu(5)  # Section 6: System
+            RETRO_SERIAL_HUB.show_main_menu(term, use_ansi=False)
+            output = peer.recv(4096)
+        finally:
+            client.close()
+            peer.close()
+
+        self.assertIn(b"[6] > SYSTEM <", output)
+        self.assertIn(b"G] Disconnect", output)
 
 
 if __name__ == "__main__":
