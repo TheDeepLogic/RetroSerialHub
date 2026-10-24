@@ -338,7 +338,7 @@ class RetroOsMenuAndLauncherTests(unittest.TestCase):
         self.assertEqual(menu.active_section_name, "Games")
         self.assertEqual(menu.get_action_for_key("A"), "mines")
         self.assertEqual(menu.get_action_for_key("B"), "solitaire")
-        self.assertEqual(menu.get_action_for_key("C"), "wargames")
+        self.assertEqual(menu.get_action_for_key("C"), "lander")
 
         # Select section 5: Accessories
         self.assertTrue(menu.select_section("5"))
@@ -1029,12 +1029,12 @@ class RetroWorkstationCompanionTests(unittest.TestCase):
         self.assertEqual(menu.active_section_name, "Host Connectivity")
         self.assertEqual(menu.get_action_for_key("F"), "host_media")
 
-        # Games section: Minesweeper (A), Solitaire (B), WarGames (C)
+        # Games section: Minesweeper (A), Solitaire (B), Lunar Lander (C)
         menu.select_section("4")
         self.assertEqual(menu.active_section_name, "Games")
         self.assertEqual(menu.get_action_for_key("A"), "mines")
         self.assertEqual(menu.get_action_for_key("B"), "solitaire")
-        self.assertEqual(menu.get_action_for_key("C"), "wargames")
+        self.assertEqual(menu.get_action_for_key("C"), "lander")
 
         # Accessories section: Weather & News (C)
         menu.select_section("5")

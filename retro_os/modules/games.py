@@ -5,8 +5,103 @@ import random
 _context = None
 _mines = {}
 _cards = {}
+_wumpus_games = {}
+_lander_games = {}
+_blackjack_games = {}
+_mastermind_games = {}
 _SUITS = ("S", "H", "D", "C")
 _RANKS = "A23456789TJQK"
+
+# The classic dodecahedral cave: every room connects to three neighbors.
+_CAVE = (
+    (2, 5, 8), (1, 3, 10), (2, 4, 12), (3, 5, 14), (1, 4, 6),
+    (5, 7, 15), (6, 8, 17), (1, 7, 9), (8, 10, 18), (2, 9, 11),
+    (10, 12, 19), (3, 11, 13), (12, 14, 20), (4, 13, 15), (6, 14, 16),
+    (15, 17, 20), (7, 16, 18), (9, 17, 19), (11, 18, 20), (13, 16, 19),
+)
+
+
+def _new_wumpus():
+    rooms = random.sample(range(1, 21), 6)
+    return {
+        "player": rooms[0], "wumpus": rooms[1],
+        "pits": set(rooms[2:4]), "bats": set(rooms[4:6]),
+        "arrows": 3, "over": False,
+    }
+
+
+def _new_lander():
+    return {"altitude": 100, "velocity": 5.0, "fuel": 30, "turn": 0, "landed": False, "over": False}
+
+
+def _lander_status(game, notice=""):
+    bars = max(0, min(20, int(game["altitude"] / 5)))
+    lines = ["LUNAR LANDER", f"ALTITUDE {max(0, game['altitude']):3d} m | SPEED {game['velocity']:4.1f} m/s | FUEL {game['fuel']:2d}",
+             "MOON  " + "=" * bars + "v" + " " * max(0, 19 - bars)]
+    if notice:
+        lines.append(notice)
+    lines.append("Burn 0-4 units per turn (0=coast); land at <= 2 m/s. B <0-4>=burn, I=status, N=new, Q=quit")
+    return "\n".join(lines)
+
+
+def _new_blackjack():
+    deck = [(rank, suit) for suit in _SUITS for rank in _RANKS]
+    random.shuffle(deck)
+    game = {"deck": deck, "player": [deck.pop(), deck.pop()], "dealer": [deck.pop(), deck.pop()], "over": False}
+    return game
+
+
+def _hand_value(hand):
+    total = sum(11 if rank == "A" else 10 if rank in "TJQK" else int(rank) for rank, _ in hand)
+    aces = sum(rank == "A" for rank, _ in hand)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+
+def _blackjack_status(game, reveal_dealer=False, notice=""):
+    dealer = game["dealer"] if reveal_dealer else game["dealer"][:1]
+    lines = ["BLACKJACK", "You: " + " ".join(_card_text(card) for card in game["player"]) + f"  ({_hand_value(game['player'])})",
+             "Dealer: " + " ".join(_card_text(card) for card in dealer) + (f"  ({_hand_value(game['dealer'])})" if reveal_dealer else "  ??")]
+    if notice:
+        lines.append(notice)
+    if not game["over"]:
+        lines.append("H=hit, S=stand, N=new, Q=quit")
+    return "\n".join(lines)
+
+
+def _new_mastermind():
+    return {"code": random.sample("123456", 4), "guesses": [], "over": False}
+
+
+def _mastermind_status(game, notice=""):
+    lines = ["MASTERMIND  Choose four different digits from 1-6.", "Guesses: %d/10" % len(game["guesses"])]
+    lines.extend(f"{guess}  {exact} exact, {near} misplaced" for guess, exact, near in game["guesses"])
+    if notice:
+        lines.append(notice)
+    if not game["over"]:
+        lines.append("G <four digits>=guess, N=new, Q=quit")
+    return "\n".join(lines)
+
+
+def _wumpus_status(game, notice=""):
+    room = game["player"]
+    nearby = _CAVE[room - 1]
+    clues = []
+    if game["wumpus"] in nearby:
+        clues.append("I smell a Wumpus!")
+    if any(n in game["pits"] for n in nearby):
+        clues.append("I feel a draft.")
+    if any(n in game["bats"] for n in nearby):
+        clues.append("Bats nearby!")
+    lines = [f"HUNT THE WUMPUS  Room {room}  Arrows: {game['arrows']}",
+             f"Tunnels lead to: {nearby[0]}, {nearby[1]}, {nearby[2]}"]
+    lines.extend(clues or ["The cave is quiet..."])
+    if notice:
+        lines.append(notice)
+    lines.append("Move: m <room> | Shoot: s <room>[,<room>,<room>] | quit")
+    return "\n".join(lines)
 
 
 def _new_minesweeper(rows, columns, count):
@@ -175,9 +270,177 @@ def register_commands(registry):
     def games(args):
         context = _context
         if not args or args[0].lower() == "help":
-            return "Games: minesweeper new [rows cols mines] | minesweeper r <row> <col> | minesweeper f <row> <col> | solitaire [new|draw|auto|move <src> <dst>]"
+            return "Games: minesweeper [new|r row col|f row col] | solitaire [new|draw|auto|move src dst] | wumpus [new|m room|s room,...] | lander [new|burn 0-4] | blackjack [new|hit|stand] | mastermind [new|guess 1234]"
         name = args[0].lower()
         session_id = context.session.id
+        if name in ("blackjack", "21"):
+            sub = args[1].lower() if len(args) > 1 else ""
+            if sub in ("n", "new", "start") or session_id not in _blackjack_games:
+                game = _new_blackjack()
+                _blackjack_games[session_id] = game
+                if _hand_value(game["player"]) == 21:
+                    game["over"] = True
+                    return _blackjack_status(game, True, "BLACKJACK! You win!")
+                return _blackjack_status(game)
+            game = _blackjack_games[session_id]
+            if sub in ("q", "quit", "exit"):
+                del _blackjack_games[session_id]
+                return "Hand ended."
+            if game["over"]:
+                return "Hand is over. Start another with: games blackjack new"
+            if sub in ("h", "hit"):
+                if not game["deck"]:
+                    return _blackjack_status(game, notice="No cards remain. Stand to end the hand.")
+                game["player"].append(game["deck"].pop())
+                if _hand_value(game["player"]) > 21:
+                    game["over"] = True
+                    return _blackjack_status(game, True, "Bust! Dealer wins.")
+                return _blackjack_status(game)
+            if sub in ("s", "stand"):
+                while _hand_value(game["dealer"]) < 17 and game["deck"]:
+                    game["dealer"].append(game["deck"].pop())
+                game["over"] = True
+                player_total, dealer_total = _hand_value(game["player"]), _hand_value(game["dealer"])
+                outcome = "You win!" if dealer_total > 21 or player_total > dealer_total else "Push." if player_total == dealer_total else "Dealer wins."
+                return _blackjack_status(game, True, outcome)
+            if sub in ("", "i", "status", "show"):
+                return _blackjack_status(game)
+            return "Usage: games blackjack [H|S|N|Q] (hit|stand|new|quit)"
+        if name in ("mastermind", "codebreaker"):
+            sub = args[1].lower() if len(args) > 1 else ""
+            if sub in ("n", "new", "start") or session_id not in _mastermind_games:
+                _mastermind_games[session_id] = _new_mastermind()
+                return _mastermind_status(_mastermind_games[session_id], "Secret code set. Crack it in 10 guesses!")
+            game = _mastermind_games[session_id]
+            if sub in ("q", "quit", "exit"):
+                del _mastermind_games[session_id]
+                return "Codebreaker session ended."
+            if game["over"]:
+                return "Puzzle is over. Start another with: games mastermind new"
+            if sub in ("guess", "g") and len(args) == 3:
+                guess = args[2]
+                if len(guess) != 4 or any(digit not in "123456" for digit in guess) or len(set(guess)) != 4:
+                    return "Enter four different digits from 1 to 6, for example: guess 1352"
+                exact = sum(a == b for a, b in zip(guess, game["code"]))
+                near = len(set(guess) & set(game["code"])) - exact
+                game["guesses"].append((guess, exact, near))
+                if exact == 4:
+                    game["over"] = True
+                    return _mastermind_status(game, f"YOU WIN! Code cracked in {len(game['guesses'])} guesses.")
+                if len(game["guesses"]) >= 10:
+                    game["over"] = True
+                    return _mastermind_status(game, "Out of guesses. The code was " + "".join(game["code"]) + ".")
+                return _mastermind_status(game)
+            if sub in ("", "i", "status", "show"):
+                return _mastermind_status(game)
+            return "Usage: games mastermind [G <four-digits>|N|I|Q]"
+        if name in ("wumpus", "wump"):
+            sub = args[1].lower() if len(args) > 1 else ""
+            if sub in ("n", "new", "start") or session_id not in _wumpus_games:
+                _wumpus_games[session_id] = _new_wumpus()
+                return _wumpus_status(_wumpus_games[session_id], "Find and shoot the Wumpus before it finds you!")
+            game = _wumpus_games[session_id]
+            if game["over"]:
+                if sub in ("status", "show"):
+                    return "Game over. Start another with: games wumpus new"
+                return "Game over. Start another with: games wumpus new"
+            if sub in ("q", "quit", "exit"):
+                del _wumpus_games[session_id]
+                return "Hunt ended. Start again with: games wumpus new"
+            if sub in ("m", "move") and len(args) >= 3:
+                try:
+                    destination = int(args[2])
+                except ValueError:
+                    return "Room must be a number from 1 to 20."
+                if destination not in _CAVE[game["player"] - 1]:
+                    return f"Room {destination} is not connected to room {game['player']}. Choose: {', '.join(map(str, _CAVE[game['player'] - 1]))}."
+                game["player"] = destination
+                if destination in game["pits"]:
+                    game["over"] = True
+                    return "You fall into a bottomless pit! Game over.\n" + _wumpus_status(game)
+                if destination == game["wumpus"]:
+                    game["over"] = True
+                    return "The Wumpus eats you! Game over.\n" + _wumpus_status(game)
+                notice = ""
+                if destination in game["bats"]:
+                    game["player"] = random.choice([n for n in range(1, 21) if n not in game["pits"] and n not in game["bats"] and n != game["wumpus"]])
+                    notice = f"Super bats carry you to room {game['player']}!"
+                if random.randrange(4) == 0:
+                    game["wumpus"] = random.choice((game["wumpus"], *_CAVE[game["wumpus"] - 1]))
+                    if game["wumpus"] == game["player"]:
+                        game["over"] = True
+                        return "The Wumpus wanders into your room and eats you! Game over.\n" + _wumpus_status(game)
+                return _wumpus_status(game, notice)
+            if sub in ("s", "shoot") and len(args) >= 3:
+                raw_path = " ".join(args[2:]).replace(",", " ").split()
+                try:
+                    path = [int(room) for room in raw_path]
+                except ValueError:
+                    return "Use room numbers, for example: games wumpus shoot 4,7,9"
+                if not 1 <= len(path) <= 3 or any(room < 1 or room > 20 for room in path):
+                    return "An arrow travels through 1 to 3 rooms, numbered 1 to 20."
+                game["arrows"] -= 1
+                arrow_room = game["player"]
+                for target in path:
+                    if target not in _CAVE[arrow_room - 1]:
+                        target = random.choice(_CAVE[arrow_room - 1])
+                    arrow_room = target
+                    if arrow_room == game["wumpus"]:
+                        game["over"] = True
+                        return "Your arrow finds the Wumpus! YOU WIN!\n" + _wumpus_status(game)
+                    if arrow_room == game["player"]:
+                        game["over"] = True
+                        return "Your arrow turns around and hits you! Game over.\n" + _wumpus_status(game)
+                if game["arrows"] <= 0:
+                    game["over"] = True
+                    return "You are out of arrows. The Wumpus wins.\n" + _wumpus_status(game)
+                if random.randrange(4) == 0:
+                    game["wumpus"] = random.choice((game["wumpus"], *_CAVE[game["wumpus"] - 1]))
+                    if game["wumpus"] == game["player"]:
+                        game["over"] = True
+                        return "The Wumpus hears your arrow and eats you! Game over.\n" + _wumpus_status(game)
+                return _wumpus_status(game, "Missed! The Wumpus heard the arrow.")
+            if sub in ("", "i", "status", "show", "board"):
+                return _wumpus_status(game)
+            return "Usage: games wumpus [N|M <room>|S <room>[,<room>,<room>]|Q]"
+        if name in ("lander", "lunarlander"):
+            sub = args[1].lower() if len(args) > 1 else ""
+            if sub in ("n", "new", "start") or session_id not in _lander_games:
+                _lander_games[session_id] = _new_lander()
+                return _lander_status(_lander_games[session_id], "Descent initiated. Keep your landing speed under 2 m/s.")
+            game = _lander_games[session_id]
+            if sub in ("q", "quit", "exit"):
+                del _lander_games[session_id]
+                return "Flight computer disengaged."
+            if game["over"]:
+                return "Flight ended. Start another with: games lander new"
+            if sub in ("", "i", "status", "show"):
+                return _lander_status(game)
+            if sub in ("b", "burn") and len(args) == 3:
+                try:
+                    burn = int(args[2])
+                except ValueError:
+                    return "Burn must be a whole number from 0 to 4."
+                if not 0 <= burn <= 4:
+                    return "Burn must be from 0 to 4."
+                if burn > game["fuel"]:
+                    return f"Only {game['fuel']} fuel units remain."
+                game["fuel"] -= burn
+                game["turn"] += 1
+                acceleration = 1.6 - burn * 1.1
+                game["altitude"] -= game["velocity"] + acceleration / 2
+                game["velocity"] += acceleration
+                if game["altitude"] <= 0:
+                    game["altitude"] = 0
+                    game["over"] = True
+                    if 0 <= game["velocity"] <= 2:
+                        game["landed"] = True
+                        return _lander_status(game, f"Touchdown! Safe landing in {game['turn']} turns. Congratulations, pilot!")
+                    return _lander_status(game, f"CRASH! Impact speed: {abs(game['velocity']):.1f} m/s. Try again with 'new'.")
+                if game["fuel"] == 0 and game["velocity"] > 0:
+                    return _lander_status(game, "Fuel exhausted. You are coasting toward the surface.")
+                return _lander_status(game)
+            return "Usage: games lander [B <0-4>|N|I|Q]"
         if name in ("minesweeper", "mines"):
             sub = args[1].lower() if len(args) > 1 else ""
             if not sub or sub in ("board", "show"):
@@ -186,7 +449,7 @@ def register_commands(registry):
                     _mines[session_id] = _new_minesweeper(*defaults)
                 return _mine_board(_mines[session_id])
 
-            if sub == "new":
+            if sub in ("n", "new"):
                 defaults = (8, min(16, context.session.cols - 2), 10)
                 try:
                     settings = tuple(map(int, args[2:5])) if len(args) > 2 else defaults
@@ -238,7 +501,7 @@ def register_commands(registry):
             return _mine_board(game)
 
         if name in ("solitaire", "sol"):
-            if (len(args) > 1 and args[1].lower() == "new") or session_id not in _cards:
+            if (len(args) > 1 and args[1].lower() in ("n", "new")) or session_id not in _cards:
                 _cards[session_id] = _new_solitaire()
                 return _solitaire_status(_cards[session_id])
             game = _cards[session_id]
@@ -356,11 +619,15 @@ def register_commands(registry):
                     return "All cards moved to the foundations. You win!\n" + _solitaire_status(game)
                 return _solitaire_status(game)
             return "Usage: games solitaire [new|draw|auto|move <source> <destination>]"
-        return "Choose minesweeper or solitaire."
+        return "Choose minesweeper, solitaire, wumpus, lander, blackjack, or mastermind."
     registry.register_command("games", games)
     registry.register_command("minesweeper", lambda args: games(["minesweeper", *args]))
     registry.register_command("mines", lambda args: games(["minesweeper", *args]))
     registry.register_command("solitaire", lambda args: games(["solitaire", *args]))
+    registry.register_command("wumpus", lambda args: games(["wumpus", *args]))
+    registry.register_command("lander", lambda args: games(["lander", *args]))
+    registry.register_command("blackjack", lambda args: games(["blackjack", *args]))
+    registry.register_command("mastermind", lambda args: games(["mastermind", *args]))
 
 
 def register_menu(menu):

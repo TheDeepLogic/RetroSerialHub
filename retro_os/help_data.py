@@ -31,7 +31,7 @@ bridges the gap between retro hardware and modern computing:
   XLSX, CSV, Markdown, and HTML files.
 * Communications & Mail: Bulletin board directory, telnet terminal, web
   browser, FTP client, and integrated inter-terminal electronic mail.
-* Retro Games: Native text-mode Minesweeper, Solitaire, and WarGames W.O.P.R.
+* Retro Games: Native text-mode Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, and Mastermind, plus the WarGames W.O.P.R. CLI simulation.
 """,
     ),
     (
@@ -44,16 +44,19 @@ The main menu uses an accordion flyout layout designed for vintage 40- and
 
 * Sections (0 to 6):
   [0] Shortcuts: Quick user-defined command macros with custom arguments.
-  [1] Communications: BBS, Telnet, Web Browser, FTP, Electronic Mail.
-  [2] Host Connectivity: Host Applications, Keyboard Bridge, Terminal Prompt.
+  [1] Communications: BBS, Telnet, Web Browser, FTP, Electronic Mail, Connected Terminals.
+  [2] Host Connectivity: Host Applications, Keyboard Bridge, Terminal Prompt, Host Printing.
   [3] Files & Media: File Transfers, Document Viewer, Text Library, ASCII Art.
-  [4] Games: Dedicated retro games (Minesweeper, Solitaire, WarGames).
-  [5] Accessories: Notepad, Calculator, Live Weather & News, AI, Printing.
+  [4] Games: Dedicated retro games (Minesweeper, Solitaire, Wumpus, Lunar Lander, Blackjack, Mastermind).
+  [5] Accessories: Notepad, Calculator, Live Weather & News, AI, LOGO.
   [6] System: Command Shell (CLI), Task Scheduler, Hardware Settings, Help.
 
 * Navigation Keys:
   - Enter a section number (0-6) or name (e.g. 'GAMES' or 'SYS') to expand it.
   - Enter an item letter (A-G) to launch the option in the active section.
+  - Communications > Connected Terminals lists active links; select one to message it or send a text file.
+  - In Notepad, P saves the host clipboard as a note and C<number> copies a note to the clipboard.
+  - In Accessories > LOGO, enter commands such as REPEAT 4 (FD 80 RT 90). Parentheses or square brackets group commands.
   - In Shortcuts: press '+' to add a shortcut, or '-' to remove one.
   - At any prompt: type 'ATM' to return to the Main Menu immediately.
   - While connected to a BBS or Telnet host: type 'ATH' to hang up.
@@ -74,17 +77,20 @@ Type 'CLI' or 'OS' at the main menu to enter the interactive command prompt:
   cli> top (or sysinfo live)     Real-time host system monitor with clear screen
   cli> sysinfo [-s]              Display host CPU, RAM, disk, and uptime snapshot
   cli> clip [text]               View or copy text to host clipboard
+  cli> terminals                 List connected serial/Telnet terminals
+  cli> msg to <terminal> <text>  Send a message to one terminal
   cli> media play|pause|next     Control host media playback
   cli> vol up|down|mute          Control host system volume
   cli> weather [location]        Fetch live ASCII weather from wttr.in
   cli> news [src] | news <num>   Read news headlines or view article story
   cli> briefing [location]       Generate complete morning desk briefing
+  cli> logo                      Start the terminal Logo programming prompt
   cli> view <file|url>           Extract and paginate modern docs (PDF/DOCX/XLS)
   cli> fetch <url> [dest]        Download internet file to hub storage
   cli> xsend/ysend/asend <file>  Direct file transfer to retro computer
   cli> xrecv <dest_file>         Receive file via XMODEM from retro computer
   cli> mail [inbox|read|send]    Read and send integrated hub or internet email
-  cli> mines / solitaire         Play text-mode retro games
+  cli> games wumpus new          Start Hunt the Wumpus
   cli> calc <expression>         Evaluate mathematical expressions
   cli> schedule list|add|run     Manage automated periodic background tasks
   cli> caps on|off               Toggle uppercase-only mode for vintage ROMs
@@ -221,10 +227,29 @@ All games are fully playable on 40- and 80-column vintage displays:
   - Commands: 'd' to draw from stock, 'move <src> <dst>' to move cards,
     'f' for automatic foundation moves.
 
+* Hunt the Wumpus:
+  - Start with 'games wumpus new'. The cave has 20 numbered rooms.
+  - 'games wumpus' shows your room, connected tunnels, and nearby danger clues.
+  - Move with 'M <room>'; shoot with 'S <room>[,<room>,<room>]'. Arrows travel at most 3 rooms.
+  - Use N for a new hunt and Q to quit.
+  - Avoid bottomless pits, bats, and the Wumpus. 'games wumpus quit' ends a hunt.
+
+* Lunar Lander:
+  - Start with 'games lander new'. Each turn, enter 'B <0-4>' to burn.
+  - A higher burn slows the descent but consumes the same number of fuel units.
+  - Land at 2 m/s or less. Use I for instruments, N for a new flight, or Q to quit.
+
+* Blackjack:
+  - Start a hand with 'games blackjack new'. Use H to hit, S to stand, N for a new hand, or Q to quit.
+  - Aces count as 1 or 11; face cards count as 10.
+
+* Mastermind:
+  - Start with 'games mastermind new'. Enter 'G <four digits>' to guess four different digits from 1-6.
+  - Each clue reports exact positions and matching digits in the wrong position.
+  - You have 10 guesses to crack the code. Use N for a new puzzle or Q to quit.
+
 * WarGames (W.O.P.R.):
-  - Interactive NORAD strategic defense computer simulation inspired by
-    the classic 1983 film.
-  - Play Global Thermonuclear War, Tic-Tac-Toe, Falken's Maze, and more.
+  - Launch from the CLI with 'WARGAMES'. The game is no longer on the Games menu.
 """,
     ),
     (

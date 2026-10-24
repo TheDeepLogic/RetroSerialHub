@@ -50,7 +50,9 @@ Features
 * Multi-Format Document Viewer: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs with native Windows path handling
 * Direct File Transfers: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (xsend, ysend, asend, xrecv)
 * Electronic Mail (Hub & Internet): Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
-* Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike), and WarGames (W.O.P.R.) simulation
+* Connected Terminal Messaging: List active serial/Telnet terminals, message a selected terminal, or deliver a text file from the Communications menu
+* Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, and Mastermind, plus WarGames (W.O.P.R.) from the CLI
+* LOGO Programming: Terminal Logo interpreter with repeat loops, variables, procedures, turtle state feedback, and optional host graphics
 * Ambient Desk Companion: Live ASCII weather forecasts (wttr.in), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (briefing), and interactive article reader (news <num>)
 * Background Task Scheduler: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. news : weather Austin : broadcast Morning briefing complete)
 * Terminal Hardware Settings: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
@@ -62,10 +64,12 @@ Features
 * Text Library: Browse and read text files with pagination; includes starter
   articles on classic computers
 * Web Browser: Browse paginated text pages, follow numbered links, and manage bookmarks
-* Notes System: Create, read, and manage text notes
+* Notes System: Create, read, and manage text notes, including host clipboard capture and copy
 * COM Port Bridge: Bridge between different serial ports for direct computer-to-computer communication
 * Keyboard Bridge: Type serial input into the focused host application
-* WarGames Mode: Nostalgic WarGames movie-inspired interface (proof-of-concept)
+* Lunar Lander, Hunt the Wumpus, Blackjack, and Mastermind: Terminal-first games in the Games menu
+* WarGames Mode: Nostalgic WarGames movie-inspired interface, available from the CLI
+* Notepad clipboard actions: Save host clipboard text as a note, or copy a note to the host clipboard
 * AI Assistant: Optional ChatGPT-powered assistant accessible from vintage terminals
 * Hot-Reload Modules: Edit feature modules without restarting the hub
 * ANSI Support: Automatic detection and handling of ANSI escape codes for compatible terminals
@@ -283,32 +287,49 @@ Connecting Your Vintage Computer
 
 Main Menu
 
-The main menu groups features into:
+The accordion main menu groups features into:
 
-* Accessories: 1 Bulletin Boards, 2 Web Browser, 3 Telnet, and 4 Notes
-* Bridging: 5 COM Port and 6 Keyboard
-* Files: 7 File Transfers, 8 Text Library, and 9 FTP
-* Various: 10 AI Assistant and 11 Wargames
-* System: 12 toggle ANSI translation, 13 switch between 40- and
-  80-column layouts, and 14 Welcome Banner.
-  The selection is saved for that machine profile. Remote TCP terminal
-  clients
-  also see 15 Disconnect.
+* [1] Communications: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client,
+  Electronic Mail, and Connected Terminals (list, message, or deliver a text file)
+* [2] Host Connectivity: Host Applications, Launch Host App, Keyboard Bridge,
+  COM Port Bridge, Host Terminal, System Monitor & Media, and Host Printing
+* [3] Files & Media: File Transfers, Document Viewer, Text Library, ASCII Image Viewer
+* [4] Games: Minesweeper, Solitaire, Lunar Lander, Hunt the Wumpus, Blackjack,
+  and Mastermind. WarGames remains available with the WARGAMES CLI command.
+* [5] Accessories: Notepad, Calculator, Live Weather & News, AI Assistant, LOGO
+* [6] System: Command Shell, Task Scheduler, Terminal Settings, Keyboard Profiles,
+  Help & User Guide, Welcome Banner, and remote-client Disconnect
 
-At 80 columns, numbering proceeds down the left column (Accessories,
-Bridging,
-then Files) and continues at the top of the right column (Various, then
-System).
-At 40 columns, the same numbering is used in section order, with options
-paired
-compactly within each section. The Keyboard option types into the focused
-host
+Enter a section number (0-6) to expand it and an item letter to launch it. At 80
+columns, the menu is arranged in three columns; at 40 columns, it uses a compact
+layout. The Keyboard option types into the focused host
 application. Enter, Tab, and Backspace are supported;
 press Ctrl+X to exit. Escape and Ctrl+] are also recognized when the
 terminal can send them. This uses Windows' native input API on Windows and
 pynput on macOS/Linux. Keep the intended application focused while using
 this
 mode.
+
+From the CLI, use terminals to list destinations and msg to <terminal> <text>
+to send a direct message; msg <text> broadcasts. The Connected Terminals menu
+also offers a selected-terminal message or text-file delivery action.
+
+LOGO Programming
+
+Select Accessories > E > LOGO or type LOGO at the main menu. Use commands at the
+Logo> prompt. For example, REPEAT 4 (FD 80 RT 90) draws a square; square brackets
+work as well. FD and BK move, RT and LT turn, PU and PD lift or lower the pen,
+and STATUS reports the turtle position and heading. MAKE defines variables, TO
+and END define procedures, and HELP lists the supported commands. Type BYE to
+return to the hub. Drawing state is reported in the terminal; a host turtle
+window opens when Python Tkinter and a graphical display are available.
+
+Terminal Games
+
+The Games menu contains Minesweeper, Solitaire, Lunar Lander, Hunt the Wumpus,
+Blackjack, and Mastermind. WarGames is still available by typing WARGAMES at
+the CLI. Blackjack uses H to hit, S to stand, N to start a new hand, and Q to
+quit. Other games display their available single-key actions at their prompt.
 
 The ANSI Translation option toggles translating incoming ANSI/VT100 BBS
 output
@@ -487,6 +508,22 @@ Garbled Text
 * Try a different cable
 
 Release Notes
+
+v2.3
+
+* Added a terminal Logo accessory and CLI launcher with repeat loops, bracket or
+  parenthesis command groups, variables, arithmetic, procedures, and turtle
+  position feedback. Optional host graphics use Python turtle.
+* Added the Communications > Connected Terminals feature to list terminals,
+  send direct messages, and deliver text files over ASCII. Added terminals and
+  targeted msg commands to the CLI.
+* Added Lunar Lander, Hunt the Wumpus, Blackjack, and Mastermind to the Games
+  menu while keeping WarGames available through the CLI. Standardized single-key
+  game actions in interactive prompts.
+* Moved Host Printing to Host Connectivity, renamed Notes to Notepad, and added
+  host clipboard capture and note-to-clipboard actions.
+* Fixed dashboard section activity numbering and normalized menu spacing.
+* Updated application version to v2.3.
 
 v2.2
 

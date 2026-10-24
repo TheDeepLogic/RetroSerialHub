@@ -19,6 +19,7 @@ FEATURE_MODULES = (
     "bbs",
     "ai",
     "calc",
+    "logo",
     "mail",
     "print",
     "games",
@@ -203,14 +204,33 @@ def install_core_commands(shell, context, loader):
 
     def notify_cmd(args):
         if not args:
-            return "Usage: msg <text> | notify <text> | alert <text> | echo <text>"
+            return "Usage: msg <text> | msg to <terminal> <text> | notify <text> | alert <text>"
+        target = None
+        if args[0].lower() == "to":
+            if len(args) < 3:
+                return "Usage: msg to <terminal> <text>"
+            target = args[1]
+            args = args[2:]
         message = " ".join(args).strip()
-        context.bus.publish("notify", {
+        event = {
             "session": context.session,
             "message": message,
             "sender": getattr(context.session, "user", "Host"),
-        })
+            "target": target,
+            "delivered": False,
+        }
+        context.bus.publish("notify", event)
+        if target:
+            return f"Message sent to {target}." if event["delivered"] else f"No connected terminal matched '{target}'. Use 'terminals' to list destinations."
         return message
+
+    def terminals_cmd(args):
+        if args:
+            return "Usage: terminals"
+        result = {"names": []}
+        context.bus.publish("terminals.list", result)
+        names = sorted(result["names"])
+        return "Connected terminals:\n" + ("\n".join(names) if names else "(none)")
 
     def send_cmd(args):
         if not args:
@@ -456,6 +476,7 @@ def install_core_commands(shell, context, loader):
     shell.register_command("alert", notify_cmd)
     shell.register_command("echo", notify_cmd)
     shell.register_command("broadcast", notify_cmd)
+    shell.register_command("terminals", terminals_cmd)
     shell.register_command("send", send_cmd)
     shell.register_command("sendkeys", send_cmd)
     shell.register_command("reload", lambda args: _reload_module(loader, args))

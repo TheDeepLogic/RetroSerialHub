@@ -73,6 +73,10 @@ CONSOLE = None
 SURRENDERED_PORTS = set()
 
 def register_active_terminal(terminal):
+    if not hasattr(terminal, "_terminal_name"):
+        profile = getattr(terminal, "_profile_name", "Terminal")
+        address = getattr(terminal, "_remote_address", None)
+        terminal._terminal_name = f"{profile}@{address[0]}" if address else profile
     with ACTIVE_TERMINALS_LOCK:
         ACTIVE_TERMINALS.add(terminal)
 
@@ -123,6 +127,7 @@ RETRO_OS_MENU_ACTIONS = {
     "bbs": "bbs",
     "browser": "browser",
     "telnet": "telnet",
+    "terminals": "terminals",
     "notes": "notes",
     "files": "files",
     "textlib": "text",
@@ -140,6 +145,7 @@ RETRO_OS_MENU_ACTIONS = {
     "games": "games",
     "mines": "mines",
     "solitaire": "solitaire",
+    "wumpus": "wumpus",
     "help_menu": "help_menu",
     "ascii_viewer": "ascii_viewer",
     "print": "print",
@@ -432,7 +438,8 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
 
     flyout = ser._rsh_flyout_menu
     sec_idx = getattr(flyout, "active_section_idx", 0) if flyout else 0
-    set_terminal_activity(ser, f"section:{sec_idx}")
+    # Flyout indices are zero-based; dashboard section labels are 1-based.
+    set_terminal_activity(ser, f"section:{sec_idx + 1}")
 
     serial_count, remote_count = get_active_connection_counts()
     if columns == 40:
@@ -763,6 +770,8 @@ def remote_client_worker(name, cfg, client_socket, address):
     client_id = id(client_socket)
     terminal._client_id = client_id
     terminal._profile_name = name
+    terminal._remote_address = address
+    terminal._terminal_name = f"{name}@{address[0]}"
     with ACTIVE_REMOTE_CLIENTS_LOCK:
         ACTIVE_REMOTE_CLIENTS.add(client_id)
     if CONSOLE:
@@ -1028,11 +1037,40 @@ def bridge_loop(
 
     event_bus.subscribe("session.send_keys", on_send_keys_event)
 
+    def on_terminals_list(evt):
+        if isinstance(evt, dict):
+            with ACTIVE_TERMINALS_LOCK:
+                terminals = list(ACTIVE_TERMINALS)
+            evt["names"] = [
+                getattr(term, "_terminal_name", getattr(term, "_profile_name", "Terminal"))
+                for term in terminals
+            ]
+
+    event_bus.subscribe("terminals.list", on_terminals_list)
+
     def on_notify_event(evt):
         if not isinstance(evt, dict):
             return
         sender = evt.get("sender") or "Host"
         msg = evt.get("message", "")
+        target = evt.get("target")
+        if target and msg:
+            with ACTIVE_TERMINALS_LOCK:
+                terminals = list(ACTIVE_TERMINALS)
+            matches = [
+                term for term in terminals
+                if target.casefold() in {
+                    str(getattr(term, "_terminal_name", "")).casefold(),
+                    str(getattr(term, "_profile_name", "")).casefold(),
+                }
+            ]
+            for term in matches:
+                try:
+                    write(term, f"\r\n*** [MESSAGE from {sender}] {msg} ***\r\n")
+                    evt["delivered"] = True
+                except Exception:
+                    pass
+            return
         # Avoid double-broadcast if sent from automated scheduler task
         if msg and evt.get("session") is not None:
             broadcast_to_terminals(f"\r\n*** [ALERT from {sender}] {msg} ***\r\n")
@@ -1147,7 +1185,7 @@ def bridge_loop(
         res = retro_shell.execute("mines")
         write(ser, res + "\r\n")
         while True:
-            write(ser, "\r\nMines [r/f row col, new, q]> ")
+            write(ser, "\r\nMines [R/F row col, N=new, Q=quit]> ")
             cmd = read_input_line(ser).strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 break
@@ -1172,7 +1210,7 @@ def bridge_loop(
         res = retro_shell.execute("solitaire")
         write(ser, res + "\r\n")
         while True:
-            write(ser, "\r\nSolitaire [cmd, new, q]> ")
+            write(ser, "\r\nSolitaire [D=draw, M=move, A=auto, N=new, Q=quit]> ")
             cmd = read_input_line(ser).strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 break
@@ -1192,23 +1230,92 @@ def bridge_loop(
                     wait_for_key(ser)
                     break
 
+    def run_wumpus_session():
+        write(ser, "\r\n--- HUNT THE WUMPUS ---\r\n")
+        write(ser, retro_shell.execute("games wumpus new") + "\r\n")
+        while True:
+            write(ser, "\r\nWumpus [M room, S rooms, N=new, Q=quit]> ")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                retro_shell.execute("games wumpus quit")
+                break
+            if cmd.upper() in ("NEW", "RESTART"):
+                res = retro_shell.execute("games wumpus new")
+            else:
+                res = retro_shell.execute("games wumpus " + cmd)
+            write(ser, "\r\n" + str(res) + "\r\n")
+            if "Game over" in res or "YOU WIN" in res:
+                write(ser, "Press any key to continue...\r\n")
+                wait_for_key(ser)
+                break
+
+    def run_lander_session():
+        write(ser, "\r\n--- LUNAR LANDER ---\r\n")
+        write(ser, retro_shell.execute("games lander new") + "\r\n")
+        while True:
+            write(ser, "\r\nLander [B 0-4, I=status, N=new, Q=quit]> ")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                retro_shell.execute("games lander quit")
+                break
+            if cmd.upper() in ("NEW", "RESTART"):
+                res = retro_shell.execute("games lander new")
+            elif cmd.lower().startswith("lander "):
+                res = retro_shell.execute("games " + cmd)
+            else:
+                res = retro_shell.execute("games lander " + cmd)
+            write(ser, "\r\n" + str(res) + "\r\n")
+            if "Touchdown!" in res or "CRASH!" in res:
+                write(ser, "Press any key to continue...\r\n")
+                wait_for_key(ser)
+                break
+
+    def run_card_or_code_game(game_name, title, prompt, end_markers):
+        command = "blackjack" if game_name == "blackjack" else "mastermind"
+        write(ser, f"\r\n--- {title} ---\r\n")
+        write(ser, retro_shell.execute(f"games {command} new") + "\r\n")
+        while True:
+            write(ser, f"\r\n{prompt}")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                retro_shell.execute(f"games {command} quit")
+                break
+            if cmd.upper() in ("NEW", "RESTART"):
+                res = retro_shell.execute(f"games {command} new")
+            else:
+                res = retro_shell.execute(f"games {command} {cmd}")
+            write(ser, "\r\n" + str(res) + "\r\n")
+            if any(marker in res for marker in end_markers):
+                write(ser, "Press any key to continue...\r\n")
+                wait_for_key(ser)
+                break
+
     def run_games_menu():
         while True:
             write(ser, "\r\n--- RETRO GAMES ---\r\n")
             write(ser, "[1] Minesweeper\r\n")
             write(ser, "[2] Solitaire\r\n")
-            write(ser, "[3] WarGames (W.O.P.R.)\r\n")
+            write(ser, "[3] Lunar Lander\r\n")
+            write(ser, "[4] Hunt the Wumpus\r\n")
+            write(ser, "[5] Blackjack\r\n")
+            write(ser, "[6] Mastermind\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
             choice = read_input_line(ser).strip().upper()
             if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
                 return None
-            elif choice in ("3", "W", "WAR", "WARGAMES", "WOPR"):
-                return "wargames"
+            elif choice in ("3", "L", "LANDER", "LUNAR LANDER"):
+                run_lander_session()
             elif choice in ("1", "M", "MINES", "MINESWEEPER"):
                 run_minesweeper_session()
             elif choice in ("2", "S", "SOL", "SOLITAIRE"):
                 run_solitaire_session()
+            elif choice in ("4", "WUMPUS", "HUNT"):
+                run_wumpus_session()
+            elif choice in ("5", "BLACKJACK", "21"):
+                run_card_or_code_game("blackjack", "BLACKJACK", "Blackjack [H=hit, S=stand, N=new, Q=quit]> ", ("You win!", "Dealer wins.", "Push.", "Bust!", "BLACKJACK!"))
+            elif choice in ("6", "MASTERMIND", "CODEBREAKER"):
+                run_card_or_code_game("mastermind", "MASTERMIND", "Mastermind [G 1234=guess, N=new, Q=quit]> ", ("YOU WIN!", "Out of guesses."))
 
     def run_help_menu():
         from retro_os.help_data import get_help_topics, get_topic_content
@@ -1241,6 +1348,23 @@ def bridge_loop(
                 write(ser, f"Result: {res}\r\n")
             except Exception as exc:
                 write(ser, f"Error: {exc}\r\n")
+
+    def run_logo_session():
+        from retro_os.logo import LogoInterpreter
+
+        logo = LogoInterpreter(graphics=True)
+        write(ser, "\r\n--- LOGO ---\r\n")
+        write(ser, "Terminal Logo interpreter. Drawing commands report position and heading.\r\n")
+        write(ser, "Type HELP for commands; type BYE to return to the hub.\r\n")
+        write(ser, logo.help_text() + "\r\n")
+        while not logo.done:
+            write(ser, logo.prompt)
+            command = read_input_line(ser).strip()
+            if not command:
+                continue
+            response = logo.execute(command)
+            if response:
+                write(ser, response.replace("\n", "\r\n") + "\r\n")
 
     def run_keyboard_profiles_menu():
         while True:
@@ -1736,6 +1860,73 @@ def bridge_loop(
                     except Exception as exc:
                         write(ser, f"Print error: {exc}\r\n")
                     wait_for_key(ser)
+
+    def run_connected_terminals_menu():
+        while True:
+            with ACTIVE_TERMINALS_LOCK:
+                terminals = sorted(
+                    list(ACTIVE_TERMINALS),
+                    key=lambda term: str(getattr(term, "_terminal_name", getattr(term, "_profile_name", "Terminal"))).casefold(),
+                )
+            write(ser, "\r\n--- CONNECTED TERMINALS ---\r\n")
+            if not terminals:
+                write(ser, "No terminals are connected.\r\n")
+                wait_for_key(ser)
+                return
+            for index, terminal in enumerate(terminals, 1):
+                label = getattr(terminal, "_terminal_name", getattr(terminal, "_profile_name", "Terminal"))
+                write(ser, f"[{index}] {label}\r\n")
+            write(ser, "\r\nSelect a terminal number, R=Refresh, Q=Return: ")
+            choice = read_input_line(ser).strip().upper()
+            if choice in ("", "Q", "QUIT", "EXIT"):
+                return
+            if choice in ("R", "REFRESH"):
+                continue
+            try:
+                index = int(choice) - 1
+                target = terminals[index]
+            except (ValueError, IndexError):
+                write(ser, "Invalid terminal selection.\r\n")
+                continue
+
+            target_name = getattr(target, "_terminal_name", getattr(target, "_profile_name", "Terminal"))
+            sender_name = getattr(ser, "_profile_name", name)
+            write(ser, f"\r\n{target_name}\r\n[M] Send message  [F] Send file  [R] Return\r\nChoice: ")
+            action = read_input_line(ser).strip().upper()
+            if action in ("R", "RETURN", "Q"):
+                continue
+            if action in ("M", "MESSAGE"):
+                write(ser, "Message (Q to cancel): ")
+                message = read_input_line(ser).strip()
+                if message and message.upper() != "Q":
+                    try:
+                        write(target, f"\r\n*** [MESSAGE from {sender_name}] {message} ***\r\n")
+                        write(ser, f"Message sent to {target_name}.\r\n")
+                    except Exception as exc:
+                        write(ser, f"Message failed: {exc}\r\n")
+                continue
+            if action in ("F", "FILE"):
+                write(ser, "File path or file name from files/ (Q to cancel): ")
+                raw_path = read_input_line(ser).strip().strip("'\"")
+                if not raw_path or raw_path.upper() == "Q":
+                    continue
+                file_path = pathlib.Path(raw_path).expanduser()
+                if not file_path.is_absolute():
+                    file_path = FILES_DIR / file_path
+                if not file_path.is_file():
+                    write(ser, f"File not found: {file_path}\r\n")
+                    wait_for_key(ser)
+                    continue
+                try:
+                    fm = importlib.import_module("rsh_files")
+                    write(target, f"\r\n*** Incoming text file from {sender_name}: {file_path.name} ***\r\n")
+                    fm.ascii_send(target, str(file_path))
+                    write(ser, f"\r\nSent {file_path.name} to {target_name} as ASCII text.\r\n")
+                except Exception as exc:
+                    write(ser, f"File delivery failed: {exc}\r\n")
+                wait_for_key(ser)
+                continue
+            write(ser, "Choose M, F, or R.\r\n")
 
     def run_ascii_viewer_menu():
         while True:
@@ -2833,10 +3024,14 @@ def bridge_loop(
                                 menu_action = "browser"
                             elif upper in ("TELNET",):
                                 menu_action = "telnet"
+                            elif upper in ("TERMINALS", "CONNECTED TERMINALS"):
+                                menu_action = "terminals"
                             elif upper in ("NOTES", "NOTE"):
                                 menu_action = "notes"
                             elif upper in ("CALC", "CALCULATOR") or upper.startswith("CALC "):
                                 menu_action = "calc"
+                            elif upper == "LOGO":
+                                menu_action = "logo"
                             elif upper in ("MAIL", "EMAIL") or upper.startswith("MAIL "):
                                 menu_action = "mail"
                             elif upper in ("APPS", "APPLICATIONS") or upper.startswith("APPS "):
@@ -2891,6 +3086,8 @@ def bridge_loop(
                                 menu_action = "fetch"
                             elif upper in ("WARGAMES",):
                                 menu_action = "wargames"
+                            elif upper in ("WUMPUS", "HUNT"):
+                                menu_action = "wumpus"
                             elif upper in ("COLUMNS", "WIDTH"):
                                 menu_action = "columns"
                             elif upper in ("ANSI",):
@@ -3002,6 +3199,10 @@ def bridge_loop(
                             show_main_menu(ser, use_ansi)
                             continue
                         mode = "TELNET"
+                    elif menu_action == "terminals":
+                        run_connected_terminals_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
                     elif menu_action == "ftp":
                         try:
                             importlib.invalidate_caches()
@@ -3225,6 +3426,10 @@ def bridge_loop(
                             run_calc_session()
                         show_main_menu(ser, use_ansi)
                         continue
+                    elif menu_action == "logo":
+                        run_logo_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
                     elif menu_action == "mail":
                         if line_str and line_str.upper().startswith("MAIL ") and len(line_str) > 5:
                             try:
@@ -3279,6 +3484,22 @@ def bridge_loop(
                             wait_for_key(ser)
                         else:
                             run_solitaire_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "wumpus":
+                        run_wumpus_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "lander":
+                        run_lander_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "blackjack":
+                        run_card_or_code_game("blackjack", "BLACKJACK", "Blackjack [H=hit, S=stand, N=new, Q=quit]> ", ("You win!", "Dealer wins.", "Push.", "Bust!", "BLACKJACK!"))
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "mastermind":
+                        run_card_or_code_game("mastermind", "MASTERMIND", "Mastermind [G 1234=guess, N=new, Q=quit]> ", ("YOU WIN!", "Out of guesses."))
                         show_main_menu(ser, use_ansi)
                         continue
                     elif menu_action == "help_menu":
@@ -3468,7 +3689,7 @@ def bridge_loop(
                     else:
                         flyout = getattr(ser, "_rsh_flyout_menu", None)
                         sec_idx = getattr(flyout, "active_section_idx", 0) if flyout else 0
-                        set_terminal_activity(ser, f"section:{sec_idx}", default_name=name)
+                        set_terminal_activity(ser, f"section:{sec_idx + 1}", default_name=name)
                         write(ser, "Invalid command\r\n")
                         write(ser, "Command: ")
                     continue
@@ -3895,6 +4116,17 @@ def bridge_loop(
                                         except Exception:
                                             show_main_menu(ser, use_ansi)
                                         continue
+                                if isinstance(action, tuple) and action[0] == 'COPY_TO_CLIPBOARD':
+                                    note_path = NOTES_DIR / action[1]
+                                    try:
+                                        note_text = note_path.read_text(encoding="utf-8", errors="ignore")
+                                        if host_env.set_clipboard(note_text):
+                                            refresh_notes_session(f"Copied {note_path.name} to the host clipboard.")
+                                        else:
+                                            refresh_notes_session("Could not write to the host clipboard.")
+                                    except OSError as exc:
+                                        refresh_notes_session(f"Could not read {note_path.name}: {exc}")
+                                    continue
                                 if isinstance(action, str) and action.startswith('SHOW_NOTE:'):
                                     fname = action.split(':',1)[1]
                                     path = NOTES_DIR / fname
@@ -3920,6 +4152,35 @@ def bridge_loop(
                                 if action == 'CREATE':
                                     write(ser, "\r\nEnter a note name (without .txt). Q=Cancel: ")
                                     mode = "CREATE_NOTE_NAME"
+                                    continue
+                                if action == 'PASTE_CLIPBOARD':
+                                    clip_text = host_env.get_clipboard()
+                                    if not clip_text:
+                                        refresh_notes_session("Host clipboard is empty or unavailable.")
+                                        continue
+                                    if clip_text.startswith("[Clipboard read error:"):
+                                        refresh_notes_session(clip_text)
+                                        continue
+                                    write(ser, "\r\nSave host clipboard as a note. Name (Q=Cancel): ")
+                                    clip_title = read_input_line(ser).strip()
+                                    if not clip_title or clip_title.upper() == "Q":
+                                        refresh_notes_session("Clipboard capture cancelled.")
+                                        continue
+                                    invalid_chars = '<>:"/\\|?*'
+                                    if any(ord(ch) < 32 or ch in invalid_chars for ch in clip_title) or pathlib.Path(clip_title).name != clip_title or clip_title.endswith((".", " ")):
+                                        refresh_notes_session("Invalid note name.")
+                                        continue
+                                    clip_filename = clip_title if clip_title.lower().endswith(".txt") else clip_title + ".txt"
+                                    clip_path = NOTES_DIR / clip_filename
+                                    try:
+                                        with clip_path.open("x", encoding="utf-8", newline="") as clip_file:
+                                            clip_file.write(clip_text)
+                                    except FileExistsError:
+                                        refresh_notes_session(f"A note named {clip_filename} already exists.")
+                                    except OSError as exc:
+                                        refresh_notes_session(f"Could not save clipboard note: {exc}")
+                                    else:
+                                        refresh_notes_session(f"Saved host clipboard as {clip_filename}.")
                                     continue
                                 if action and action.startswith('DELETE:'):
                                     fname = action.split(':',1)[1]

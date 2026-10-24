@@ -10,7 +10,7 @@ import time
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-VERSION = "2.2"
+VERSION = "2.3"
 
 MENU_SECTIONS = [
     (
@@ -22,6 +22,7 @@ MENU_SECTIONS = [
             ("C", "Web Browser", "Browser", "browser"),
             ("D", "FTP Client", "FTP", "ftp"),
             ("E", "Electronic Mail", "Mail", "mail"),
+            ("F", "Connected Terminals", "Terminals", "terminals"),
         ],
     ),
     (
@@ -34,6 +35,7 @@ MENU_SECTIONS = [
             ("D", "COM Port Bridge", "COM Bridge", "com_bridge"),
             ("E", "Host Terminal", "Terminal", "host_terminal"),
             ("F", "Sys Monitor & Media", "Sys/Media", "host_media"),
+            ("G", "Host Printing", "Print", "print"),
         ],
     ),
     (
@@ -52,18 +54,21 @@ MENU_SECTIONS = [
         [
             ("A", "Minesweeper", "Mines", "mines"),
             ("B", "Solitaire", "Solitaire", "solitaire"),
-            ("C", "WarGames (W.O.P.R.)", "WarGames", "wargames"),
+            ("C", "Lunar Lander", "Lander", "lander"),
+            ("D", "Hunt the Wumpus", "Wumpus", "wumpus"),
+            ("E", "Blackjack", "Blackjack", "blackjack"),
+            ("F", "Mastermind", "Mastermind", "mastermind"),
         ],
     ),
     (
         "5",
         "ACCESSORIES",
         [
-            ("A", "Notepad (Notes)", "Notes", "notes"),
+            ("A", "Notepad", "Notepad", "notes"),
             ("B", "Calculator", "Calculator", "calc"),
             ("C", "Live Weather & News", "Weather/News", "weather_news"),
             ("D", "AI Assistant", "AI Chat", "ai"),
-            ("E", "Host Printing", "Print", "print"),
+            ("E", "LOGO", "Logo", "logo"),
         ],
     ),
     (
@@ -95,6 +100,8 @@ ACTION_ALIASES = {
     "mail": "mail",
     "email": "mail",
     "mailto": "mail",
+    "terminals": "terminals",
+    "connected_terminals": "terminals",
     "apps": "apps",
     "launch": "launch",
     "keyboard": "keyboard",
@@ -129,6 +136,14 @@ ACTION_ALIASES = {
     "minesweeper": "mines",
     "solitaire": "solitaire",
     "sol": "solitaire",
+    "lander": "lander",
+    "lunarlander": "lander",
+    "wumpus": "wumpus",
+    "hunt": "wumpus",
+    "blackjack": "blackjack",
+    "21": "blackjack",
+    "mastermind": "mastermind",
+    "codebreaker": "mastermind",
     "wargames": "wargames",
     "games": "wargames",
     "notes": "notes",
@@ -459,6 +474,9 @@ class ConsoleDashboard:
                 row_raw_len = len(c1_raw) + 1 + len(c2_raw) + 1 + len(c3_raw)
                 pad = " " * max(0, inner_width - row_raw_len)
                 rows.append((self._paint("| ", "dim", force_color=force_color) + f"{c1} {c2} {c3}" + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
+
+            # Keep a consistent visual break between the upper and lower menu bands.
+            rows.append((self._paint("| ", "dim", force_color=force_color) + (" " * inner_width) + self._paint(" |", "dim", force_color=force_color), "raw"))
 
             # Bottom half: Sec 4, 5, 6
             sec4, sec5, sec6 = MENU_SECTIONS[3], MENU_SECTIONS[4], MENU_SECTIONS[5]

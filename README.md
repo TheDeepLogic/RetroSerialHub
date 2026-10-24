@@ -25,9 +25,12 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Multi-Format Document Viewer**: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs with native Windows path handling
 - **Direct File Transfers**: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (`xsend`, `ysend`, `asend`, `xrecv`)
 - **Electronic Mail (Hub & Internet)**: Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
-- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), and WarGames (W.O.P.R.) simulation
+- **Connected Terminal Messaging**: List active serial/Telnet terminals, send a direct message, or deliver a text file from the Communications menu
+- **Terminal Messages**: List connected terminals and send a message to one machine or broadcast to all connected screens
+- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, and the WarGames (W.O.P.R.) CLI simulation
 - **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (`briefing`), and interactive article reader (`news <num>`)
 - **Background Task Scheduler**: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. `news : weather Austin : broadcast Morning briefing complete`)
+- **LOGO Programming**: A line-oriented terminal Logo interpreter with repeat loops, variables, procedures, detailed turtle status, and optional host-side turtle graphics
 - **Terminal Hardware Settings**: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
 - **In-Hub Help & User Guide**: 9 built-in guide topics accessible directly from the menu (`HELP` or `?`)
 - **Multi-Port Serial Support**: Connect multiple vintage computers simultaneously, each with independent configurations
@@ -80,22 +83,24 @@ transfer, browser, and other retro-computing services through the hub's menu.
 Retro Serial Hub features an accordion flyout main menu organized into 6 purposeful pillars optimized for 40- and 80-column retro terminals:
 - **Sections (0–6)**: Only the selected category is expanded, showing its available actions (`[A]–[G]`, `[+]`, `[-]`), while other categories remain collapsed as headers:
   - `[0] Shortcuts`: User-defined quick shortcuts to commands and tools with custom arguments (e.g., weather feeds, favorite BBS connections, games, calculations). If any shortcuts are populated, this section automatically flies out upon opening the main menu.
-  - `[1] Communications`: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client, Electronic Mail (Integrated Hub Mailbox & Internet Email)
-  - `[2] Host Connectivity`: Host Applications, Launch Host App, Keyboard Bridge, COM Port Bridge, Host Terminal / Prompt (cmd/powershell/bash), System Monitor & Media
+  - `[1] Communications`: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client, Electronic Mail, Connected Terminals (messages and file delivery)
+  - `[2] Host Connectivity`: Host Applications, Launch Host App, Keyboard Bridge, COM Port Bridge, Host Terminal / Prompt (cmd/powershell/bash), System Monitor & Media, Host Printing
   - `[3] Files & Media`: File Transfers (XMODEM/YMODEM/ASCII), Document Viewer, Text Library, ASCII Image Viewer
-  - `[4] Games`: Dedicated Retro Games (Minesweeper, Solitaire, WarGames W.O.P.R.)
-  - `[5] Accessories`: Notepad (Notes), Calculator, Live Weather & News, AI Assistant, Host Printing
+  - `[4] Games`: Dedicated Retro Games (Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind)
+  - `[5] Accessories`: Notepad, Calculator, Live Weather & News, AI Assistant, LOGO
   - `[6] System`: Command Shell (CLI), Task Scheduler, Terminal Hardware Settings, Keyboard Profiles, Help & User Guide, Welcome Banner, Disconnect
 - **Navigation**: Enter `0`–`6` (or section names such as `GAMES`, `CONNECTIVITY`, `SYS`) to expand that section. Enter `A`–`G`, `+`, or `-` to run the item within the currently active section.
 - **Shortcuts Management**: In the Shortcuts section, press `+` to add a shortcut with custom arguments (saved to `user_shortcuts.json`), or `-` to remove an existing shortcut. You can also manage shortcuts from the CLI via `shortcut add <name> <cmd>`, `shortcut list`, `shortcut run <id>`, or `shortcut del <id>`.
 - **Help & User Guide**: Comprehensive multi-topic documentation is accessible directly inside the hub by pressing `HELP`, `H`, or `?` at the main menu, selecting `[E]` under System, or typing `help <topic>` in the CLI.
-- **Direct Commands**: You can enter commands directly from the main menu prompt, such as `CLI` (or `OS`), `HELP` (or `?`), `SYSINFO`, `CLIP`, `VOL`, `MEDIA`, `WEATHER`, `NEWS`, `BRIEFING`, `SHORTCUT`, `APPS`, `VIEW`, `FETCH`, `LAUNCH`, `TERMINAL`, `CALC`, `MAIL`, `MAILTO`, `MINES`, `SOLITAIRE`, `WARGAMES`, `PRINT`, `KB`, `SCHEDULE`, `CAPS`, `PACE`, or `ATM` to return/refresh.
+- **Direct Commands**: You can enter commands directly from the main menu prompt, such as `CLI` (or `OS`), `HELP` (or `?`), `SYSINFO`, `CLIP`, `VOL`, `MEDIA`, `WEATHER`, `NEWS`, `BRIEFING`, `SHORTCUT`, `APPS`, `VIEW`, `FETCH`, `LAUNCH`, `TERMINAL`, `CALC`, `LOGO`, `MAIL`, `MAILTO`, `MINES`, `SOLITAIRE`, `WUMPUS`, `WARGAMES`, `PRINT`, `KB`, `SCHEDULE`, `CAPS`, `PACE`, or `ATM` to return/refresh.
 
 ### Command Shell (CLI)
 
 Enter `CLI` at the main menu to open the interactive command shell (`cli>`). Type `help` for commands or `exit` to return to the menu:
 - `sysinfo` (aliases `sys`, `top`): Displays host CPU cores, memory load, disk capacity, uptime, and OS platform information formatted cleanly for 40- or 80-column screens.
-- `clip [text]` / `copy <text>` / `paste`: Reads the host OS clipboard or copies text to the host clipboard directly from your vintage terminal.
+- `clip [text]` / `copy <text>` / `paste`: Reads the host OS clipboard or copies text to the host clipboard. Notepad also has `P` to save clipboard text as a note and `C<number>` to copy a note to the clipboard.
+- `terminals`: Lists connected serial and Telnet terminals. `msg to <terminal> <text>` sends a message to one listed destination; `msg <text>` broadcasts to all.
+- `logo`: Opens the interactive Logo prompt. Use `REPEAT 4 (FD 80 RT 90)` (parentheses or square brackets) to draw a square; drawing commands report turtle position and heading.
 - `media <play|pause|next|prev|stop>` and `vol <up|down|mute>`: Controls host media playback and volume without leaving your retro terminal.
 - `weather [city/zip]`: Fetches current conditions and ASCII weather forecast from wttr.in.
 - `news [npr|hn|bbc] [count]` / `news <number>`: Parses and displays clean ASCII news headlines from RSS feeds. Type an article number (e.g. `news 1` or `news 1 full`) to read the article story summary or fetch the complete web article text.
@@ -126,6 +131,10 @@ All games feature clean ASCII board rendering optimized for both 40- and 80-colu
 - **Minesweeper** (`mines`): Text-mode minefield with first-click safety, reveal (`r row col`), flag toggle (`f row col`), and customizable board dimensions.
 - **Klondike Solitaire** (`solitaire`): Full card tableau with stock/waste piles, card movement, and automatic foundation moves (`f`).
 - **WarGames (W.O.P.R.)** (`wargames`): Interactive NORAD defense computer simulation inspired by the 1983 film.
+- **Lunar Lander** (`games lander`): Turn-based descent challenge controlled with numeric engine burns.
+- **Hunt the Wumpus** (`games wumpus` in the CLI, or Games section `[D]`): Cave exploration with numbered rooms, danger clues, bats, pits, and three-room arrow shots, designed for line-oriented terminals.
+- **Blackjack** (`games blackjack`): Play hit or stand against a dealer with standard ace scoring.
+- **Mastermind** (`games mastermind`): Crack a four digit code using exact and misplaced clues in up to ten guesses.
 
 ### Built-in Help & User Guide
 
@@ -308,14 +317,18 @@ errors are printed as ordinary text without ANSI color codes.
 The main menu features an interactive accordion flyout layout designed for vintage 40- and 80-column terminals:
 
 - **[0] Shortcuts**: User-defined command macros with custom arguments. Automatically flies out when populated. Press `+` to add a shortcut or `-` to remove one.
-- **[1] Communications**: `A` Bulletin Boards, `B` Telnet, `C` Web Browser, `D` FTP, and `E` Electronic Mail (Hub & Internet).
-- **[2] Host Connectivity**: `A` Host Applications, `B` Launch with Keyboard Bridge, `C` Keyboard Bridge Profiles, `D` Serial COM Port Bridge, `E` Host Terminal / Prompt (`cmd.exe`/`powershell`/unix shell), and `F` System Monitor & Media Controls.
+- **[1] Communications**: `A` Bulletin Boards, `B` Telnet, `C` Web Browser, `D` FTP, `E` Electronic Mail (Hub & Internet), and `F` Connected Terminals (list, message, or send a text file).
+- **[2] Host Connectivity**: `A` Host Applications, `B` Launch with Keyboard Bridge, `C` Keyboard Bridge Profiles, `D` Serial COM Port Bridge, `E` Host Terminal / Prompt (`cmd.exe`/`powershell`/unix shell), `F` System Monitor & Media Controls, and `G` Host Printing.
 - **[3] Files & Media**: `A` File Transfers (XMODEM, YMODEM, ASCII), `B` Document Viewer (PDF, DOCX, XLSX, CSV, Markdown, Web), `C` Text Library, and `D` ASCII Image Viewer.
-- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), and `C` WarGames (W.O.P.R.).
-- **[5] Accessories**: `A` Notes, `B` Calculator, `C` Live Weather & News Briefings, `D` AI Assistant, and `E` Host Printing.
+- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), `C` Lunar Lander, `D` Hunt the Wumpus, `E` Blackjack, and `F` Mastermind. WarGames remains available through the `WARGAMES` CLI command.
+- **[5] Accessories**: `A` Notepad, `B` Calculator, `C` Live Weather & News Briefings, `D` AI Assistant, and `E` LOGO. Logo accepts commands in the terminal and reports turtle position and heading after drawing; when Tkinter is available, it also opens a host-side turtle window.
 - **[6] System**: `A` Command Shell (`cli>` / `OS`), `B` Background Task Scheduler, `C` Terminal Hardware Settings (40/80 cols, Caps-Only, Serial Pacing, ANSI), `D` Welcome Banner, and `E` Help & User Guide (`HELP` or `?`). Remote TCP clients also see `F` Disconnect.
 
-Enter a section number (`0`-`6`) or name (`GAMES`, `SYS`, `HOST`, etc.) to expand it, then enter the letter (`A`-`F`) to activate an option. You can also switch between the accordion flyout and the legacy numbered menu layout.
+Enter a section number (`0`-`6`) or name (`GAMES`, `SYS`, `HOST`, etc.) to expand it, then enter the letter (`A`-`G`) to activate an option. You can also switch between the accordion flyout and the legacy numbered menu layout.
+
+### LOGO
+
+Select **Accessories > E > LOGO**, or type `LOGO` at the main menu. At the `Logo>` prompt, try `REPEAT 4 (FD 80 RT 90)` to draw a square; square brackets work too. Use `STATUS` to inspect turtle state and `HELP` to see the supported commands. Variables (`MAKE "side 60`), arithmetic words, and user procedures (`TO SQUARE :side`, then commands, then `END`) are supported. Type `BYE` to return to the hub. Drawing output is always described in the terminal; the graphical turtle window is optional and requires a working Tkinter display.
 
 The Keyboard option types into the focused host application. Enter, Tab, and Backspace are supported;
 press **Ctrl+X** to exit. Escape and Ctrl+] are also recognized when the
@@ -506,6 +519,22 @@ This design allows you to customize or extend features without modifying the cor
 - Try a different cable
 
 ## Release Notes
+
+### v2.3
+
+- **Terminal Logo Programming**: Added the LOGO accessory and CLI launcher, with
+  movement, pen controls, repeat groups using brackets or parentheses, variables,
+  arithmetic, user procedures, terminal turtle status, and optional host graphics.
+- **Connected Terminal Tools**: Added a Communications menu for listing active
+  terminals, messaging a selected terminal, and delivering a text file over ASCII;
+  the CLI also supports `terminals` and `msg to <terminal> <text>`.
+- **Expanded Terminal Games**: Added Lunar Lander, Hunt the Wumpus, Blackjack,
+  and Mastermind to Games. WarGames remains available through the CLI. Game prompts
+  now show the single-letter keys that activate each action.
+- **Menu and Notes Updates**: Moved Host Printing to Host Connectivity, renamed
+  the Notes menu item to Notepad, added host clipboard capture/copy workflows,
+  corrected dashboard section activity numbering, and normalized menu spacing.
+- Updated both user guides and incremented the application version to v2.3.
 
 ### v2.2
 

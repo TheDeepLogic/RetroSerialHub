@@ -19,6 +19,7 @@ class OSFlyoutMenu:
                 ("C", "Web Browser", "browser"),
                 ("D", "FTP Client", "ftp"),
                 ("E", "Electronic Mail", "mail"),
+                ("F", "Connected Terminals", "terminals"),
             ],
         ),
         (
@@ -31,6 +32,7 @@ class OSFlyoutMenu:
                 ("D", "COM Port Bridge", "com_bridge"),
                 ("E", "Host Terminal / Prompt", "host_terminal"),
                 ("F", "System Monitor & Media", "host_media"),
+                ("G", "Host Printing", "print"),
             ],
         ),
         (
@@ -49,18 +51,21 @@ class OSFlyoutMenu:
             [
                 ("A", "Minesweeper", "mines"),
                 ("B", "Solitaire", "solitaire"),
-                ("C", "WarGames (W.O.P.R.)", "wargames"),
+                ("C", "Lunar Lander", "lander"),
+                ("D", "Hunt the Wumpus", "wumpus"),
+                ("E", "Blackjack", "blackjack"),
+                ("F", "Mastermind", "mastermind"),
             ],
         ),
         (
             "Accessories",
             "5",
             [
-                ("A", "Notepad (Notes)", "notes"),
+                ("A", "Notepad", "notes"),
                 ("B", "Calculator", "calc"),
                 ("C", "Live Weather & News", "weather_news"),
                 ("D", "AI Assistant", "ai"),
-                ("E", "Host Printing", "print"),
+                ("E", "LOGO", "logo"),
             ],
         ),
         (

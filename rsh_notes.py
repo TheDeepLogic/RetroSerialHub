@@ -43,7 +43,7 @@ def _render_menu(ser, sess):
     items = sess.get('notes', [])
     if not items:
         _write(ser, "No notes available.\r\n")
-        _write(ser, "\r\nC=Create, Q=Quit\r\n")
+        _write(ser, "\r\nC=Create, P=Save Host Clipboard as Note, Q=Quit\r\n")
         if sess.get('notice'):
             _write(ser, f"\r\n{sess['notice']}\r\n")
         _write(ser, "Command: ")
@@ -53,7 +53,7 @@ def _render_menu(ser, sess):
     _write(ser, "\r\nNotes:\r\n\r\n")
     for ln in lines:
         _write(ser, ln + "\r\n")
-    _write(ser, "\r\nEnter number to read, C=Create, D=Delete, Q=Quit\r\n")
+    _write(ser, "\r\nNumber=Read, C=Create, C<number>=Copy to Host Clipboard, P=Save Clipboard as Note, D<number>=Delete, Q=Quit\r\n")
     if sess.get('notice'):
         _write(ser, f"\r\n{sess['notice']}\r\n")
     _write(ser, "Command: ")
@@ -69,6 +69,19 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         return True, 'MENU'
     if upper == 'C':
         return True, 'CREATE'
+    if upper == 'P':
+        return True, 'PASTE_CLIPBOARD'
+    if upper.startswith('C') and len(txt) > 1:
+        rest = txt[1:].strip()
+        try:
+            num = int(rest)
+        except ValueError:
+            num = 0
+        if 1 <= num <= len(sess.get('notes', [])):
+            return True, ('COPY_TO_CLIPBOARD', sess['notes'][num - 1])
+        _write(ser, "Invalid note number for clipboard copy\r\n")
+        _write(ser, "Command: ")
+        return True, None
     if upper.startswith('D') and len(txt) > 1:
         # allow 'D 3' or 'D3' to delete specific index
         rest = txt[1:].strip()
