@@ -1,6 +1,6 @@
 ![Retro Serial Hub](images/retroserialhub_banner.jpg)
 
-# Retro Serial Hub
+# Retro Serial Hub v2.4
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -20,14 +20,16 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Retro Serial OS Runtime**: Interactive command shell (`cli>` / `OS`) with hot-reloadable module system, event bus pub/sub, multi-client sessions, and keyboard bridge shortcut profiles
 - **Accordion Main Menu & Custom Shortcuts**: Fast categorized accordion flyout navigation with user-defined macros, arguments, and automatic flyout
 - **Host Terminal / Command Prompt**: Quick launch the host OS shell (`cmd.exe` on Windows, or `$SHELL` on macOS/Linux) with bidirectional console streaming, local echo, and line translation
-- **Console Pseudo Interface & Live User Activity**: Host console dashboard displays an interactive pseudo-interface view highlighting the menu items connected retro users are currently browsing in real time
+- **Interactive Host Console & Live Activity**: Run hub commands, send messages, and open menus from the host dashboard, with scrollable output, command history, and live terminal activity
+- **Host-Approved Telnet Access**: New source IPs require host keyboard approval or a manual JSON allowlist entry before a session starts; serial connections are exempt
+- **Accessories & Media Tools**: Calendar with reminders, unit and number-base conversions, address book, shared file manager, ZIP archive browser, and host audio player with playlists
 - **Real-Time Host System Monitor**: Live CPU load measurement, RAM, disk, and uptime metrics with automatic screen clearing and interactive controls (`top` / `sysinfo live`)
 - **Multi-Format Document Viewer**: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs with native Windows path handling
 - **Direct File Transfers**: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (`xsend`, `ysend`, `asend`, `xrecv`)
 - **Electronic Mail (Hub & Internet)**: Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
 - **Connected Terminal Messaging**: List active serial/Telnet terminals, send a direct message, or deliver a text file from the Communications menu
 - **Terminal Messages**: List connected terminals and send a message to one machine or broadcast to all connected screens
-- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, and the WarGames (W.O.P.R.) CLI simulation
+- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek, and the WarGames (W.O.P.R.) CLI simulation
 - **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (`briefing`), and interactive article reader (`news <num>`)
 - **Background Task Scheduler**: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. `news : weather Austin : broadcast Morning briefing complete`)
 - **LOGO Programming**: A line-oriented terminal Logo interpreter with repeat loops, variables, procedures, detailed turtle status, and optional host-side turtle graphics
@@ -48,10 +50,11 @@ transfer, browser, and other retro-computing services through the hub's menu.
 
 ## Requirements
 
-- Python 3.8 or higher
+- Python 3.9 or higher
 - Dependencies listed in `requirements.txt`
 - USB-to-Serial adapters or RS-232 ports for connecting vintage computers
 - Optional: OpenAI API key for AI Assistant feature
+- Optional: FFmpeg (`ffplay` on PATH) for internet radio and additional audio formats/platforms
 
 ## Installation
 
@@ -81,20 +84,44 @@ transfer, browser, and other retro-computing services through the hub's menu.
 ## Main Menu Navigation and Command Shell (CLI)
 
 Retro Serial Hub features an accordion flyout main menu organized into 6 purposeful pillars optimized for 40- and 80-column retro terminals:
-- **Sections (0–6)**: Only the selected category is expanded, showing its available actions (`[A]–[G]`, `[+]`, `[-]`), while other categories remain collapsed as headers:
+- **Sections (0–6)**: Only the selected category is expanded, showing its available actions (`[A]–[H]`, `[+]`, `[-]`), while other categories remain collapsed as headers:
   - `[0] Shortcuts`: User-defined quick shortcuts to commands and tools with custom arguments (e.g., weather feeds, favorite BBS connections, games, calculations). If any shortcuts are populated, this section automatically flies out upon opening the main menu.
   - `[1] Communications`: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client, Electronic Mail, Connected Terminals (messages and file delivery)
   - `[2] Host Connectivity`: Host Applications, Launch Host App, Keyboard Bridge, COM Port Bridge, Host Terminal / Prompt (cmd/powershell/bash), System Monitor & Media, Host Printing
-  - `[3] Files & Media`: File Transfers (XMODEM/YMODEM/ASCII), Document Viewer, Text Library, ASCII Image Viewer
-  - `[4] Games`: Dedicated Retro Games (Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind)
-  - `[5] Accessories`: Notepad, Calculator, Live Weather & News, AI Assistant, LOGO
-  - `[6] System`: Command Shell (CLI), Task Scheduler, Terminal Hardware Settings, Keyboard Profiles, Help & User Guide, Welcome Banner, Disconnect
-- **Navigation**: Enter `0`–`6` (or section names such as `GAMES`, `CONNECTIVITY`, `SYS`) to expand that section. Enter `A`–`G`, `+`, or `-` to run the item within the currently active section.
+  - `[3] Files & Media`: File Manager, File Transfers (XMODEM/YMODEM/ASCII), Archive Browser, Text Library, Document Viewer, ASCII Image Viewer, Audio Player
+  - `[4] Games`: Dedicated Retro Games (Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek)
+  - `[5] Accessories`: Notepad, Calendar, Calculator, Address Book, Unit Converter, Weather & News, AI Assistant, LOGO
+  - `[6] System`: Command Shell (CLI), Task Scheduler, Terminal Hardware Settings, Keyboard Profiles, Help & User Guide, Welcome Banner, Host Settings, Disconnect
+- **Navigation**: Enter `0`–`6` (or section names such as `GAMES`, `CONNECTIVITY`, `SYS`) to expand that section. Enter the item's letter (`A`–`H` where available), `+`, or `-` to run it within the currently active section.
 - **Shortcuts Management**: In the Shortcuts section, press `+` to add a shortcut with custom arguments (saved to `user_shortcuts.json`), or `-` to remove an existing shortcut. You can also manage shortcuts from the CLI via `shortcut add <name> <cmd>`, `shortcut list`, `shortcut run <id>`, or `shortcut del <id>`.
 - **Help & User Guide**: Comprehensive multi-topic documentation is accessible directly inside the hub by pressing `HELP`, `H`, or `?` at the main menu, selecting `[E]` under System, or typing `help <topic>` in the CLI.
 - **Direct Commands**: You can enter commands directly from the main menu prompt, such as `CLI` (or `OS`), `HELP` (or `?`), `SYSINFO`, `CLIP`, `VOL`, `MEDIA`, `WEATHER`, `NEWS`, `BRIEFING`, `SHORTCUT`, `APPS`, `VIEW`, `FETCH`, `LAUNCH`, `TERMINAL`, `CALC`, `LOGO`, `MAIL`, `MAILTO`, `MINES`, `SOLITAIRE`, `WUMPUS`, `WARGAMES`, `PRINT`, `KB`, `SCHEDULE`, `CAPS`, `PACE`, or `ATM` to return/refresh.
 
 ### Command Shell (CLI)
+
+The host dashboard also accepts hub commands directly at `Host>`. It starts in
+the same CLI as a connected terminal, with its own session and output history.
+For example:
+
+```text
+terminals
+msg to APPLE2 Hello from the host
+broadcast Meeting in five minutes
+calc 6 * 7
+```
+
+Use `terminals` to find exact destination names. Other terminals can reply with
+`msg to Host <text>`. `ATM` opens the normal numbered menus; use `CLI` to return
+to commands. Interactive tools use the same prompts as serial/Telnet sessions.
+Host output stays in the dashboard: PgUp/PgDn scroll it, Up/Down recall commands,
+and `clear` clears the output pane. Blank Enter answers prompts or continues a
+pause; Ctrl+X is forwarded to the active host session. The host CLI also works
+when inbound Telnet listeners are disabled.
+
+`allow <request #>`, `deny <request #>`, and `pending` remain local console
+controls for incoming Telnet approval. They are not exposed through the remote
+hub CLI. The host session appears as `Host`, without adding a serial port or
+Telnet connection to the live counts.
 
 Enter `CLI` at the main menu to open the interactive command shell (`cli>`). Type `help` for commands or `exit` to return to the menu:
 - `sysinfo` (aliases `sys`, `top`): Displays host CPU cores, memory load, disk capacity, uptime, and OS platform information formatted cleanly for 40- or 80-column screens.
@@ -135,10 +162,31 @@ All games feature clean ASCII board rendering optimized for both 40- and 80-colu
 - **Hunt the Wumpus** (`games wumpus` in the CLI, or Games section `[D]`): Cave exploration with numbered rooms, danger clues, bats, pits, and three-room arrow shots, designed for line-oriented terminals.
 - **Blackjack** (`games blackjack`): Play hit or stand against a dealer with standard ace scoring.
 - **Mastermind** (`games mastermind`): Crack a four digit code using exact and misplaced clues in up to ten guesses.
+- **Word Guess** (`games wordguess`, or Games section `[G]`): Find a hidden five-letter word in six tries. `G` marks a correct position, `Y` marks a letter elsewhere in the word, and `.` marks a letter that is absent.
+- **Star Trek** (`games trek`, or Games section `[H]`): Explore an 8×8 galaxy, scan quadrants and sectors, then destroy Klingons with phasers and photon torpedoes before the mission deadline. Move with `move <course> <warp>`; dock near a starbase to resupply.
 
 ### Built-in Help & User Guide
 
 An interactive multi-topic guide is accessible anywhere by typing `HELP`, `H`, or `?` at the main menu or selecting `[E]` under System. Topics cover hub capabilities, navigation, shell commands, hardware settings, games, and emergency hotkeys with built-in `--More--` paging.
+
+### Accessories and Shared Files
+
+All six tools have numbered terminal menus and CLI commands. Quote names and paths containing spaces.
+
+| Menu | Tool | CLI examples |
+|---|---|---|
+| Accessories B | Calendar | `calendar month`, `calendar add 2026-11-01 09:00 "Retro club"`, `calendar agenda`, `calendar done <id>` |
+| Accessories D | Address Book | `contacts add "Retro Friend"`, `contacts set <id> email user@example.org`, `contacts set <id> bbs example.org:23`, `contacts mail <id>`, `contacts connect <id>` |
+| Accessories E | Unit Converter | `convert 72 F C`, `convert 1 mi km`, `convert FF hex bin` |
+| Files & Media A | File Manager | `fileman ls`, `fileman cd <folder>`, `fileman copy <file> <destination>`, `fileman view <file>`, `fileman send <file> y` |
+| Files & Media C | Archive Browser | `archive list`, `archive open software.zip`, `archive members`, `archive extract 2`, `archive extract all unpacked` |
+| Files & Media G | Audio Player | `audio list`, `audio play 1`, `audio queue 2`, `audio pause`, `audio next`, `audio volume 70`, `audio save "Retro Mix"`, `audio load "Retro Mix"`, `audio radio <stream URL>` |
+
+Appointments and contacts are shared by terminals and saved in `hub_tools/`. Appointment times follow the host's local clock. Due reminders broadcast to connected terminals, and today's appointments and overdue items appear when a terminal connects. Mark an appointment done to remove it from the open agenda.
+
+File operations and ZIP extraction stay inside `files/` and do not replace existing files. ZIP contents can be extracted individually or together. Numbered file selections come from the current listing; each terminal has its own browsing location.
+
+Audio plays through the host speakers with one shared playback queue. Put audio files in `files/`; saved M3U playlists go in `files/playlists/`. Windows provides native local playback. Installing FFmpeg with `ffplay` on PATH enables internet radio, additional formats, and playback on other platforms. Playback errors appear in `audio info`.
 
 ## Configuration
 
@@ -270,14 +318,49 @@ the server works even if that profile's serial port is not connected.
 When a listener starts, the hub prints detected LAN IPv4 address(es) and ports
 to use for connecting.
 
-These sessions are unauthenticated and unencrypted. Keep the server disabled
-unless needed, restrict access with your firewall, and do not forward these
-ports from the Internet. The listener is disabled by default when
+Incoming Telnet clients must be listed in `telnet_allowlist.json`. The hub
+creates this file with an empty `allowed_ips` array on its first network-enabled
+start; no address, including loopback, is automatically trusted. Serial
+connections do not use this approval process.
+
+An unknown address waits for up to 120 seconds while the host dashboard shows
+its request number, source IP, and requested machine profile. At the **host
+computer's console**, type `allow 1` or `deny 1` (using the displayed request
+number), then press Enter. `pending` lists pending requests. Approval is saved
+before the waiting client receives a hub session. Future connections from that
+IP can enter any machine profile without another prompt. Input sent by an
+unapproved client is discarded and cannot approve its own connection.
+
+You can also edit the JSON manually, using individual IP addresses:
+
+```json
+{
+  "allowed_ips": ["192.168.1.13", "192.168.1.14"]
+}
+```
+
+See `telnet_allowlist.example.json` for an empty template. Manual additions apply
+to waiting clients and new connections without a restart. Removing an address
+blocks its next connection; it does not end an existing approved session.
+Missing files mean no addresses are approved. Invalid JSON, invalid entries,
+or a failed approval save never grant access. Without an interactive host console
+(for example, a background service), unknown connections are refused; add their
+addresses manually and reconnect. Pending approvals are limited to 16, with one
+per source IP, and unanswered requests expire.
+
+This trusts source IPs, not hardware identities. DHCP reservations help keep
+entries assigned to the intended devices; devices behind the same NAT or proxy
+can share an approved address. Approved clients still have the hub's full host
+capabilities. Telnet remains unencrypted: restrict access with your firewall and
+do not forward these ports from the Internet. The listener is disabled when
 `TELNET_SERVER_CONFIGS` is empty.
 
 ### AI Assistant Configuration (Optional)
 
 To enable the AI Assistant feature:
+
+Install the optional client library with `python -m pip install openai`, then
+configure a key using either method below.
 
 1. Create `ai_config.json` in the project directory:
    ```json
@@ -319,20 +402,21 @@ The main menu features an interactive accordion flyout layout designed for vinta
 - **[0] Shortcuts**: User-defined command macros with custom arguments. Automatically flies out when populated. Press `+` to add a shortcut or `-` to remove one.
 - **[1] Communications**: `A` Bulletin Boards, `B` Telnet, `C` Web Browser, `D` FTP, `E` Electronic Mail (Hub & Internet), and `F` Connected Terminals (list, message, or send a text file).
 - **[2] Host Connectivity**: `A` Host Applications, `B` Launch with Keyboard Bridge, `C` Keyboard Bridge Profiles, `D` Serial COM Port Bridge, `E` Host Terminal / Prompt (`cmd.exe`/`powershell`/unix shell), `F` System Monitor & Media Controls, and `G` Host Printing.
-- **[3] Files & Media**: `A` File Transfers (XMODEM, YMODEM, ASCII), `B` Document Viewer (PDF, DOCX, XLSX, CSV, Markdown, Web), `C` Text Library, and `D` ASCII Image Viewer.
-- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), `C` Lunar Lander, `D` Hunt the Wumpus, `E` Blackjack, and `F` Mastermind. WarGames remains available through the `WARGAMES` CLI command.
-- **[5] Accessories**: `A` Notepad, `B` Calculator, `C` Live Weather & News Briefings, `D` AI Assistant, and `E` LOGO. Logo accepts commands in the terminal and reports turtle position and heading after drawing; when Tkinter is available, it also opens a host-side turtle window.
-- **[6] System**: `A` Command Shell (`cli>` / `OS`), `B` Background Task Scheduler, `C` Terminal Hardware Settings (40/80 cols, Caps-Only, Serial Pacing, ANSI), `D` Welcome Banner, and `E` Help & User Guide (`HELP` or `?`). Remote TCP clients also see `F` Disconnect.
+- **[3] Files & Media**: `A` File Manager, `B` File Transfers (XMODEM, YMODEM, ASCII), `C` Archive Browser, `D` Text Library, `E` Document Viewer (PDF, DOCX, XLSX, CSV, Markdown, Web), `F` ASCII Image Viewer, and `G` Audio Player.
+- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), `C` Lunar Lander, `D` Hunt the Wumpus, `E` Blackjack, `F` Mastermind, `G` Word Guess, and `H` Star Trek. WarGames remains available through the `WARGAMES` CLI command.
+- **[5] Accessories**: `A` Notepad, `B` Calendar, `C` Calculator, `D` Address Book, `E` Unit Converter, `F` Weather & News, `G` AI Assistant, and `H` LOGO. Logo accepts commands in the terminal and reports turtle position and heading after drawing; when Tkinter is available, it also opens a host-side turtle window.
+- **[6] System**: `A` Command Shell (`cli>` / `OS`), `B` Task Scheduler, `C` Terminal Settings (40/80 cols, Caps-Only, Serial Pacing, ANSI), `D` Keyboard Profiles, `E` Help & User Guide, `F` Welcome Banner, and `G` Host Settings. Remote TCP clients also see `H` Disconnect at the bottom.
 
 Enter a section number (`0`-`6`) or name (`GAMES`, `SYS`, `HOST`, etc.) to expand it, then enter the letter (`A`-`G`) to activate an option. You can also switch between the accordion flyout and the legacy numbered menu layout.
 
 ### LOGO
 
-Select **Accessories > E > LOGO**, or type `LOGO` at the main menu. At the `Logo>` prompt, try `REPEAT 4 (FD 80 RT 90)` to draw a square; square brackets work too. Use `STATUS` to inspect turtle state and `HELP` to see the supported commands. Variables (`MAKE "side 60`), arithmetic words, and user procedures (`TO SQUARE :side`, then commands, then `END`) are supported. Type `BYE` to return to the hub. Drawing output is always described in the terminal; the graphical turtle window is optional and requires a working Tkinter display.
+Select **Accessories > H > LOGO**, or type `LOGO` at the main menu. At the `Logo>` prompt, try `REPEAT 4 (FD 80 RT 90)` to draw a square; square brackets work too. Use `STATUS` to inspect turtle state and `HELP` to see the supported commands. Variables (`MAKE "side 60`), arithmetic words, and user procedures (`TO SQUARE :side`, then commands, then `END`) are supported. Type `BYE` to return to the hub. Drawing output is always described in the terminal; the graphical turtle window is optional and requires a working Tkinter display.
 
-The Keyboard option types into the focused host application. Enter, Tab, and Backspace are supported;
-press **Ctrl+X** to exit. Escape and Ctrl+] are also recognized when the
-terminal can send them. This uses Windows' native input API on Windows and
+The Keyboard option types into the focused host application. Enter, Tab,
+Backspace, and Escape are supported. The configured Ctrl+letter exit binding
+defaults to **Ctrl+X** and can be changed under **System > Host Settings**.
+This uses Windows' native input API on Windows and
 `pynput` on macOS/Linux. Keep the intended application focused while using this
 mode.
 
@@ -435,6 +519,9 @@ Retro-Serial-Hub/
 ├── telnet_bookmarks.json  # Telnet bookmarks (created when first saved)
 ├── ftp_bookmarks.json     # FTP/FTPS bookmarks (created when first saved)
 ├── keyboard_profiles.json # Retro keyboard mapping profiles (Apple II, C64, etc.)
+├── host_settings.json     # Saved host preferences (created when changed)
+├── telnet_allowlist.json  # Approved source IPs (created on network-enabled startup)
+├── telnet_allowlist.example.json # Empty allowlist template
 ├── requirements.txt       # Python dependencies
 ├── rsh_ai.py              # AI Assistant module
 ├── rsh_bbs.py             # BBS directory and management module
@@ -445,6 +532,9 @@ Retro-Serial-Hub/
 ├── rsh_bridge.py          # COM port bridge module
 ├── rsh_files.py           # File transfer module
 ├── rsh_keyboard.py        # Host keyboard bridge
+├── rsh_access.py          # Telnet admission and host approval queue
+├── rsh_host.py            # Local host-console terminal session
+├── rsh_console.py         # Live dashboard, keyboard input, and output history
 ├── rsh_notes.py           # Notes module
 ├── rsh_terminal.py        # ANSI translation and screen clearing
 ├── rsh_text.py            # Text library module
@@ -454,6 +544,8 @@ Retro-Serial-Hub/
 │   ├── core.py            # Shell, EventBus, Session model, ModuleLoader
 │   ├── runtime.py         # Runtime initialization and built-in command handlers
 │   ├── host_env.py        # Host OS integration, app scanner, clipboard, sysinfo
+│   ├── toolkit.py         # Calendar, conversion, contacts, files, and ZIP tools
+│   ├── audio_player.py    # Shared audio playback and playlists
 │   ├── menu.py            # Accordion flyout menu engine
 │   ├── shortcuts.py       # User-defined command shortcuts manager
 │   ├── scheduler.py       # Background periodic task scheduler
@@ -466,6 +558,7 @@ Retro-Serial-Hub/
 ├── files/                 # File transfer storage
 ├── text/                  # Text library files, README, and starter articles
 ├── notes/                 # Notes storage
+├── hub_tools/             # Local appointment and contact data (not committed)
 └── tests/                 # Unit tests
 ```
 
@@ -519,6 +612,37 @@ This design allows you to customize or extend features without modifying the cor
 - Try a different cable
 
 ## Release Notes
+
+### v2.4
+
+- **Interactive Host Console**: The host keyboard now runs the hub's CLI and
+  interactive menus. Added host-to-terminal messaging and replies to `Host`,
+  scrollable command output, command history, and masked FTP password input.
+- **Telnet Source Approval**: Unknown source IPs wait for `allow <request #>` or
+  `deny <request #>` at the host keyboard. Approvals persist in a manually editable
+  JSON allowlist. Missing/invalid policies and failed saves never grant access;
+  pending requests expire and the queue is bounded. Serial connections are exempt.
+- **Six New Tools**: Added Calendar with persistent reminders, Unit Converter,
+  Address Book with mail/BBS shortcuts, File Manager, ZIP Archive Browser, and
+  Audio Player with host playback controls, M3U playlists, and optional internet
+  radio through FFmpeg.
+- **More Terminal Games**: Added Word Guess and a Star Trek adaptation inspired
+  by the supplied Apple II BASIC listing, with quadrant exploration, scans,
+  phasers, photon torpedoes, shields, starbase resupply, and a mission deadline.
+- **Host Settings**: Added a host preferences menu with a saved keyboard bridge
+  exit binding, defaulting to Ctrl+X. Escape is forwarded to the host application.
+- **Menus and Status Formatting**: Reordered Files & Media and Accessories,
+  shortened Calendar and Weather & News labels, and placed Disconnect last in
+  System. Active and waiting profile rows share field order and indentation;
+  active rows stay green under a gray divider without redundant terminal text.
+- **Stable Console Redrawing**: Fixed cursor drift after host input and approval
+  changes. Redraws use fixed screen positions, fit the viewport, and retain the
+  host prompt when the full dashboard will not fit.
+- **Session Reliability**: Kept game, Logo, and mail context tied to the correct
+  terminal, serialized module initialization, and shared one scheduler per task
+  file so adding a host session does not duplicate scheduled jobs.
+- Updated the README, in-hub help, text-library guide, and regression coverage.
+  Private allowlists and saved tool data remain local to the installation.
 
 ### v2.3
 

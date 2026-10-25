@@ -9,6 +9,7 @@ from retro_os.scheduler import MODULE_USAGE_INFO, TaskScheduler
 
 _context = None
 _scheduler: TaskScheduler | None = None
+_schedulers_by_path = {}
 
 
 def init(context):
@@ -17,6 +18,9 @@ def init(context):
     tasks_file = context.fs.get("tasks")
     if not tasks_file:
         tasks_file = context.fs.get("files", context.fs.get("notes")).parent / "scheduled_tasks.json"
+    key = str(tasks_file.resolve())
+    if key in _schedulers_by_path:
+        context.host_env.scheduler = _schedulers_by_path[key]
 
     # Check if a scheduler is already created on host_env or create one
     if not hasattr(context.host_env, "scheduler") or context.host_env.scheduler is None:
@@ -46,6 +50,7 @@ def init(context):
             bus=context.bus,
         )
         context.host_env.scheduler.start()
+    _schedulers_by_path[key] = context.host_env.scheduler
     _scheduler = context.host_env.scheduler
 
 

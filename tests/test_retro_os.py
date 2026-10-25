@@ -330,8 +330,9 @@ class RetroOsMenuAndLauncherTests(unittest.TestCase):
         # Select section by name
         self.assertTrue(menu.select_section("FILES"))
         self.assertEqual(menu.active_section_name, "Files & Media")
-        self.assertEqual(menu.get_action_for_key("A"), "files")
-        self.assertEqual(menu.get_action_for_key("B"), "view")
+        self.assertEqual(menu.get_action_for_key("A"), "fileman")
+        self.assertEqual(menu.get_action_for_key("B"), "files")
+        self.assertEqual(menu.get_action_for_key("E"), "view")
 
         # Select section 4: Games
         self.assertTrue(menu.select_section("4"))
@@ -344,8 +345,9 @@ class RetroOsMenuAndLauncherTests(unittest.TestCase):
         self.assertTrue(menu.select_section("5"))
         self.assertEqual(menu.active_section_name, "Accessories")
         self.assertEqual(menu.get_action_for_key("A"), "notes")
-        self.assertEqual(menu.get_action_for_key("B"), "calc")
-        self.assertEqual(menu.get_action_for_key("C"), "weather_news")
+        self.assertEqual(menu.get_action_for_key("B"), "calendar")
+        self.assertEqual(menu.get_action_for_key("C"), "calc")
+        self.assertEqual(menu.get_action_for_key("F"), "weather_news")
 
         # Select section 6: System (by abbreviation)
         self.assertTrue(menu.select_section("sys"))
@@ -652,6 +654,8 @@ class UserShortcutsTests(unittest.TestCase):
         # Start new game on 80 cols
         ctx80 = DummyContext(cols=80)
         games_module.init(ctx80)
+        reg = Shell()
+        games_module.register_commands(reg)
         status80 = reg.execute("solitaire new")
         self.assertIn("Stock:", status80)
         self.assertIn("Waste:", status80)
@@ -765,39 +769,44 @@ class RetroWorkstationCompanionTests(unittest.TestCase):
         from retro_os.runtime import create_runtime
         from retro_os.core import Session
         import tempfile
+        from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as tmpdir:
             fs = {"notes": tmpdir, "text": tmpdir, "bookmarks": tmpdir, "files": tmpdir}
             session = Session()
             session, bus, host_env, shell, loader = create_runtime(fs, session=session)
 
-            # Test set clipboard
-            res = shell.execute("clip Hello Retro World")
-            self.assertIn("Copied 17 characters", res)
-
-            # Test get clipboard
-            res_get = shell.execute("clip")
-            self.assertIn("Hello Retro World", res_get)
-
-            # Test copy alias
-            res_copy = shell.execute("copy Another string")
-            self.assertIn("Copied 14 characters", res_copy)
+            clipboard = {}
+            def set_clipboard(text):
+                clipboard["text"] = text
+                return True
+            with patch.object(host_env, "set_clipboard", side_effect=set_clipboard), patch.object(host_env, "get_clipboard", side_effect=lambda: clipboard.get("text", "")):
+                res = shell.execute("clip Hello Retro World")
+                self.assertIn("Copied 17 characters", res)
+                res_get = shell.execute("clip")
+                self.assertIn("Hello Retro World", res_get)
+                res_copy = shell.execute("copy Another string")
+                self.assertIn("Copied 14 characters", res_copy)
+                self.assertEqual(clipboard["text"], "Another string")
 
     def test_media_control_and_shell_commands(self):
         from retro_os.runtime import create_runtime
         from retro_os.core import Session
         import tempfile
+        from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as tmpdir:
             fs = {"notes": tmpdir, "text": tmpdir, "bookmarks": tmpdir, "files": tmpdir}
             session = Session()
             session, bus, host_env, shell, loader = create_runtime(fs, session=session)
 
-            self.assertIn("Host media command sent: play", shell.execute("media play"))
-            self.assertIn("Host media command sent: next", shell.execute("media next"))
-            self.assertIn("Host media command sent: vol_up", shell.execute("vol up"))
-            self.assertIn("Host media command sent: vol_down", shell.execute("vol down"))
-            self.assertIn("Host media command sent: mute", shell.execute("vol mute"))
+            with patch.object(host_env, "media_control", side_effect=lambda action: f"Host media command sent: {action}") as control:
+                self.assertIn("Host media command sent: play", shell.execute("media play"))
+                self.assertIn("Host media command sent: next", shell.execute("media next"))
+                self.assertIn("Host media command sent: vol_up", shell.execute("vol up"))
+                self.assertIn("Host media command sent: vol_down", shell.execute("vol down"))
+                self.assertIn("Host media command sent: mute", shell.execute("vol mute"))
+            self.assertEqual([call.args[0] for call in control.call_args_list], ["play", "next", "vol_up", "vol_down", "mute"])
 
     def test_weather_news_and_briefing_clean_ascii(self):
         from retro_os.news import _clean_ascii, get_news
@@ -1036,10 +1045,10 @@ class RetroWorkstationCompanionTests(unittest.TestCase):
         self.assertEqual(menu.get_action_for_key("B"), "solitaire")
         self.assertEqual(menu.get_action_for_key("C"), "lander")
 
-        # Accessories section: Weather & News (C)
+        # Accessories section: Weather & News (F)
         menu.select_section("5")
         self.assertEqual(menu.active_section_name, "Accessories")
-        self.assertEqual(menu.get_action_for_key("C"), "weather_news")
+        self.assertEqual(menu.get_action_for_key("F"), "weather_news")
 
         # System section: Terminal Settings (C), Help & User Guide (E)
         menu.select_section("6")

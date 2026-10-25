@@ -31,13 +31,15 @@ def init(context):
         bus=_context.bus,
         session=_context.session,
     )
+    context.host_env.mail_manager = _manager
 
 
 def register_commands(registry):
     context = _context
+    manager = context.host_env.mail_manager
 
     def mail_command(args):
-        mgr = get_mail_manager()
+        mgr = manager
         cols = getattr(context.session, "cols", 80) if context and context.session else 80
         root = context.fs["mail"]
         root.mkdir(parents=True, exist_ok=True)

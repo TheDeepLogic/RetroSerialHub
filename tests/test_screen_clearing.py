@@ -515,7 +515,7 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"A] Bulletin Boards", output)
         self.assertIn(b"B] Telnet Terminal", output)
         self.assertIn(b"C] Web Browser", output)
-        self.assertIn(b"Select [1-6] for section, [A-G] for item", output)
+        self.assertIn(b"Select [1-6] for section, [A-H] for item", output)
 
     def test_accordion_menu_section_expansion(self):
         import RETRO_SERIAL_HUB
@@ -547,7 +547,7 @@ class ScreenClearingTests(unittest.TestCase):
             peer.close()
 
         self.assertIn(b"[6] > SYSTEM <", output)
-        self.assertIn(b"G] Disconnect", output)
+        self.assertIn(b"H] Disconnect", output)
 
 
 if __name__ == "__main__":

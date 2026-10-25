@@ -8,3 +8,6 @@ mail/
 user_shortcuts.json
 scheduler_tasks.json
 scheduled_tasks.json
+hub_tools/
+telnet_allowlist.json
+host_settings.json

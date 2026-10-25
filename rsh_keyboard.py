@@ -193,6 +193,7 @@ def _pynput_senders():
         "ENTER": keyboard.Key.enter,
         "BACKSPACE": keyboard.Key.backspace,
         "TAB": keyboard.Key.tab,
+        "ESC": keyboard.Key.esc,
     }
 
     def send_character(character):
@@ -216,7 +217,10 @@ class KeyboardBridge:
         send_shortcut=None,
         shortcut_mappings=None,
         on_shortcut=None,
+        exit_byte=0x18,
     ):
+        if not isinstance(exit_byte, int) or not 0x01 <= exit_byte <= 0x1A:
+            raise ValueError("Keyboard bridge exit binding must be Ctrl+A through Ctrl+Z.")
         if sys.platform == "win32":
             default_character_sender = _send_unicode_character
             default_key_sender = _send_special_key
@@ -237,11 +241,12 @@ class KeyboardBridge:
         self._shortcut_mappings = shortcut_mappings or {}
         self._on_shortcut = on_shortcut
         self._skip_line_feed = False
+        self._exit_byte = exit_byte
 
     def feed(self, data):
-        """Inject data as keyboard input. Ctrl+X, Escape, or Ctrl+] exits."""
+        """Inject data as keyboard input; the configured Ctrl+letter exits."""
         for byte in data:
-            if byte in (0x18, 0x1B, 0x1D):
+            if byte == self._exit_byte:
                 return True
             if 0x01 <= byte <= 0x1A:
                 shortcut = f"CTRL+{chr(byte + 0x40)}"
@@ -277,6 +282,8 @@ class KeyboardBridge:
                 self._send_key("BACKSPACE")
             elif byte == 0x09:
                 self._send_key("TAB")
+            elif byte == 0x1B:
+                self._send_key("ESC")
             elif 0x20 <= byte <= 0x7E:
                 self._send_character(chr(byte))
         return False

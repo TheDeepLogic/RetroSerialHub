@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 from .shortcuts import ShortcutsManager
+from rsh_console import VERSION
 
 
 class OSFlyoutMenu:
@@ -39,10 +40,13 @@ class OSFlyoutMenu:
             "Files & Media",
             "3",
             [
-                ("A", "File Transfers", "files"),
-                ("B", "Document Viewer", "view"),
-                ("C", "Text Library", "textlib"),
-                ("D", "ASCII Image Viewer", "ascii_viewer"),
+                ("A", "File Manager", "fileman"),
+                ("B", "File Transfers", "files"),
+                ("C", "Archive Browser", "archive"),
+                ("D", "Text Library", "textlib"),
+                ("E", "Document Viewer", "view"),
+                ("F", "ASCII Image Viewer", "ascii_viewer"),
+                ("G", "Audio Player", "audio"),
             ],
         ),
         (
@@ -55,6 +59,8 @@ class OSFlyoutMenu:
                 ("D", "Hunt the Wumpus", "wumpus"),
                 ("E", "Blackjack", "blackjack"),
                 ("F", "Mastermind", "mastermind"),
+                ("G", "Word Guess", "wordguess"),
+                ("H", "Star Trek", "trek"),
             ],
         ),
         (
@@ -62,10 +68,13 @@ class OSFlyoutMenu:
             "5",
             [
                 ("A", "Notepad", "notes"),
-                ("B", "Calculator", "calc"),
-                ("C", "Live Weather & News", "weather_news"),
-                ("D", "AI Assistant", "ai"),
-                ("E", "LOGO", "logo"),
+                ("B", "Calendar", "calendar"),
+                ("C", "Calculator", "calc"),
+                ("D", "Address Book", "contacts"),
+                ("E", "Unit Converter", "convert"),
+                ("F", "Weather & News", "weather_news"),
+                ("G", "AI Assistant", "ai"),
+                ("H", "LOGO", "logo"),
             ],
         ),
         (
@@ -78,7 +87,8 @@ class OSFlyoutMenu:
                 ("D", "Keyboard Profiles", "kb"),
                 ("E", "Help & User Guide", "help_menu"),
                 ("F", "Welcome Banner", "welcome_banner"),
-                ("G", "Disconnect", "disconnect"),
+                ("G", "Host Settings", "host_settings"),
+                ("H", "Disconnect", "disconnect"),
             ],
         ),
     ]
@@ -200,7 +210,7 @@ class OSFlyoutMenu:
         columns: int = 80,
         translate_ansi: bool = False,
         welcome_banner: str = "Retro Serial Hub",
-        version: str = "1.0",
+        version: str = VERSION,
         is_remote: bool = False,
         status: str = "",
     ) -> str:
@@ -271,8 +281,8 @@ class OSFlyoutMenu:
         num_sections = len(self.SECTIONS)
         if columns == 80:
             lines.append("")
-            prompt = f"Select [1-{num_sections}] for section, [A-G] for item, or command (CLI/ATM): "
+            prompt = f"Select [1-{num_sections}] for section, [A-H] for item, or command (CLI/ATM): "
         else:
-            prompt = f"[0-{num_sections}] Sec, [A-G] Item, or CLI: "
+            prompt = f"[0-{num_sections}] Sec, [A-H] Item, or CLI: "
 
         return "\r\n".join(lines) + "\r\n" + prompt

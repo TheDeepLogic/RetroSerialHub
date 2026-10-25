@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+_MODULE_INITIALIZATION_LOCK = threading.RLock()
+
 
 class EventBus:
     """Thread-safe topic-based event delivery."""
@@ -138,6 +140,12 @@ class ModuleLoader:
         self.modules: dict[str, Any] = {}
 
     def load(self, name: str, *, reload_module: bool = False):
+        # Modules expose init/register hooks through shared Python modules.
+        # Keep those hooks together while simultaneous terminal sessions start.
+        with _MODULE_INITIALIZATION_LOCK:
+            return self._load(name, reload_module=reload_module)
+
+    def _load(self, name: str, *, reload_module: bool = False):
         module = importlib.import_module(f"retro_os.modules.{name}")
         if reload_module:
             module = importlib.reload(module)

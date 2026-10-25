@@ -1,11 +1,131 @@
 import io
+import os
+import re
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from rsh_console import ConsoleDashboard, VERSION
 
 
+class VirtualScreen:
+    """Minimal ANSI viewport that detects wrapping and scrolling in redraws."""
+
+    def __init__(self, columns, height):
+        self.columns, self.height = columns, height
+        self.lines = [[" "] * columns for _ in range(height)]
+        self.row = self.column = self.scrolls = 0
+
+    def newline(self):
+        self.row += 1
+        if self.row >= self.height:
+            self.lines.pop(0)
+            self.lines.append([" "] * self.columns)
+            self.row = self.height - 1
+            self.scrolls += 1
+
+    def feed(self, output):
+        position = 0
+        while position < len(output):
+            escape = re.match(r"\x1b\[([0-9;]*)([A-Za-z])", output[position:])
+            if escape:
+                arguments = [int(value or 0) for value in escape[1].split(";")]
+                action = escape[2]
+                if action in ("H", "f"):
+                    self.row = min(self.height - 1, max(0, (arguments[0] or 1) - 1))
+                    self.column = min(self.columns - 1, max(0, ((arguments[1] if len(arguments) > 1 else 1) or 1) - 1))
+                elif action == "A":
+                    self.row = max(0, self.row - (arguments[0] or 1))
+                elif action == "K":
+                    start = 0 if arguments[0] == 2 else self.column
+                    self.lines[self.row][start:] = [" "] * (self.columns - start)
+                elif action == "J":
+                    self.lines[self.row][self.column:] = [" "] * (self.columns - self.column)
+                    for row in range(self.row + 1, self.height):
+                        self.lines[row] = [" "] * self.columns
+                position += len(escape[0])
+                continue
+            character = output[position]
+            position += 1
+            if character == "\r":
+                self.column = 0
+            elif character == "\n":
+                self.newline()
+            elif character.isprintable():
+                if self.column >= self.columns:
+                    self.column = 0
+                    self.newline()
+                self.lines[self.row][self.column] = character
+                self.column += 1
+
+    def text(self):
+        return "\n".join("".join(row).rstrip() for row in self.lines)
+
+
 class ConsoleDashboardTests(unittest.TestCase):
+    def test_host_typing_and_approval_footer_growth_do_not_scroll_or_shift_header(self):
+        dashboard = ConsoleDashboard({})
+        dashboard._tty = True
+        dashboard._running = True
+        access = MagicMock()
+        access.pending.return_value = []
+        dashboard.set_telnet_access(access)
+        screen = VirtualScreen(80, 24)
+        output = io.StringIO()
+
+        def verify_redraw():
+            screen.feed(output.getvalue())
+            output.seek(0)
+            output.truncate()
+            self.assertTrue("".join(screen.lines[0]).startswith("Retro Serial Hub"))
+            self.assertIn("Host>", screen.text())
+            self.assertEqual(screen.scrolls, 0)
+
+        with patch("rsh_console.sys.stdout", output), patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))), patch.object(dashboard, "host_input_available", return_value=True):
+            dashboard._draw_frame()
+            verify_redraw()
+            for key in "pending\r":
+                # Simulate cursor drift from host interaction between frames.
+                screen.row, screen.column = 6, 12
+                dashboard._host_key(key)
+                verify_redraw()
+            access.pending.return_value = [{"id": 1, "ip": "192.168.7.13", "profile": "APPLE2", "seconds_left": 120}]
+            for index in range(4):
+                dashboard.log(f"Approval event {index}")
+                verify_redraw()
+            access.pending.return_value = []
+            dashboard._draw_frame()
+            verify_redraw()
+        self.assertNotIn("TELNET APPROVAL REQUIRED", screen.text())
+
+    def test_resizing_keeps_redraw_inside_viewport_and_preserves_host_prompt(self):
+        dashboard = ConsoleDashboard({})
+        dashboard._tty = True
+        access = MagicMock()
+        access.pending.return_value = []
+        dashboard.set_telnet_access(access)
+        dashboard.set_host_terminal(MagicMock())
+        for index in range(20):
+            dashboard.append_host_output(f"Command response {index}\r\n".encode())
+        for columns, height in ((120, 50), (80, 24), (40, 12), (20, 5)):
+            output = io.StringIO()
+            screen = VirtualScreen(columns, height)
+            with patch("rsh_console.sys.stdout", output), patch("shutil.get_terminal_size", return_value=os.terminal_size((columns, height))), patch.object(dashboard, "host_input_available", return_value=True):
+                dashboard._draw_frame()
+            screen.feed(output.getvalue())
+            self.assertEqual(screen.scrolls, 0)
+            self.assertLessEqual(dashboard._frame_lines, height)
+            self.assertIn("Host>", screen.text())
+            self.assertTrue(screen.text().startswith("Retro Serial Hub"))
+
+    def test_row_clipping_preserves_colors_and_prevents_wrap_or_embedded_newlines(self):
+        clip = ConsoleDashboard._clip_screen_row
+        colored = clip("\x1b[31mABCDE\x1b[0m", 3)
+        self.assertEqual(ConsoleDashboard._strip_ansi(colored), "ABC")
+        self.assertTrue(colored.endswith("\x1b[0m"))
+        self.assertEqual(clip("A\nB\rC", 10), "A B C")
+        self.assertEqual(clip("界界X", 4), "界界")
+        self.assertEqual(clip("\x1b[2Jtext", 10), "text")
+
     def test_noninteractive_console_reports_profiles_and_state_changes(self):
         output = io.StringIO()
         profile = {
@@ -32,7 +152,7 @@ class ConsoleDashboardTests(unittest.TestCase):
         self.assertIn("TCP 6400: LISTENING (1)", text)
         self.assertIn("Telnet clients: 1", text)
         self.assertIn("Telnet clients: 0", text)
-        self.assertIn("Active connections: 2", text)
+        self.assertIn("Active connections: 1", text)
 
     def test_noninteractive_console_logs_errors_without_ansi_colors(self):
         output = io.StringIO()
@@ -132,7 +252,7 @@ class ConsoleDashboardTests(unittest.TestCase):
         rows = dashboard.render_interface(inner_width=80, use_color=False)
         self.assertTrue(all(len(r) == 80 for r in rows))
         full_text = "\n".join(rows)
-        self.assertIn("*[B] Calc", full_text)
+        self.assertIn("*[C] Calc", full_text)
         self.assertIn("[UserAlpha+2]", full_text)
 
     def test_frame_includes_interface_rows(self):
@@ -141,7 +261,7 @@ class ConsoleDashboardTests(unittest.TestCase):
         with patch("shutil.get_terminal_size", return_value=type("TermSize", (), {"columns": 80, "lines": 24})()):
             frame = dashboard._frame()
         frame_text = "\n".join(frame)
-        self.assertIn("Retro Serial Hub Interface", frame_text)
+        self.assertIn("Connected Terminal Activity Monitor", frame_text)
         self.assertIn("*[A] Shell (CLI", frame_text)
         self.assertIn("[Hacker]", frame_text)
 

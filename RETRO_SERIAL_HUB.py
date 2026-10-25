@@ -30,6 +30,8 @@ from rsh_terminal import (
 )
 from rsh_welcome import load_banner, reset_banner, save_banner, validate_banner
 from rsh_console import ConsoleDashboard, VERSION
+from rsh_access import TelnetAccess
+from rsh_host import HostTerminal
 
 # Import configuration from config.py
 try:
@@ -69,6 +71,7 @@ ACTIVE_REMOTE_CLIENTS_LOCK = threading.Lock()
 ACTIVE_TERMINALS = set()
 ACTIVE_TERMINALS_LOCK = threading.Lock()
 CONSOLE = None
+TELNET_ACCESS = None
 # Ports that have been surrendered/taken over by a COM-bridge request. Worker threads should stop retrying if their port is surrendered.
 SURRENDERED_PORTS = set()
 
@@ -107,6 +110,15 @@ def broadcast_scheduler_event(task, output):
     notice += "*** [END EVENT] ***\r\n\r\n"
     broadcast_to_terminals(notice)
 
+HUB_TOOL_ALIASES = {
+    "CALENDAR": "calendar", "CAL": "calendar",
+    "CONVERT": "convert", "UNITS": "convert",
+    "CONTACTS": "contacts", "ADDRESSBOOK": "contacts",
+    "FILEMAN": "fileman", "FM": "fileman",
+    "ARCHIVE": "archive", "ZIP": "archive",
+    "AUDIO": "audio", "PLAYER": "audio",
+}
+
 MAIN_MENU_ACTIONS = {
     "1": "bbs",
     "2": "browser",
@@ -124,6 +136,12 @@ MAIN_MENU_ACTIONS = {
     "14": "welcome_banner",
 }
 RETRO_OS_MENU_ACTIONS = {
+    "calendar": "calendar",
+    "convert": "convert",
+    "contacts": "contacts",
+    "fileman": "fileman",
+    "archive": "archive",
+    "audio": "audio",
     "bbs": "bbs",
     "browser": "browser",
     "telnet": "telnet",
@@ -143,6 +161,8 @@ RETRO_OS_MENU_ACTIONS = {
     "launch": "launch",
     "view": "view",
     "games": "games",
+    "wordguess": "wordguess",
+    "trek": "trek",
     "mines": "mines",
     "solitaire": "solitaire",
     "wumpus": "wumpus",
@@ -157,6 +177,7 @@ RETRO_OS_MENU_ACTIONS = {
     "sysinfo": "sysinfo",
     "weather_news": "weather_news",
     "terminal_settings": "terminal_settings",
+    "host_settings": "host_settings",
 }
 
 # ---------------- Paths ----------------
@@ -165,8 +186,10 @@ FILES_DIR = BASE_DIR / "files"
 TEXT_DIR  = BASE_DIR / "text"
 NOTES_DIR = BASE_DIR / "notes"
 WELCOME_BANNER_FILE = BASE_DIR / "welcome_banner.json"
+TELNET_ALLOWLIST_FILE = BASE_DIR / "telnet_allowlist.json"
 COLUMN_SETTINGS_FILE = BASE_DIR / "terminal_columns.json"
 ANSI_TRANSLATION_SETTINGS_FILE = BASE_DIR / "terminal_ansi_translation.json"
+HOST_SETTINGS_FILE = BASE_DIR / "host_settings.json"
 FILES_DIR.mkdir(exist_ok=True)
 TEXT_DIR.mkdir(exist_ok=True)
 NOTES_DIR.mkdir(exist_ok=True)
@@ -247,6 +270,43 @@ def save_ansi_translation_preference(path, preferences, name, enabled):
     return updated_preferences
 
 
+def load_host_settings(path):
+    if not path.exists():
+        return {"keyboard_exit_binding": "CTRL+X"}
+    try:
+        with path.open("r", encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OSError(f"Could not load host settings from {path}: {exc}") from exc
+    binding = settings.get("keyboard_exit_binding") if isinstance(settings, dict) else None
+    if not isinstance(binding, str) or not re.fullmatch(r"CTRL\+[A-Z]", binding.upper()):
+        raise ValueError(f"Invalid keyboard exit binding in {path}.")
+    settings = dict(settings)
+    settings["keyboard_exit_binding"] = binding.upper()
+    return settings
+
+
+def save_host_settings(path, settings):
+    binding = settings.get("keyboard_exit_binding") if isinstance(settings, dict) else None
+    if not isinstance(binding, str) or not re.fullmatch(r"CTRL\+[A-Z]", binding.upper()):
+        raise ValueError("Keyboard exit binding must be CTRL+A through CTRL+Z.")
+    updated = dict(settings)
+    updated["keyboard_exit_binding"] = binding.upper()
+    temporary_path = path.with_name(path.name + ".tmp")
+    try:
+        with temporary_path.open("w", encoding="utf-8") as settings_file:
+            json.dump(updated, settings_file, indent=2)
+            settings_file.write("\n")
+        temporary_path.replace(path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise OSError(f"Could not save host settings to {path}: {exc}") from exc
+    return updated
+
+
 try:
     COLUMN_PREFERENCES = load_column_preferences(COLUMN_SETTINGS_FILE)
 except (OSError, ValueError) as exc:
@@ -274,6 +334,13 @@ try:
 except (OSError, ValueError) as exc:
     print(f"Welcome banner override error: {exc}. Using config.py value.")
     WELCOME_BANNER = CONFIG_WELCOME_BANNER
+
+try:
+    HOST_SETTINGS = load_host_settings(HOST_SETTINGS_FILE)
+except (OSError, ValueError) as exc:
+    print(f"Host settings error: {exc}. Using default settings.")
+    HOST_SETTINGS = {"keyboard_exit_binding": "CTRL+X"}
+HOST_SETTINGS_LOCK = threading.Lock()
 
 # ---------------- UI helpers ----------------
 def clear_screen(ser, use_ansi=True):
@@ -439,7 +506,12 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
     flyout = ser._rsh_flyout_menu
     sec_idx = getattr(flyout, "active_section_idx", 0) if flyout else 0
     # Flyout indices are zero-based; dashboard section labels are 1-based.
-    set_terminal_activity(ser, f"section:{sec_idx + 1}")
+    # Opening a serial port only means the host can listen on it. Do not show
+    # an idle machine as browsing the menu until it has sent us input.
+    if getattr(ser, "_rsh_input_seen", isinstance(ser, SocketTerminal)):
+        set_terminal_activity(ser, f"section:{sec_idx + 1}")
+    else:
+        clear_terminal_activity(ser)
 
     serial_count, remote_count = get_active_connection_counts()
     if columns == 40:
@@ -459,9 +531,10 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
         welcome_banner=WELCOME_BANNER,
         version=VERSION,
         is_remote=remote_client,
-        status=status,
+        status=status + ("\r\n" + ser._rsh_reminder_notice if getattr(ser, "_rsh_reminder_notice", "") else ""),
     )
     write(ser, output)
+    ser._rsh_reminder_notice = ""
 
 
 def show_legacy_main_menu(ser, use_ansi=True):
@@ -473,6 +546,9 @@ def show_legacy_main_menu(ser, use_ansi=True):
     version_spacing = "\r\n\r\n"
     write(ser, banner_prefix + WELCOME_BANNER + "\r\n")
     write(ser, f"v{VERSION}, copyright (c) 2025-2026" + version_spacing)
+    if getattr(ser, "_rsh_reminder_notice", ""):
+        write(ser, ser._rsh_reminder_notice + "\r\n")
+        ser._rsh_reminder_notice = ""
     options = {
         "Accessories": [
             ("1", "Bulletin Boards"),
@@ -814,6 +890,24 @@ def remote_client_worker(name, cfg, client_socket, address):
         terminal.close()
 
 
+def start_remote_client(name, cfg, client_socket, address):
+    """Called by the access gate only after the source IP is approved."""
+    threading.Thread(
+        target=remote_client_worker,
+        args=(name, cfg, client_socket, address),
+        name=f"{name}-remote-{address[0]}", daemon=True,
+    ).start()
+
+
+def host_console_worker(terminal):
+    """Use the full terminal CLI/menu flow for the local dashboard keyboard."""
+    try:
+        bridge_loop("Host", terminal, use_ansi=False)
+    finally:
+        unregister_active_terminal(terminal)
+        clear_terminal_activity(terminal, default_name="Host")
+
+
 def local_ipv4_addresses():
     """Return distinct non-loopback IPv4 addresses available on this host."""
     addresses = set()
@@ -869,12 +963,11 @@ def telnet_server_worker(name, cfg, server_cfg):
                 CONSOLE.update_profile(name, tcp="LISTENING")
             while True:
                 client_socket, address = listener.accept()
-                threading.Thread(
-                    target=remote_client_worker,
-                    args=(name, cfg, client_socket, address),
-                    name=f"{name}-remote-{address[0]}",
-                    daemon=True,
-                ).start()
+                if TELNET_ACCESS is None:
+                    client_socket.close()
+                    console_log(f"{name}: refused Telnet connection; access gate is not initialized.", level="red")
+                    continue
+                TELNET_ACCESS.accept(name, cfg, client_socket, address)
     except (OSError, TypeError) as exc:
         if CONSOLE:
             CONSOLE.update_profile(name, tcp="ERROR")
@@ -920,8 +1013,9 @@ def bridge_loop(
     input_buffer = b""
     mode = "MENU"  # MENU, TELNET, BBS, FILES, TEXT, BROWSER
     retro_session = Session(
-        client_type="telnet" if isinstance(ser, SocketTerminal) else "serial",
+        client_type="host" if getattr(ser, "_rsh_host_console", False) is True else "telnet" if isinstance(ser, SocketTerminal) else "serial",
         cols=terminal_columns(ser),
+        user="Host" if getattr(ser, "_rsh_host_console", False) is True else getattr(ser, "_terminal_name", name),
     )
     shell_requested_module = []
 
@@ -945,13 +1039,27 @@ def bridge_loop(
         shortcuts_path=BASE_DIR / "user_shortcuts.json",
     )
     host_env.shortcuts_manager = shortcuts_mgr
+    if getattr(ser, "_rsh_host_console", False) is True:
+        retro_shell.register_command("help", lambda _args: retro_shell.help() + "\nHost controls: allow <#>, deny <#>, pending, clear. ATM opens menus. PgUp/PgDn scroll output; Up/Down recall commands.")
     if hasattr(host_env, "scheduler") and host_env.scheduler:
         host_env.scheduler.broadcaster = broadcast_scheduler_event
+    from retro_os.toolkit import CalendarTool, start_calendar_reminders
+    calendar_tool = getattr(host_env, "calendar_tool", None)
+    if isinstance(calendar_tool, CalendarTool):
+        try:
+            ser._rsh_reminder_notice = calendar_tool.connection_reminders()
+            start_calendar_reminders(calendar_tool, broadcast_to_terminals)
+        except (OSError, ValueError, KeyError) as exc:
+            console_log(f"Calendar reminders could not load: {exc}", level="yellow")
 
     def render_shell_result(result):
         from retro_os.viewer import paginate_text
 
         text = str(result)
+        if getattr(ser, "_rsh_host_console", False) is True:
+            for output_line in text.splitlines():
+                write(ser, output_line + "\r\n")
+            return
         cols = getattr(retro_session, "cols", terminal_columns(ser))
         rows = getattr(retro_session, "rows", 24)
         pages = paginate_text(text, cols, page_lines=max(1, rows - 2))
@@ -1080,8 +1188,7 @@ def bridge_loop(
     def run_mail_menu():
         while True:
             try:
-                from retro_os.modules.mail import get_mail_manager
-                mgr = get_mail_manager()
+                mgr = host_env.mail_manager
                 cur_mode = mgr.get_mode() if mgr else "hub"
             except Exception:
                 cur_mode = "hub"
@@ -1290,6 +1397,46 @@ def bridge_loop(
                 wait_for_key(ser)
                 break
 
+    def run_word_guess_session():
+        write(ser, "\r\n--- WORD GUESS ---\r\n")
+        write(ser, retro_shell.execute("games wordguess new") + "\r\n")
+        while True:
+            write(ser, "\r\nWord [five letters, N=new, Q=quit]> ")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                retro_shell.execute("games wordguess quit")
+                break
+            res = retro_shell.execute(
+                "games wordguess new" if cmd.upper() in ("N", "NEW", "RESTART")
+                else f"games wordguess {cmd}"
+            )
+            write(ser, "\r\n" + str(res) + "\r\n")
+            if "YOU WIN!" in res or "No guesses left." in res:
+                write(ser, "Press any key to continue...\r\n")
+                wait_for_key(ser)
+                break
+
+    def run_trek_session():
+        write(ser, "\r\n--- STAR TREK ---\r\n")
+        write(ser, retro_shell.execute("games trek new") + "\r\n")
+        while True:
+            write(ser, "\r\nTrek [command, N=new, Q=quit]> ")
+            cmd = read_input_line(ser).strip()
+            if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
+                retro_shell.execute("games trek quit")
+                break
+            if cmd.upper() in ("N", "NEW", "RESTART"):
+                res = retro_shell.execute("games trek new")
+            else:
+                res = retro_shell.execute(f"games trek {cmd}")
+            res = str(res)
+            write(ser, "\r\n" + res + "\r\n")
+            lower = res.lower()
+            if "victory!" in lower or "destroyed!" in lower or "mission time expired" in lower:
+                write(ser, "Press any key to continue...\r\n")
+                wait_for_key(ser)
+                break
+
     def run_games_menu():
         while True:
             write(ser, "\r\n--- RETRO GAMES ---\r\n")
@@ -1299,6 +1446,8 @@ def bridge_loop(
             write(ser, "[4] Hunt the Wumpus\r\n")
             write(ser, "[5] Blackjack\r\n")
             write(ser, "[6] Mastermind\r\n")
+            write(ser, "[7] Word Guess\r\n")
+            write(ser, "[8] Star Trek\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
             choice = read_input_line(ser).strip().upper()
@@ -1316,6 +1465,10 @@ def bridge_loop(
                 run_card_or_code_game("blackjack", "BLACKJACK", "Blackjack [H=hit, S=stand, N=new, Q=quit]> ", ("You win!", "Dealer wins.", "Push.", "Bust!", "BLACKJACK!"))
             elif choice in ("6", "MASTERMIND", "CODEBREAKER"):
                 run_card_or_code_game("mastermind", "MASTERMIND", "Mastermind [G 1234=guess, N=new, Q=quit]> ", ("YOU WIN!", "Out of guesses."))
+            elif choice in ("7", "WORD", "WORDGUESS", "WORDLE"):
+                run_word_guess_session()
+            elif choice in ("8", "TREK", "STAR TREK", "STARTREK"):
+                run_trek_session()
 
     def run_help_menu():
         from retro_os.help_data import get_help_topics, get_topic_content
@@ -1333,6 +1486,51 @@ def bridge_loop(
             write(ser, "\r\n")
             render_shell_result(content)
             wait_for_key(ser)
+
+    def run_tool_menu(tool):
+        import shlex
+        from retro_os.modules.toolkit import TOOL_MENUS
+        from retro_os.core import Shell
+
+        title, initial, choices = TOOL_MENUS[tool]
+        clear_screen(ser, use_ansi)
+        write(ser, f"\r\n--- {title} ---\r\n")
+        render_shell_result(retro_shell.execute(f"{tool} {initial}"))
+        while True:
+            write(ser, f"\r\n--- {title} ---\r\n")
+            for index, (label, _, _) in enumerate(choices, 1):
+                write(ser, f"[{index}] {label}\r\n")
+            write(ser, "[Q] Return to Main Menu\r\nChoice (or command): ")
+            choice = read_input_line(ser).strip()
+            if not choice or choice.upper() in ("Q", "QUIT", "EXIT", "ATM"):
+                return False
+            if choice.isdigit() and 1 <= int(choice) <= len(choices):
+                _, fixed, prompts = choices[int(choice) - 1]
+                arguments = list(fixed)
+                cancelled = False
+                for prompt in prompts:
+                    write(ser, prompt + " (Enter cancels): ")
+                    value = read_input_line(ser).strip()
+                    if not value:
+                        cancelled = True
+                        break
+                    arguments.append(value)
+                if cancelled:
+                    continue
+            else:
+                try:
+                    arguments = Shell.split_line(choice)
+                except ValueError as exc:
+                    write(ser, f"\r\n{exc}\r\n")
+                    continue
+                if arguments and HUB_TOOL_ALIASES.get(arguments[0].upper()) == tool:
+                    arguments = arguments[1:]
+            result = retro_shell.execute(shlex.join([tool, *arguments]))
+            render_shell_result(result)
+            if shell_requested_module:
+                handled = handle_shell_action(shell_requested_module.pop())
+                if handled:
+                    return True
 
     def run_calc_session():
         write(ser, "\r\n--- RETRO CALCULATOR ---\r\n")
@@ -1492,6 +1690,7 @@ def bridge_loop(
             kb = keyboard_module.KeyboardBridge(
                 shortcut_mappings=shortcut_mappings,
                 on_shortcut=publish_shortcut,
+                exit_byte=ord(HOST_SETTINGS["keyboard_exit_binding"][-1]) - 64,
             )
         except Exception as e:
             write(ser, f"\r\n*** Keyboard Bridge unavailable: {e} ***\r\n")
@@ -1505,7 +1704,10 @@ def bridge_loop(
             write(ser, "--- KEYBOARD BRIDGE ACTIVE ---\r\n")
         write(ser, "Characters typed on the retro terminal are sent to the active host window.\r\n")
         write(ser, "Enter, Tab, Backspace and configured shortcuts (e.g. CTRL+W -> WIN) are supported.\r\n")
-        write(ser, "Press Ctrl+X (or Esc) to exit and return to Retro Serial Hub.\r\n")
+        write(
+            ser,
+            f"Press {HOST_SETTINGS['keyboard_exit_binding']} to exit and return to Retro Serial Hub.\r\n",
+        )
         write(ser, "----------------------------------------------------------------------\r\n\r\n")
 
         while True:
@@ -2339,7 +2541,7 @@ def bridge_loop(
                 wait_for_key(ser)
 
         while True:
-            write(ser, "\r\n--- LIVE WEATHER & NEWS ---\r\n")
+            write(ser, "\r\n--- WEATHER & NEWS ---\r\n")
             write(ser, "[1] Morning / Desk Briefing\r\n")
             write(ser, "[2] Live Weather Forecast (Auto Location)\r\n")
             write(ser, "[3] Live Weather (Specify City / Zip)\r\n")
@@ -2495,6 +2697,40 @@ def bridge_loop(
                 use_ansi = new_ansi
                 write(ser, f"\r\nANSI translation set to {'ON' if new_ansi else 'OFF'}.\r\n")
                 wait_for_key(ser)
+
+    def run_host_settings_menu():
+        global HOST_SETTINGS
+        while True:
+            with HOST_SETTINGS_LOCK:
+                current_binding = HOST_SETTINGS["keyboard_exit_binding"]
+            write(ser, "\r\n--- HOST SETTINGS ---\r\n")
+            write(ser, f"Keyboard Bridge Exit Binding: {current_binding}\r\n")
+            write(ser, "[1] Change Exit Binding (Ctrl+A through Ctrl+Z)\r\n")
+            write(ser, "[2] Restore Default (Ctrl+X)\r\n")
+            write(ser, "[Q] Return to Main Menu\r\n")
+            write(ser, "Choice: ")
+            choice = read_input_line(ser).strip().upper()
+            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+                return
+            if choice == "1":
+                write(ser, "Enter exit binding (CTRL+A through CTRL+Z, Q to cancel): ")
+                binding = read_input_line(ser).strip().upper()
+                if binding == "Q":
+                    continue
+            elif choice == "2":
+                binding = "CTRL+X"
+            else:
+                continue
+
+            try:
+                with HOST_SETTINGS_LOCK:
+                    updated_settings = dict(HOST_SETTINGS)
+                    updated_settings["keyboard_exit_binding"] = binding
+                    HOST_SETTINGS = save_host_settings(HOST_SETTINGS_FILE, updated_settings)
+                write(ser, f"\r\nKeyboard Bridge exit binding set to {binding}.\r\n")
+            except (OSError, ValueError) as exc:
+                write(ser, f"\r\nCould not update Host Settings: {exc}\r\n")
+            wait_for_key(ser)
 
     def handle_shell_action(requested_module):
         nonlocal mode, tcp_sock, use_ansi
@@ -2721,10 +2957,18 @@ def bridge_loop(
             mode = "MENU"
             show_main_menu(ser, use_ansi)
 
-    show_main_menu(ser, use_ansi)
+    if getattr(ser, "_rsh_host_console", False) is True:
+        mode = "CLI"
+        retro_session.active_module = "shell"
+        set_terminal_activity(ser, "cli", user_label="Host")
+        write(ser, "\r\nHost Retro Serial Hub CLI. Type help for commands or ATM for menus.\r\ncli> ")
+    else:
+        show_main_menu(ser, use_ansi)
 
     while True:
-        # serial input
+        # serial, network, or local host input
+        if getattr(ser, "_rsh_host_console", False) is True:
+            ser.secret_input = mode == "FTP" and ftp_session is not None and ftp_session.get("submode") == "PASSWORD"
         if ser.in_waiting:
             data = ser.read(ser.in_waiting)
             if not data and isinstance(ser, SocketTerminal):
@@ -2732,6 +2976,23 @@ def bridge_loop(
                 retro_session.state = "disconnected"
                 event_bus.publish("session.disconnected", retro_session)
                 return
+
+            if data:
+                first_input = not getattr(ser, "_rsh_input_seen", False)
+                ser._rsh_input_seen = True
+                if first_input and CONSOLE and not isinstance(ser, SocketTerminal):
+                    CONSOLE.update_profile(name, terminal="ACTIVE")
+                if first_input and mode == "MENU":
+                    if not isinstance(ser, SocketTerminal) and isinstance(calendar_tool, CalendarTool):
+                        try:
+                            ser._rsh_reminder_notice = calendar_tool.connection_reminders()
+                        except (OSError, ValueError, KeyError):
+                            pass
+                    flyout = getattr(ser, "_rsh_flyout_menu", None)
+                    section = getattr(flyout, "active_section_idx", 0)
+                    set_terminal_activity(
+                        ser, f"section:{section + 1}", default_name=name
+                    )
 
             if mode == "KEYBOARD":
                 try:
@@ -2996,7 +3257,9 @@ def bridge_loop(
 
                         # Direct command strings
                         if menu_action is None:
-                            if upper in ("CLI", "SHELL", "OS"):
+                            if HUB_TOOL_ALIASES.get(upper.split()[0]):
+                                menu_action = HUB_TOOL_ALIASES[upper.split()[0]]
+                            elif upper in ("CLI", "SHELL", "OS"):
                                 menu_action = "cli"
                             elif upper in ("SHORTCUT", "SHORTCUTS") or upper.startswith("SHORTCUT ") or upper.startswith("SHORTCUTS "):
                                 if upper in ("SHORTCUT", "SHORTCUTS"):
@@ -3062,6 +3325,10 @@ def bridge_loop(
                                 menu_action = "solitaire"
                             elif upper in ("GAMES", "GAME"):
                                 menu_action = "games"
+                            elif upper in ("WORD", "WORDGUESS", "WORDLE"):
+                                menu_action = "wordguess"
+                            elif upper in ("TREK", "STAR TREK", "STARTREK"):
+                                menu_action = "trek"
                             elif upper in ("HELP", "MAN", "GUIDE", "?") or upper.startswith("HELP "):
                                 menu_action = "help_menu"
                             elif upper in ("MAILTO",) or upper.startswith("MAILTO "):
@@ -3078,6 +3345,8 @@ def bridge_loop(
                                 menu_action = "weather_news"
                             elif upper in ("TERMINAL_SETTINGS", "SETTINGS", "CAPS", "PACE") or upper.startswith("CAPS ") or upper.startswith("PACE "):
                                 menu_action = "terminal_settings"
+                            elif upper in ("HOST_SETTINGS", "HOST SETTINGS"):
+                                menu_action = "host_settings"
                             elif upper.startswith("XSEND ") or upper.startswith("YSEND ") or upper.startswith("ASEND ") or upper.startswith("XRECV ") or upper == "XRECV":
                                 menu_action = "direct_transfer"
                             elif upper in ("SCHEDULE", "SCHEDULER", "TASKS", "CRON") or upper.startswith("SCHEDULE ") or upper.startswith("SCHEDULER "):
@@ -3102,7 +3371,18 @@ def bridge_loop(
                     if menu_action is not None:
                         set_terminal_activity(ser, menu_action, default_name=name)
 
-                    if menu_action == "columns":
+                    if menu_action in HUB_TOOL_ALIASES.values():
+                        parts = line_str.split(maxsplit=1) if line_str else []
+                        if len(parts) > 1 and HUB_TOOL_ALIASES.get(parts[0].upper()) == menu_action:
+                            render_shell_result(retro_shell.execute(line_str))
+                            if shell_requested_module and handle_shell_action(shell_requested_module.pop()):
+                                continue
+                            wait_for_key(ser)
+                        elif run_tool_menu(menu_action):
+                            continue
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "columns":
                         new_columns = 40 if terminal_columns(ser) == 80 else 80
                         try:
                             with COLUMN_PREFERENCES_LOCK:
@@ -3502,6 +3782,14 @@ def bridge_loop(
                         run_card_or_code_game("mastermind", "MASTERMIND", "Mastermind [G 1234=guess, N=new, Q=quit]> ", ("YOU WIN!", "Out of guesses."))
                         show_main_menu(ser, use_ansi)
                         continue
+                    elif menu_action == "wordguess":
+                        run_word_guess_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "trek":
+                        run_trek_session()
+                        show_main_menu(ser, use_ansi)
+                        continue
                     elif menu_action == "help_menu":
                         if line_str and line_str.upper().startswith("HELP ") and len(line_str) > 5:
                             from retro_os.help_data import get_topic_content
@@ -3673,6 +3961,10 @@ def bridge_loop(
                             wait_for_key(ser)
                         else:
                             run_terminal_settings_menu()
+                        show_main_menu(ser, use_ansi)
+                        continue
+                    elif menu_action == "host_settings":
+                        run_host_settings_menu()
                         show_main_menu(ser, use_ansi)
                         continue
                     elif menu_action == "direct_transfer":
@@ -4432,7 +4724,7 @@ def bridge_loop(
                 pass
 
 def main():
-    global CONSOLE
+    global CONSOLE, TELNET_ACCESS
     threads = []
     addresses = local_ipv4_addresses() if TELNET_SERVER_CONFIGS else []
     profiles = {}
@@ -4462,7 +4754,22 @@ def main():
         }
 
     CONSOLE = ConsoleDashboard(profiles)
+    host_terminal = None
+    if CONSOLE.host_input_available():
+        host_terminal = HostTerminal(CONSOLE.append_host_output)
+        CONSOLE.set_host_terminal(host_terminal)
+    TELNET_ACCESS = None
+    if TELNET_SERVER_CONFIGS:
+        TELNET_ACCESS = TelnetAccess(
+            TELNET_ALLOWLIST_FILE, start_remote_client, console_log,
+            interactive=CONSOLE.host_input_available(),
+        )
+        CONSOLE.set_telnet_access(TELNET_ACCESS)
     CONSOLE.start()
+    if host_terminal is not None:
+        host_terminal.start(host_console_worker)
+    if TELNET_ACCESS is not None:
+        TELNET_ACCESS.start()
 
     for name, server_cfg in TELNET_SERVER_CONFIGS.items():
         cfg = SERIAL_CONFIGS.get(name)
@@ -4503,7 +4810,12 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         console_log("Shutting down.")
+    finally:
+        if host_terminal is not None:
+            host_terminal.stop()
         CONSOLE.stop()
+        if TELNET_ACCESS is not None:
+            TELNET_ACCESS.stop()
 
 
 if __name__ == "__main__":

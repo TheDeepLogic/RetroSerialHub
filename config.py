@@ -98,6 +98,8 @@ SERIAL_CONFIGS = {
 # Leave empty to keep network access disabled. Use a distinct port per profile.
 # Binding to 0.0.0.0 allows other devices on the LAN to connect; do not expose
 # these unauthenticated, unencrypted terminal sessions directly to the Internet.
+# Every new source IP also requires approval at the host console, or an entry
+# in telnet_allowlist.json. Approval applies to all profiles. Serial is exempt.
 TELNET_SERVER_CONFIGS = {
     "APPLE2": {"host": "0.0.0.0", "port": 6400},
     "IBM": {"host": "0.0.0.0", "port": 6401},

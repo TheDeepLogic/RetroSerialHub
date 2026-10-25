@@ -1,6 +1,6 @@
 Image: Retro Serial Hub
 
-Retro Serial Hub
+Retro Serial Hub v2.4
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -51,7 +51,7 @@ Features
 * Direct File Transfers: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (xsend, ysend, asend, xrecv)
 * Electronic Mail (Hub & Internet): Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
 * Connected Terminal Messaging: List active serial/Telnet terminals, message a selected terminal, or deliver a text file from the Communications menu
-* Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, and Mastermind, plus WarGames (W.O.P.R.) from the CLI
+* Dedicated Retro Games: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, and Star Trek, plus WarGames (W.O.P.R.) from the CLI
 * LOGO Programming: Terminal Logo interpreter with repeat loops, variables, procedures, turtle state feedback, and optional host graphics
 * Ambient Desk Companion: Live ASCII weather forecasts (wttr.in), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (briefing), and interactive article reader (news <num>)
 * Background Task Scheduler: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. news : weather Austin : broadcast Morning briefing complete)
@@ -67,7 +67,7 @@ Features
 * Notes System: Create, read, and manage text notes, including host clipboard capture and copy
 * COM Port Bridge: Bridge between different serial ports for direct computer-to-computer communication
 * Keyboard Bridge: Type serial input into the focused host application
-* Lunar Lander, Hunt the Wumpus, Blackjack, and Mastermind: Terminal-first games in the Games menu
+* Lunar Lander, Hunt the Wumpus, Blackjack, Mastermind, Word Guess, and Star Trek: Terminal-first games in the Games menu
 * WarGames Mode: Nostalgic WarGames movie-inspired interface, available from the CLI
 * Notepad clipboard actions: Save host clipboard text as a note, or copy a note to the host clipboard
 * AI Assistant: Optional ChatGPT-powered assistant accessible from vintage terminals
@@ -76,7 +76,7 @@ Features
 
 Requirements
 
-* Python 3.8 or higher
+* Python 3.9 or higher
 * Dependencies listed in requirements.txt
 * USB-to-Serial adapters or RS-232 ports for connecting vintage computers
 * Optional: OpenAI API key for AI Assistant feature
@@ -244,10 +244,29 @@ When a listener starts, the hub prints detected LAN IPv4 address(es) and
 ports
 to use for connecting.
 
-These sessions are unauthenticated and unencrypted. Keep the server disabled
-unless needed, restrict access with your firewall, and do not forward these
-ports from the Internet. The listener is disabled by default when
-TELNET_SERVER_CONFIGS is empty.
+Telnet connections require a source IP entry in telnet_allowlist.json. The hub
+creates an empty allowlist on its first network-enabled start. Serial connections
+are exempt. No IP, including loopback, is automatically trusted.
+
+Unknown clients wait up to 120 seconds for approval. At the HOST COMPUTER'S
+console, type allow <request number> or deny <request number>, then Enter.
+The dashboard shows the source IP and requested profile. The pending command
+lists requests. Approval saves the IP before opening a session; future connections
+from that address enter any profile normally. Remote input cannot approve itself.
+
+Alternatively, edit the JSON manually:
+{"allowed_ips": ["192.168.1.13", "192.168.1.14"]}
+
+Manual additions apply without restarting, including to waiting clients. Removing
+an IP blocks its next connection; existing approved sessions continue. Missing
+files mean an empty allowlist. Invalid files or failed saves never grant access.
+Without an interactive host console, unknown clients are refused; manually add
+their IPs and reconnect. The queue holds at most 16 requests, one per source IP.
+
+IP approval trusts an address, not a hardware identity. Use DHCP reservations
+where possible; clients behind the same NAT/proxy may share an approved address.
+Telnet remains unencrypted. Restrict access with your firewall and do not forward
+these ports from the Internet. An empty TELNET_SERVER_CONFIGS disables listeners.
 
 AI Assistant Configuration (Optional)
 
@@ -293,19 +312,21 @@ The accordion main menu groups features into:
   Electronic Mail, and Connected Terminals (list, message, or deliver a text file)
 * [2] Host Connectivity: Host Applications, Launch Host App, Keyboard Bridge,
   COM Port Bridge, Host Terminal, System Monitor & Media, and Host Printing
-* [3] Files & Media: File Transfers, Document Viewer, Text Library, ASCII Image Viewer
+* [3] Files & Media: File Manager, File Transfers, Archive Browser, Text Library,
+  Document Viewer, ASCII Image Viewer, Audio Player
 * [4] Games: Minesweeper, Solitaire, Lunar Lander, Hunt the Wumpus, Blackjack,
-  and Mastermind. WarGames remains available with the WARGAMES CLI command.
-* [5] Accessories: Notepad, Calculator, Live Weather & News, AI Assistant, LOGO
+  Mastermind, Word Guess, and Star Trek. WarGames remains available with the WARGAMES CLI command.
+* [5] Accessories: Notepad, Calendar, Calculator, Address Book, Unit Converter,
+  Weather & News, AI Assistant, LOGO
 * [6] System: Command Shell, Task Scheduler, Terminal Settings, Keyboard Profiles,
-  Help & User Guide, Welcome Banner, and remote-client Disconnect
+  Help & User Guide, Welcome Banner, Host Settings, and remote-client Disconnect
 
 Enter a section number (0-6) to expand it and an item letter to launch it. At 80
 columns, the menu is arranged in three columns; at 40 columns, it uses a compact
 layout. The Keyboard option types into the focused host
-application. Enter, Tab, and Backspace are supported;
-press Ctrl+X to exit. Escape and Ctrl+] are also recognized when the
-terminal can send them. This uses Windows' native input API on Windows and
+application. Enter, Tab, Backspace, and Escape are supported. The configured
+Ctrl+letter exit binding defaults to Ctrl+X and can be changed under
+System > Host Settings. This uses Windows' native input API on Windows and
 pynput on macOS/Linux. Keep the intended application focused while using
 this
 mode.
@@ -316,7 +337,7 @@ also offers a selected-terminal message or text-file delivery action.
 
 LOGO Programming
 
-Select Accessories > E > LOGO or type LOGO at the main menu. Use commands at the
+Select Accessories > H > LOGO or type LOGO at the main menu. Use commands at the
 Logo> prompt. For example, REPEAT 4 (FD 80 RT 90) draws a square; square brackets
 work as well. FD and BK move, RT and LT turn, PU and PD lift or lower the pen,
 and STATUS reports the turtle position and heading. MAKE defines variables, TO
@@ -324,10 +345,50 @@ and END define procedures, and HELP lists the supported commands. Type BYE to
 return to the hub. Drawing state is reported in the terminal; a host turtle
 window opens when Python Tkinter and a graphical display are available.
 
+Host Console Commands
+
+Type hub commands directly at Host>, just as in the terminal CLI:
+  terminals
+  msg to APPLE2 Hello from the host
+  broadcast Meeting in five minutes
+  calc 6 * 7
+
+Other machines can reply using msg to Host <text>. ATM opens the regular menus;
+CLI returns to commands. PgUp/PgDn scroll host output, Up/Down recall commands,
+and clear clears the output pane. Blank Enter responds to prompts; Ctrl+X is
+forwarded to the active session. Host commands work with Telnet listeners off.
+The allow/deny/pending approval commands remain local host-console controls.
+
+New Accessories and Media Tools
+
+Calendar saves appointments using the host's local clock. Timed
+reminders broadcast to connected terminals; today's and overdue appointments
+also appear when connecting. Use calendar month, calendar agenda, or
+calendar add YYYY-MM-DD HH:MM "Title". Use calendar done <id> to complete one.
+
+Unit Converter handles length, mass, US volume, temperature, and number bases:
+convert 72 F C; convert 1 mi km; convert FF hex bin.
+
+Address Book stores names, email, phone, BBS addresses, and notes. Use contacts
+add "Name", contacts set <id> email user@example.org, contacts mail <id> to
+compose a host draft, or contacts connect <id> to open a saved BBS destination.
+Appointments and contacts are shared across terminals in hub_tools/.
+
+File Manager browses files, creates folders, renames, copies, moves, views, and
+transfers files. Archive Browser lists ZIP members and extracts selected files
+or all contents. Both stay inside files/ and do not replace existing files.
+Try fileman ls or archive open software.zip; each command accepts help.
+
+Audio Player plays through host speakers with a shared queue, playback controls,
+volume, and saved M3U playlists. Try audio list, audio play 1, audio queue 2,
+audio save "Retro Mix", audio load "Retro Mix", or audio radio <stream URL>.
+Windows supports native local playback; FFmpeg (ffplay on PATH) enables internet
+radio, additional formats, and playback on other platforms.
+
 Terminal Games
 
 The Games menu contains Minesweeper, Solitaire, Lunar Lander, Hunt the Wumpus,
-Blackjack, and Mastermind. WarGames is still available by typing WARGAMES at
+Blackjack, Mastermind, Word Guess, and Star Trek. WarGames is still available by typing WARGAMES at
 the CLI. Blackjack uses H to hit, S to stand, N to start a new hand, and Q to
 quit. Other games display their available single-key actions at their prompt.
 
@@ -508,6 +569,31 @@ Garbled Text
 * Try a different cable
 
 Release Notes
+
+v2.4
+
+* Interactive Host Console: Run hub CLI commands and interactive menus from the
+  host keyboard. Added messages to other terminals and replies to Host, command
+  history, scrollable output, and masked FTP password input.
+* Telnet Source Approval: New IPs require allow <request #> or deny <request #>
+  at the host console, or a manual telnet_allowlist.json entry. Approval is saved
+  before opening a session. Invalid policies/saves never grant access. Requests
+  expire and the pending queue is bounded. Serial connections are exempt.
+* Added Calendar with reminders, Unit Converter, Address Book, File Manager,
+  ZIP Archive Browser, and Audio Player with playlists and optional FFmpeg radio.
+* Added Word Guess and a Star Trek adaptation inspired by Apple II BASIC, with
+  quadrant scans, navigation, phasers, torpedoes, shields, and starbase resupply.
+* Added Host Settings with a saved keyboard bridge exit key, default Ctrl+X.
+  Escape is forwarded to applications instead of exiting the bridge.
+* Reordered Files & Media and Accessories; shortened Calendar and Weather & News
+  labels. Disconnect is last in System. Active connection rows now match waiting
+  rows in field order and indentation, under matching gray section dividers.
+* Fixed redraw drift after console input using fixed screen positions and
+  viewport limits, while retaining the host prompt on smaller windows.
+* Isolated game, Logo, and mail sessions, serialized module initialization, and
+  shared one scheduler per task file to prevent duplicate background jobs.
+* Updated application version to v2.4, both user guides, in-hub help, and tests.
+  Source allowlists, appointments, and contacts remain local installation data.
 
 v2.3
 

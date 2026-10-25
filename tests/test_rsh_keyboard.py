@@ -27,20 +27,29 @@ class KeyboardBridgeTests(unittest.TestCase):
             self.keys, ["ENTER", "BACKSPACE", "TAB", "ENTER"]
         )
 
-    def test_escape_exits_without_being_injected(self):
-        self.assertTrue(self.bridge.feed(b"before\x1bafter"))
-        self.assertEqual(self.characters, list("before"))
-        self.assertEqual(self.keys, [])
+    def test_escape_is_forwarded_without_exiting(self):
+        self.assertFalse(self.bridge.feed(b"before\x1bafter"))
+        self.assertEqual(self.characters, list("beforeafter"))
+        self.assertEqual(self.keys, ["ESC"])
 
     def test_ctrl_x_exits_without_being_injected(self):
         self.assertTrue(self.bridge.feed(b"before\x18after"))
         self.assertEqual(self.characters, list("before"))
         self.assertEqual(self.keys, [])
 
-    def test_ctrl_right_bracket_also_exits_without_being_injected(self):
-        self.assertTrue(self.bridge.feed(b"before\x1dafter"))
-        self.assertEqual(self.characters, list("before"))
+    def test_ctrl_right_bracket_does_not_exit(self):
+        self.assertFalse(self.bridge.feed(b"before\x1dafter"))
+        self.assertEqual(self.characters, list("beforeafter"))
         self.assertEqual(self.keys, [])
+
+    def test_configured_exit_binding_replaces_ctrl_x(self):
+        shortcuts = []
+        bridge = KeyboardBridge(send_character=self.characters.append, send_key=self.keys.append,
+                                send_shortcut=shortcuts.append, shortcut_mappings={"CTRL+X": "CTRL+X"}, exit_byte=0x11)
+        self.assertFalse(bridge.feed(b"\x18A"))
+        self.assertEqual(shortcuts, ["CTRL+X"])
+        self.assertTrue(bridge.feed(b"\x11B"))
+        self.assertEqual(self.characters, ["A"])
 
     def test_other_control_bytes_are_ignored(self):
         self.assertFalse(self.bridge.feed(b"\x00\x01\x02AB"))
@@ -61,18 +70,18 @@ class KeyboardBridgeTests(unittest.TestCase):
 
         keyboard = SimpleNamespace(
             Controller=FakeController,
-            Key=SimpleNamespace(enter="enter", backspace="backspace", tab="tab"),
+            Key=SimpleNamespace(enter="enter", backspace="backspace", tab="tab", esc="esc"),
         )
         with patch.object(rsh_keyboard.sys, "platform", "darwin"):
             with patch.object(
                 rsh_keyboard.importlib, "import_module", return_value=keyboard
             ) as import_module:
                 bridge = KeyboardBridge()
-                self.assertFalse(bridge.feed(b"A\r"))
+                self.assertFalse(bridge.feed(b"A\r\x1b"))
 
         import_module.assert_called_once_with("pynput.keyboard")
         self.assertEqual(
-            calls, [("type", "A"), ("press", "enter"), ("release", "enter")]
+            calls, [("type", "A"), ("press", "enter"), ("release", "enter"), ("press", "esc"), ("release", "esc")]
         )
 
     def test_linux_without_pynput_reports_install_instructions(self):

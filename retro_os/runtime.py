@@ -26,6 +26,7 @@ FEATURE_MODULES = (
     "ascii_viewer",
     "scheduler",
     "shortcut",
+    "toolkit",
 )
 
 

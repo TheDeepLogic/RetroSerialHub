@@ -31,7 +31,7 @@ bridges the gap between retro hardware and modern computing:
   XLSX, CSV, Markdown, and HTML files.
 * Communications & Mail: Bulletin board directory, telnet terminal, web
   browser, FTP client, and integrated inter-terminal electronic mail.
-* Retro Games: Native text-mode Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, and Mastermind, plus the WarGames W.O.P.R. CLI simulation.
+* Retro Games: Native text-mode Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, and Star Trek, plus the WarGames W.O.P.R. CLI simulation.
 """,
     ),
     (
@@ -46,9 +46,11 @@ The main menu uses an accordion flyout layout designed for vintage 40- and
   [0] Shortcuts: Quick user-defined command macros with custom arguments.
   [1] Communications: BBS, Telnet, Web Browser, FTP, Electronic Mail, Connected Terminals.
   [2] Host Connectivity: Host Applications, Keyboard Bridge, Terminal Prompt, Host Printing.
-  [3] Files & Media: File Transfers, Document Viewer, Text Library, ASCII Art.
-  [4] Games: Dedicated retro games (Minesweeper, Solitaire, Wumpus, Lunar Lander, Blackjack, Mastermind).
-  [5] Accessories: Notepad, Calculator, Live Weather & News, AI, LOGO.
+  [3] Files & Media: File Manager, File Transfers, Archive Browser, Text Library,
+      Document Viewer, ASCII Image Viewer, Audio Player.
+  [4] Games: Dedicated retro games (Minesweeper, Solitaire, Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek).
+  [5] Accessories: Notepad, Calendar, Calculator, Address Book, Unit Converter,
+      Weather & News, AI Assistant, LOGO.
   [6] System: Command Shell (CLI), Task Scheduler, Hardware Settings, Help.
 
 * Navigation Keys:
@@ -69,6 +71,11 @@ The main menu uses an accordion flyout layout designed for vintage 40- and
         """COMMAND SHELL (CLI) GUIDE
 =========================
 Type 'CLI' or 'OS' at the main menu to enter the interactive command prompt:
+
+The host computer's Host> prompt accepts the same commands. Use terminals,
+msg to <terminal> <text>, or broadcast <text> to interact with connected machines.
+Other terminals can send to Host. ATM opens menus; CLI returns to commands.
+On the host, PgUp/PgDn scroll output, Up/Down recall commands, and clear clears it.
 
   cli> help                      List all registered shell commands
   cli> apps                      List installed host PC applications
@@ -92,6 +99,16 @@ Type 'CLI' or 'OS' at the main menu to enter the interactive command prompt:
   cli> mail [inbox|read|send]    Read and send integrated hub or internet email
   cli> games wumpus new          Start Hunt the Wumpus
   cli> calc <expression>         Evaluate mathematical expressions
+  cli> calendar month            Monthly calendar and appointments
+  cli> calendar add YYYY-MM-DD HH:MM <title>  Save a timed reminder
+  cli> calendar agenda           List appointments (done <id> completes one)
+  cli> convert 72 F C            Units, temperature, and number bases
+  cli> contacts add <name>       Add a contact; set <id> <field> <value> edits
+  cli> contacts mail <id>        Compose a host email draft for a contact
+  cli> contacts connect <id>     Connect to a contact's BBS address
+  cli> fileman ls                Browse shared files; help lists operations
+  cli> archive open <file.zip>   Browse ZIP contents; extract <number|all>
+  cli> audio list                Browse host audio; play <number> starts it
   cli> schedule list|add|run     Manage automated periodic background tasks
   cli> caps on|off               Toggle uppercase-only mode for vintage ROMs
   cli> pace <milliseconds>       Adjust inter-character pacing delay
@@ -152,8 +169,27 @@ Hub bridges this with a real-time extraction pipeline:
   - XMODEM (128-byte blocks with checksum)
   - YMODEM (1024-byte blocks with batch headers)
   - ASCII Raw Stream
-  Use menu option [Files & Media] -> [A] File Transfers or direct CLI commands
+  Use menu option [Files & Media] -> [B] File Transfers or direct CLI commands
   (xsend, ysend, asend, xrecv).
+
+* File Manager (A):
+  Browse directories, inspect dates and sizes, create folders, rename, copy,
+  move, view, and transfer files. All paths stay inside the shared files folder.
+
+* Archive Browser (C):
+  Open ZIP archives and extract a selected member or all contents. Extraction
+  creates new files and does not replace existing files.
+
+* Audio Player (G):
+  Play host audio with pause/resume, next/previous, volume, and track information.
+  Queue tracks, save/load M3U playlists, or enter an HTTP(S) internet radio URL.
+  Audio uses the host speakers. Windows supports native local playback;
+  FFmpeg (ffplay on PATH) enables radio and additional formats/platforms.
+
+Appointments and contacts are saved in hub_tools/ and shared across terminals.
+Reminders use the host's local clock and broadcast when due. Today's and overdue
+appointments also appear on connection until marked done. Unit Converter handles
+length, mass, US volume, temperatures, and binary/octal/decimal/hexadecimal.
 """,
     ),
     (
@@ -248,6 +284,15 @@ All games are fully playable on 40- and 80-column vintage displays:
   - Each clue reports exact positions and matching digits in the wrong position.
   - You have 10 guesses to crack the code. Use N for a new puzzle or Q to quit.
 
+* Word Guess:
+  - Start with 'games wordguess new'. Guess the hidden five-letter word in six tries; G marks a correct position, Y a letter in another position, and . a letter not in the word.
+  - Enter any five-letter word; no dictionary lookup is required.
+
+* Star Trek:
+  - Start with 'games trek new'. Scan with 'scan' or 'long'; move with 'move <course 0-359> <warp 1-8>'.
+  - Attack Klingons with 'phasers <energy>' or 'torpedo <course>'. Transfer power to shields with 'shield <energy>'.
+  - Destroy every Klingon before the deadline. Dock next to a starbase to replenish supplies.
+
 * WarGames (W.O.P.R.):
   - Launch from the CLI with 'WARGAMES'. The game is no longer on the Games menu.
 """,
@@ -263,9 +308,15 @@ All games are fully playable on 40- and 80-column vintage displays:
   - CLI: Open the interactive command shell.
   - HELP or ?: Open this Help & User Guide.
 
+* Incoming Telnet Approval (host console only):
+  - Unknown source IPs wait for host approval before receiving a hub session.
+  - At the host computer keyboard: allow <request #> or deny <request #>, then Enter.
+  - Approved IPs are saved in telnet_allowlist.json; it can also be edited manually.
+  - Serial connections are exempt. Telnet traffic remains unencrypted.
+
 * Main Menu Hotkeys:
   - 0-6: Switch accordion section.
-  - A-G: Activate item in current section.
+  - A-H: Activate item in current section.
   - +: Add a user shortcut (in Shortcuts section).
   - -: Delete a user shortcut (in Shortcuts section).
 

@@ -1,6 +1,7 @@
-"""Text-mode minesweeper and a small Klondike solitaire game."""
+"""Session-scoped text-mode games for Retro Serial Hub."""
 
 import random
+import math
 
 _context = None
 _mines = {}
@@ -9,8 +10,294 @@ _wumpus_games = {}
 _lander_games = {}
 _blackjack_games = {}
 _mastermind_games = {}
+_word_guess_games = {}
+_trek_games = {}
 _SUITS = ("S", "H", "D", "C")
 _RANKS = "A23456789TJQK"
+_WORD_GUESS_WORDS = (
+    "apple", "badge", "beach", "brain", "brick", "cabin", "cable", "candy",
+    "chair", "charm", "chess", "cloud", "crane", "dance", "dream", "earth",
+    "flame", "giant", "grape", "green", "house", "light", "magic", "maple",
+    "metal", "money", "mouse", "music", "ocean", "piano", "plant", "radio",
+    "river", "robot", "round", "scale", "sheep", "shore", "smile", "sound",
+    "spare", "spoon", "stone", "storm", "table", "tiger", "train", "vapor",
+    "water", "whale", "world", "zebra",
+)
+
+
+def _new_trek_game():
+    quadrants = {}
+    for qy in range(8):
+        for qx in range(8):
+            quadrants[(qy, qx)] = {"klingons": [], "base": None, "stars": []}
+
+    def free_sector(quadrant):
+        occupied = {(k["y"], k["x"]) for k in quadrant["klingons"]} | set(quadrant["stars"])
+        if quadrant["base"] is not None:
+            occupied.add(quadrant["base"])
+        choices = [(y, x) for y in range(8) for x in range(8) if (y, x) not in occupied]
+        return random.choice(choices)
+
+    klingon_count = random.randint(16, 24)
+    base_count = 2
+    for _ in range(klingon_count):
+        quadrant = random.choice(list(quadrants.values()))
+        y, x = free_sector(quadrant)
+        quadrant["klingons"].append({"y": y, "x": x, "hull": random.randint(250, 400)})
+    for _ in range(base_count):
+        quadrant = random.choice(list(quadrants.values()))
+        while quadrant["base"] is not None:
+            quadrant = random.choice(list(quadrants.values()))
+        quadrant["base"] = free_sector(quadrant)
+    for quadrant in quadrants.values():
+        for _ in range(random.randint(1, 4)):
+            quadrant["stars"].append(free_sector(quadrant))
+
+    game = {
+        "quadrants": quadrants,
+        "qy": 3, "qx": 3, "sy": 3, "sx": 3,
+        "klingons": klingon_count, "bases": base_count,
+        "energy": 5000, "shields": 1000, "torpedoes": 10,
+        "stardate": 0.0, "deadline": 30.0, "over": False,
+    }
+    # Keep the Enterprise's starting sector free of objects.
+    quadrant = quadrants[(game["qy"], game["qx"])]
+    quadrant["klingons"] = [k for k in quadrant["klingons"] if (k["y"], k["x"]) != (game["sy"], game["sx"])]
+    if quadrant["base"] == (game["sy"], game["sx"]):
+        quadrant["base"] = None
+        game["bases"] -= 1
+    quadrant["stars"] = [p for p in quadrant["stars"] if p != (game["sy"], game["sx"])]
+    game["klingons"] = sum(len(q["klingons"]) for q in quadrants.values())
+    return game
+
+
+def _trek_quadrant(game):
+    return game["quadrants"][(game["qy"], game["qx"])]
+
+
+def _trek_sector_scan(game):
+    quadrant = _trek_quadrant(game)
+    grid = [["." for _ in range(8)] for _ in range(8)]
+    for y, x in quadrant["stars"]:
+        grid[y][x] = "*"
+    if quadrant["base"]:
+        y, x = quadrant["base"]
+        grid[y][x] = "B"
+    for klingon in quadrant["klingons"]:
+        grid[klingon["y"]][klingon["x"]] = "K"
+    grid[game["sy"]][game["sx"]] = "E"
+    lines = [f"QUADRANT {game['qy'] + 1}-{game['qx'] + 1}  (E=Enterprise K=Klingon B=base *=star)", "   1 2 3 4 5 6 7 8"]
+    lines.extend(f"{y + 1:2d} " + " ".join(row) for y, row in enumerate(grid))
+    lines.append(f"Klingons: {len(quadrant['klingons'])}  Starbases: {int(quadrant['base'] is not None)}  Stars: {len(quadrant['stars'])}")
+    return "\n".join(lines)
+
+
+def _trek_status(game, notice=""):
+    lines = [
+        f"STAR TREK  Stardate {3424 + game['stardate']:.1f}/{3424 + game['deadline']:.0f}",
+        f"Quadrant {game['qy'] + 1}-{game['qx'] + 1} Sector {game['sy'] + 1}-{game['sx'] + 1}",
+        f"Klingons: {game['klingons']}  Starbases: {game['bases']}  Torpedoes: {game['torpedoes']}",
+        f"Energy: {game['energy']}  Shields: {game['shields']}",
+    ]
+    if notice:
+        lines.append(notice)
+    lines.append("Commands: scan, long, move <course 0-359> <warp 1-8>, phasers <energy>,")
+    lines.append("          torpedo <course>, shield <energy>, status, new, quit")
+    return "\n".join(lines)
+
+
+def _trek_enemy_turn(game):
+    quadrant = _trek_quadrant(game)
+    attacks = len(quadrant["klingons"])
+    if not attacks:
+        return ""
+    total_hit = sum(random.randint(80, 220) for _ in range(attacks))
+    absorbed = min(game["shields"], total_hit)
+    game["shields"] -= absorbed
+    spill = total_hit - absorbed
+    game["energy"] = max(0, game["energy"] - spill)
+    if game["energy"] <= 0:
+        game["over"] = True
+        return f"Klingons hit for {total_hit} units. Shields are down; the Enterprise is destroyed!"
+    return f"Klingons hit for {total_hit} units ({absorbed} absorbed by shields)."
+
+
+def _trek_command(game, args):
+    if not args or args[0].lower() in ("status", "i", "show"):
+        return _trek_status(game) + "\n\n" + _trek_sector_scan(game)
+    command = args[0].lower()
+    if command in ("scan", "srs"):
+        return _trek_sector_scan(game)
+    if command in ("long", "lrs", "computer"):
+        y_range = range(max(0, game["qy"] - 1), min(8, game["qy"] + 2))
+        x_range = range(max(0, game["qx"] - 1), min(8, game["qx"] + 2))
+        lines = ["LONG RANGE SCAN  (Klingons / Starbases / Stars)",
+                 "       " + "  ".join(f"Q{game['qy'] + 1}-{x + 1}" for x in x_range)]
+        for y in y_range:
+            cells = []
+            for x in x_range:
+                quadrant = game["quadrants"][(y, x)]
+                cells.append(f"{len(quadrant['klingons']):1d}/{int(quadrant['base'] is not None):1d}/{len(quadrant['stars']):1d}")
+            lines.append(f"Q{y + 1}: " + "  ".join(cells))
+        lines.append("Quadrant entries are K/B/*; scan shows exact sector positions.")
+        return "\n".join(lines)
+    if command in ("move", "warp", "nav") and len(args) == 3:
+        try:
+            course, warp = float(args[1]), int(args[2])
+        except ValueError:
+            return "Use: move <course 0-359> <warp 1-8>"
+        if not math.isfinite(course) or not 0 <= course < 360:
+            return "Course must be from 0 to 359 degrees."
+        if not 1 <= warp <= 8:
+            return "Warp factor must be from 1 to 8."
+        energy_cost = int(10 * warp * warp)
+        if energy_cost > game["energy"]:
+            return f"Insufficient energy; movement requires {energy_cost}."
+        radians = math.radians(course)
+        dx, dy = math.sin(radians), -math.cos(radians)
+        steps = max(1, int(round(warp * 2)))
+        notices = []
+        px, py = float(game["sx"]), float(game["sy"])
+        quadrant = _trek_quadrant(game)
+        occupied = {(k["y"], k["x"]) for k in quadrant["klingons"]} | set(quadrant["stars"])
+        if quadrant["base"]:
+            occupied.add(quadrant["base"])
+        for _ in range(steps):
+            px += dx
+            py += dy
+            nx, ny = int(round(px)), int(round(py))
+            qx, qy = game["qx"], game["qy"]
+            if nx < 0:
+                qx, px = qx - 1, px + 8
+                nx = int(round(px))
+            elif nx > 7:
+                qx, px = qx + 1, px - 8
+                nx = int(round(px))
+            if ny < 0:
+                qy, py = qy - 1, py + 8
+                ny = int(round(py))
+            elif ny > 7:
+                qy, py = qy + 1, py - 8
+                ny = int(round(py))
+            if not (0 <= qx < 8 and 0 <= qy < 8):
+                notices.append("Galactic boundary reached.")
+                break
+            next_quadrant = game["quadrants"][(qy, qx)]
+            if next_quadrant is not quadrant:
+                next_occupied = {(k["y"], k["x"]) for k in next_quadrant["klingons"]} | set(next_quadrant["stars"])
+                if next_quadrant["base"]:
+                    next_occupied.add(next_quadrant["base"])
+            else:
+                next_occupied = occupied
+            if (ny, nx) in next_occupied:
+                notices.append("Course blocked by an object in that sector.")
+                break
+            if next_quadrant is not quadrant:
+                game["qx"], game["qy"] = qx, qy
+                quadrant, occupied = next_quadrant, next_occupied
+            game["sx"], game["sy"] = nx, ny
+        game["energy"] -= energy_cost
+        game["stardate"] += warp / 4
+        if quadrant["base"] and abs(quadrant["base"][0] - game["sy"]) <= 1 and abs(quadrant["base"][1] - game["sx"]) <= 1:
+            game["energy"], game["shields"], game["torpedoes"] = 5000, 1000, 10
+            notices.append("Docked at starbase; energy, shields, and torpedoes replenished.")
+        if game["stardate"] >= game["deadline"] and game["klingons"]:
+            game["over"] = True
+            notices.append("Mission time expired. The Federation has fallen.")
+        enemy_notice = _trek_enemy_turn(game) if not game["over"] else ""
+        if enemy_notice:
+            notices.append(enemy_notice)
+        return _trek_status(game, " ".join(notices)) + "\n\n" + _trek_sector_scan(game)
+    if command in ("phasers", "phaser", "p") and len(args) == 2:
+        try:
+            amount = int(args[1])
+        except ValueError:
+            return "Use: phasers <energy units>"
+        quadrant = _trek_quadrant(game)
+        klingons = quadrant["klingons"]
+        if not klingons:
+            return "No Klingons in this quadrant."
+        if not 1 <= amount <= game["energy"]:
+            return f"Choose an energy level from 1 to {game['energy']}."
+        game["energy"] -= amount
+        hits = []
+        for klingon in list(klingons):
+            distance = math.hypot(klingon["x"] - game["sx"], klingon["y"] - game["sy"])
+            damage = amount / len(klingons) * random.uniform(0.65, 1.35) / (1 + distance * 0.12)
+            klingon["hull"] -= int(damage)
+            if klingon["hull"] <= 0:
+                klingons.remove(klingon)
+                game["klingons"] -= 1
+                hits.append("Klingon destroyed")
+            else:
+                hits.append(f"Klingon damaged ({klingon['hull']} hull left)")
+        game["stardate"] += 0.2
+        if game["klingons"] == 0:
+            game["over"] = True
+            hits.append("VICTORY! The Federation is clear of Klingons.")
+        elif game["stardate"] >= game["deadline"]:
+            game["over"] = True
+            hits.append("Mission time expired. The Federation has fallen.")
+        else:
+            enemy_notice = _trek_enemy_turn(game)
+            if enemy_notice:
+                hits.append(enemy_notice)
+        return _trek_status(game, "; ".join(hits)) + "\n\n" + _trek_sector_scan(game)
+    if command in ("torpedo", "torpedoes", "t") and len(args) == 2:
+        try:
+            course_value = float(args[1])
+        except ValueError:
+            return "Use: torpedo <course 0-359>"
+        if not math.isfinite(course_value) or not 0 <= course_value < 360:
+            return "Course must be from 0 to 359 degrees."
+        course = math.radians(course_value)
+        if game["torpedoes"] <= 0:
+            return "No photon torpedoes remain."
+        game["torpedoes"] -= 1
+        dx, dy = math.sin(course), -math.cos(course)
+        quadrant = _trek_quadrant(game)
+        result = "Photon torpedo missed."
+        seen = set()
+        for distance in range(1, 12):
+            x = int(round(game["sx"] + dx * distance))
+            y = int(round(game["sy"] + dy * distance))
+            if not (0 <= x < 8 and 0 <= y < 8) or (x, y) in seen:
+                if not (0 <= x < 8 and 0 <= y < 8):
+                    break
+                continue
+            seen.add((x, y))
+            target = next((k for k in quadrant["klingons"] if (k["y"], k["x"]) == (y, x)), None)
+            if target:
+                quadrant["klingons"].remove(target)
+                game["klingons"] -= 1
+                result = "Klingon destroyed by photon torpedo!"
+                break
+            if (y, x) in quadrant["stars"] or quadrant["base"] == (y, x):
+                result = "Photon torpedo detonated against an obstruction."
+                break
+        game["stardate"] += 0.2
+        if game["klingons"] == 0:
+            game["over"] = True
+            result += " VICTORY! The Federation is clear of Klingons."
+        elif game["stardate"] >= game["deadline"]:
+            game["over"] = True
+            result += " Mission time expired. The Federation has fallen."
+        else:
+            enemy_notice = _trek_enemy_turn(game)
+            if enemy_notice:
+                result += " " + enemy_notice
+        return _trek_status(game, result) + "\n\n" + _trek_sector_scan(game)
+    if command in ("shield", "shields") and len(args) == 2:
+        try:
+            amount = int(args[1])
+        except ValueError:
+            return "Use: shield <energy units to transfer>"
+        if amount < 0 or amount > game["energy"]:
+            return f"Choose an energy transfer from 0 to {game['energy']}."
+        game["energy"] -= amount
+        game["shields"] += amount
+        return _trek_status(game, f"Transferred {amount} energy units to shields.")
+    return "Use: scan | long | move <course> <warp> | phasers <energy> | torpedo <course> | shield <energy> | status | new | quit"
 
 # The classic dodecahedral cave: every room connects to three neighbors.
 _CAVE = (
@@ -82,6 +369,38 @@ def _mastermind_status(game, notice=""):
         lines.append(notice)
     if not game["over"]:
         lines.append("G <four digits>=guess, N=new, Q=quit")
+    return "\n".join(lines)
+
+
+def _new_word_guess():
+    return {"word": random.choice(_WORD_GUESS_WORDS), "guesses": [], "over": False}
+
+
+def _word_guess_feedback(answer, guess):
+    marks = ["."] * len(answer)
+    remaining = list(answer)
+    for index, letter in enumerate(guess):
+        if letter == answer[index]:
+            marks[index] = "G"
+            remaining[index] = None
+    for index, letter in enumerate(guess):
+        if marks[index] == "." and letter in remaining:
+            marks[index] = "Y"
+            remaining[remaining.index(letter)] = None
+    return " ".join(marks)
+
+
+def _word_guess_status(game, notice=""):
+    lines = ["WORD GUESS  Find the hidden 5-letter word in 6 guesses."]
+    lines.extend(
+        f"{index}. {guess.upper()}  {_word_guess_feedback(game['word'], guess)}"
+        for index, guess in enumerate(game["guesses"], 1)
+    )
+    if notice:
+        lines.append(notice)
+    if not game["over"]:
+        lines.append("G=right spot  Y=elsewhere  .=not in word")
+        lines.append("Enter a 5-letter guess, N=new, Q=quit")
     return "\n".join(lines)
 
 
@@ -267,12 +586,48 @@ def init(context):
 
 
 def register_commands(registry):
+    context = _context
     def games(args):
-        context = _context
         if not args or args[0].lower() == "help":
-            return "Games: minesweeper [new|r row col|f row col] | solitaire [new|draw|auto|move src dst] | wumpus [new|m room|s room,...] | lander [new|burn 0-4] | blackjack [new|hit|stand] | mastermind [new|guess 1234]"
+            return "Games: minesweeper [new|r row col|f row col] | solitaire [new|draw|auto|move src dst] | wumpus [new|m room|s room,...] | lander [new|burn 0-4] | blackjack [new|hit|stand] | mastermind [new|guess 1234] | wordguess [new|<5-letter guess>] | trek [new|scan|long|move|phasers|torpedo|shield|quit]"
         name = args[0].lower()
         session_id = context.session.id
+        if name in ("trek", "startrek", "star-trek", "star_trek"):
+            sub = args[1].lower() if len(args) > 1 else ""
+            if sub in ("n", "new", "start") or session_id not in _trek_games:
+                _trek_games[session_id] = _new_trek_game()
+                return _trek_status(_trek_games[session_id], "Captain, your mission begins.") + "\n\n" + _trek_sector_scan(_trek_games[session_id])
+            game = _trek_games[session_id]
+            if sub in ("q", "quit", "exit"):
+                del _trek_games[session_id]
+                return "Star Trek mission ended."
+            if game["over"]:
+                return "Mission over. Start another with: games trek new"
+            return _trek_command(game, args[1:])
+        if name in ("wordguess", "word", "wordle"):
+            sub = args[1].lower() if len(args) > 1 else ""
+            if sub in ("n", "new", "start") or session_id not in _word_guess_games:
+                _word_guess_games[session_id] = _new_word_guess()
+                if sub in ("", "n", "new", "start"):
+                    return _word_guess_status(_word_guess_games[session_id], "New word selected.")
+            game = _word_guess_games[session_id]
+            if sub in ("q", "quit", "exit"):
+                del _word_guess_games[session_id]
+                return "Word Guess session ended."
+            if game["over"]:
+                return "Game over. Start another with: games wordguess new"
+            guess = args[2] if sub in ("g", "guess") and len(args) == 3 else sub
+            if len(guess) != 5 or not guess.isalpha():
+                return "Enter exactly five letters, for example: games wordguess crane"
+            guess = guess.lower()
+            game["guesses"].append(guess)
+            if guess == game["word"]:
+                game["over"] = True
+                return _word_guess_status(game, f"YOU WIN! Solved in {len(game['guesses'])} guesses.")
+            if len(game["guesses"]) >= 6:
+                game["over"] = True
+                return _word_guess_status(game, f"No guesses left. The word was {game['word'].upper()}.")
+            return _word_guess_status(game)
         if name in ("blackjack", "21"):
             sub = args[1].lower() if len(args) > 1 else ""
             if sub in ("n", "new", "start") or session_id not in _blackjack_games:
@@ -503,24 +858,24 @@ def register_commands(registry):
         if name in ("solitaire", "sol"):
             if (len(args) > 1 and args[1].lower() in ("n", "new")) or session_id not in _cards:
                 _cards[session_id] = _new_solitaire()
-                return _solitaire_status(_cards[session_id])
+                return _solitaire_status(_cards[session_id], context.session.cols)
             game = _cards[session_id]
             sub = args[1].lower() if len(args) > 1 else ""
             if not sub or sub in ("board", "status", "show"):
-                return _solitaire_status(game)
+                return _solitaire_status(game, context.session.cols)
             if sub in ("draw", "d"):
                 if game["stock"]:
                     game["waste"].append(game["stock"].pop())
                 elif game["waste"]:
                     game["stock"] = list(reversed(game["waste"]))
                     game["waste"] = []
-                return _solitaire_status(game)
+                return _solitaire_status(game, context.session.cols)
             if sub in ("auto", "a"):
                 moved = _solitaire_auto_move(game)
                 msg = "Moved cards to foundation.\n" if moved else "No cards can be moved to foundation.\n"
                 if sum(map(len, game["foundations"])) == 52:
-                    return "*** CONGRATULATIONS! You won Solitaire! ***\n" + _solitaire_status(game)
-                return msg + _solitaire_status(game)
+                    return "*** CONGRATULATIONS! You won Solitaire! ***\n" + _solitaire_status(game, context.session.cols)
+                return msg + _solitaire_status(game, context.session.cols)
             if sub in ("move", "m") and len(args) >= 4:
                 source, target = args[2].lower(), args[3].lower()
                 if source in ("waste", "w"):
@@ -616,10 +971,10 @@ def register_commands(registry):
                     return "Destination must be column 1-7 or foundation f1-f4."
 
                 if sum(map(len, game["foundations"])) == 52:
-                    return "All cards moved to the foundations. You win!\n" + _solitaire_status(game)
-                return _solitaire_status(game)
+                    return "All cards moved to the foundations. You win!\n" + _solitaire_status(game, context.session.cols)
+                return _solitaire_status(game, context.session.cols)
             return "Usage: games solitaire [new|draw|auto|move <source> <destination>]"
-        return "Choose minesweeper, solitaire, wumpus, lander, blackjack, or mastermind."
+        return "Choose minesweeper, solitaire, wumpus, lander, blackjack, mastermind, wordguess, or trek."
     registry.register_command("games", games)
     registry.register_command("minesweeper", lambda args: games(["minesweeper", *args]))
     registry.register_command("mines", lambda args: games(["minesweeper", *args]))
@@ -628,6 +983,10 @@ def register_commands(registry):
     registry.register_command("lander", lambda args: games(["lander", *args]))
     registry.register_command("blackjack", lambda args: games(["blackjack", *args]))
     registry.register_command("mastermind", lambda args: games(["mastermind", *args]))
+    registry.register_command("wordguess", lambda args: games(["wordguess", *args]))
+    registry.register_command("wordle", lambda args: games(["wordguess", *args]))
+    registry.register_command("trek", lambda args: games(["trek", *args]))
+    registry.register_command("startrek", lambda args: games(["trek", *args]))
 
 
 def register_menu(menu):
