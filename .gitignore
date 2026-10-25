@@ -11,3 +11,4 @@ scheduled_tasks.json
 hub_tools/
 telnet_allowlist.json
 host_settings.json
+ai_config.json

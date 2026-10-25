@@ -274,10 +274,19 @@ To enable the AI Assistant feature:
 
 1. Create ai_config.json in the project directory:
    {
-       "api_key": "your-openai-api-key-here"
+       "api_key": "your-openai-api-key-here",
+       "model": "gpt-5.6-terra"
    }
 
 2. Or set the OPENAI_API_KEY environment variable
+
+The default model is gpt-5.6-terra, replacing retired gpt-3.5-turbo. Set model
+in ai_config.json or OPENAI_MODEL to select another Chat Completions model;
+the environment variable takes precedence. Reopen AI after changing the model.
+The selected model is shown in the assistant header and fixed per conversation.
+The default uses reasoning_effort none and a 500-token completion budget.
+For other models, reasoning is omitted unless configured through reasoning_effort
+or OPENAI_REASONING_EFFORT. The value default omits the field for any model.
 
 Usage
 
@@ -572,6 +581,9 @@ Release Notes
 
 v2.4
 
+* AI Model Compatibility: Replaced retired GPT-3.5 Turbo with GPT-5.6 Terra,
+  updated completion parameters, and added configurable model/reasoning settings
+  with clearer guidance when a model is unavailable.
 * Interactive Host Console: Run hub CLI commands and interactive menus from the
   host keyboard. Added messages to other terminals and replies to Host, command
   history, scrollable output, and masked FTP password input.

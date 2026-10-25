@@ -2,9 +2,8 @@
 """
 AI interaction module for RetroSerialHub.
 
-Uses OpenAI's ChatGPT API to provide an interactive AI assistant through
-a simple conversational interface. Uses the gpt-3.5-turbo model by default
-but can be configured for gpt-4 if available.
+Uses OpenAI's Chat Completions API with a configurable model and a short
+response budget suitable for serial terminals.
 """
 
 import os
@@ -15,6 +14,7 @@ from rsh_terminal import clear_terminal_screen
 
 # Load OpenAI API key from config file or environment
 CONFIG_FILE = Path(__file__).resolve().parent / "ai_config.json"
+DEFAULT_MODEL = "gpt-5.6-terra"
 SYSTEM_PROMPT = (
     "You are a helpful AI assistant in a retro BBS system. Keep responses "
     "concise and informative. Use ASCII art sparingly and only when "
@@ -25,11 +25,12 @@ def write(ser, s):
     """Write a string to the serial port."""
     ser.write(s.encode('ascii', errors='ignore'))
 
-def write_header(ser, use_ansi):
+def write_header(ser, use_ansi, model=DEFAULT_MODEL):
     """Show the AI chat header."""
     clear_terminal_screen(ser, use_ansi)
     write(ser, "\r\nLogicNet AI Assistant (powered by ChatGPT)\r\n")
     write(ser, "--------------------------------------\r\n\r\n")
+    write(ser, f"Model: {model}\r\n\r\n")
     write_help(ser)
     
 def write_help(ser):
@@ -41,7 +42,7 @@ def write_help(ser):
     write(ser, "context of your conversation until you start a new one.\r\n")
     write(ser, "\r\nEnter your message: ")
 
-def _load_api_key():
+def _load_config():
     if CONFIG_FILE.exists():
         try:
             with CONFIG_FILE.open(encoding="utf-8") as config_file:
@@ -49,10 +50,34 @@ def _load_api_key():
         except (OSError, json.JSONDecodeError) as exc:
             print(f"Config file error: {exc}")
         else:
-            api_key = config.get("api_key")
-            if api_key:
-                return api_key
-    return os.environ.get("OPENAI_API_KEY")
+            if isinstance(config, dict):
+                return config
+            print("Config file error: ai_config.json must contain a JSON object.")
+    return {}
+
+
+def _load_api_key():
+    return _load_config().get("api_key") or os.environ.get("OPENAI_API_KEY")
+
+
+def _load_chat_options():
+    config = _load_config()
+    model = os.environ.get("OPENAI_MODEL") or config.get("model", DEFAULT_MODEL)
+    if model in (None, ""):
+        model = DEFAULT_MODEL
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("AI model must be a model ID string in ai_config.json or OPENAI_MODEL.")
+    model = model.strip()
+    options = {"model": model, "max_completion_tokens": 500}
+    effort = os.environ.get("OPENAI_REASONING_EFFORT") or config.get("reasoning_effort")
+    if effort is None and model == DEFAULT_MODEL:
+        # Do not spend the short serial response budget on hidden reasoning.
+        effort = "none"
+    if effort not in (None, "", "default"):
+        if effort not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+            raise ValueError("Invalid reasoning_effort setting. Use default to let the selected model decide.")
+        options["reasoning_effort"] = effort
+    return options
 
 
 _api_key = _load_api_key()
@@ -69,9 +94,16 @@ def create_session(ser, use_ansi=True):
         write(ser, "Please create ai_config.json with {'api_key': 'your-key'}\r\n")
         write(ser, "or set OPENAI_API_KEY environment variable.\r\n")
         return None
+
+    try:
+        options = _load_chat_options()
+    except ValueError as exc:
+        write(ser, f"\r\n*** AI configuration error: {exc} ***\r\n")
+        return None
         
-    write_header(ser, use_ansi)
+    write_header(ser, use_ansi, options["model"])
     return {
+        'request_options': options,
         'messages': [
             {"role": "system", "content": SYSTEM_PROMPT}
         ],
@@ -108,7 +140,7 @@ def handle_input(session, line_str, ser, use_ansi=True):
         session['messages'] = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
-        write_header(ser, use_ansi)
+        write_header(ser, use_ansi, session.get('request_options', {}).get('model', DEFAULT_MODEL))
         return True, None
         
     # Normal message - send to AI
@@ -121,10 +153,8 @@ def handle_input(session, line_str, ser, use_ansi=True):
         # Call ChatGPT API
         try:
             response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
                 messages=session['messages'],
-                max_tokens=500,  # Keep responses reasonable for serial
-                temperature=0.7
+                **(session.get('request_options') or _load_chat_options())
             )
 
             # Get response content
@@ -142,6 +172,9 @@ def handle_input(session, line_str, ser, use_ansi=True):
                 
         except Exception as e:
             write(ser, f"*** API Error: {str(e)} ***\r\n")
+            if getattr(e, "code", None) == "model_not_found":
+                write(ser, "Choose an available model using the model field in ai_config.json\r\n")
+                write(ser, "or the OPENAI_MODEL environment variable, then reopen the assistant.\r\n")
             # Remove failed message from history
             session['messages'].pop()
             

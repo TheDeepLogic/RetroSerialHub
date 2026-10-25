@@ -365,11 +365,24 @@ configure a key using either method below.
 1. Create `ai_config.json` in the project directory:
    ```json
    {
-       "api_key": "your-openai-api-key-here"
+       "api_key": "your-openai-api-key-here",
+       "model": "gpt-5.6-terra"
    }
    ```
 
 2. Or set the `OPENAI_API_KEY` environment variable
+
+The default model is `gpt-5.6-terra`, OpenAI's recommended replacement for the
+retired `gpt-3.5-turbo`. Set `model` in `ai_config.json` or `OPENAI_MODEL` to use
+another available Chat Completions model; `OPENAI_MODEL` takes precedence. The
+assistant header shows the selected model. Reopen the assistant after changing
+it; an existing conversation keeps its model settings.
+
+Responses use a 500-token completion budget. The default model uses
+`reasoning_effort: "none"` to keep that budget available for terminal output.
+For a custom model, reasoning effort is left to the API unless explicitly set
+through `reasoning_effort` in JSON or `OPENAI_REASONING_EFFORT`. Use `"default"`
+to omit that request field; supported effort values depend on the selected model.
 
 ## Usage
 
@@ -615,6 +628,9 @@ This design allows you to customize or extend features without modifying the cor
 
 ### v2.4
 
+- **AI Model Compatibility**: Replaced the retired GPT-3.5 Turbo default with
+  GPT-5.6 Terra, updated completion parameters, and added configurable model and
+  reasoning settings with actionable errors when a model is unavailable.
 - **Interactive Host Console**: The host keyboard now runs the hub's CLI and
   interactive menus. Added host-to-terminal messaging and replies to `Host`,
   scrollable command output, command history, and masked FTP password input.
