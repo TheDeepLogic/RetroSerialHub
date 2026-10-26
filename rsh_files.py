@@ -280,192 +280,35 @@ def handle_input(sess, line_str, ser, use_ansi=True):
 
 
 def xmodem_send(ser, file_path, ser_name_for_user=None):
-    """Send a file via classic XMODEM (128-byte blocks, checksum).
-    Block and timing behavior follows the hub's previous implementation.
-    """
-    fname = os.path.basename(file_path)
-    _write(ser, f"\r\nXMODEM SEND: {fname}\r\n")
-    start_deadline = time.time() + 20.0
-    _write(ser, "Waiting for receiver (send NAK)…\r\n")
-    while time.time() < start_deadline:
-        if ser.in_waiting:
-            b = ser.read(1)
-            if b and b[0] in (NAK, ACK):
-                break
-        time.sleep(0.05)
-    else:
-        _write(ser, "No receiver detected. Aborting.\r\n")
-        return
-
+    from rsh_transfer import xsend
+    _write(ser, f"\r\nXMODEM SEND: {pathlib.Path(file_path).name}\r\nWaiting for receiver...\r\n")
     try:
-        with open(file_path, "rb") as f:
-            block_num = 1
-            while True:
-                chunk = f.read(128)
-                if not chunk:
-                    ser.write(bytes([EOT]))
-                    end_deadline = time.time() + 10.0
-                    while time.time() < end_deadline:
-                        if ser.in_waiting:
-                            b = ser.read(1)
-                            if b and b[0] == ACK:
-                                _write(ser, "\r\nTransfer complete.\r\n")
-                                return
-                            elif b and b[0] == NAK:
-                                ser.write(bytes([EOT]))
-                        time.sleep(0.05)
-                    _write(ser, "\r\nReceiver did not ACK EOT. Transfer ended.\r\n")
-                    return
-
-                if len(chunk) < 128:
-                    chunk += bytes([0x1A]) * (128 - len(chunk))
-
-                pkt = bytearray()
-                pkt.append(SOH)
-                pkt.append(block_num & 0xFF)
-                pkt.append(0xFF - (block_num & 0xFF))
-                pkt.extend(chunk)
-                checksum = sum(chunk) & 0xFF
-                pkt.append(checksum)
-
-                ser.write(pkt)
-                ack_deadline = time.time() + 10.0
-                while time.time() < ack_deadline:
-                    if ser.in_waiting:
-                        b = ser.read(1)
-                        if b and b[0] == ACK:
-                            block_num = (block_num + 1) & 0xFF
-                            break
-                        elif b and b[0] == NAK:
-                            ser.write(pkt)
-                        elif b and b[0] == CAN:
-                            _write(ser, "\r\nTransfer cancelled by receiver.\r\n")
-                            return
-                    time.sleep(0.02)
-                else:
-                    _write(ser, "\r\nTimeout waiting for ACK/NAK. Aborting.\r\n")
-                    return
-    except FileNotFoundError:
-        _write(ser, "\r\nFile not found.\r\n")
-    except Exception as e:
-        _write(ser, f"\r\nXMODEM error: {e}\r\n")
+        total = xsend(ser, file_path)
+        _write(ser, f"\r\nTransfer complete: {total} bytes.\r\n")
+    except (OSError, ValueError) as exc:
+        _write(ser, f"\r\nTransfer stopped: {exc}\r\n")
 
 
-def xmodem_receive(ser, dest_path):
-    _write(ser, f"\r\nXMODEM RECEIVE: saving to {os.path.basename(dest_path)}\r\n")
-    block_num = 1
-    received = bytearray()
-    ser.write(bytes([NAK]))
-
-    while True:
-        if ser.in_waiting:
-            b = ser.read(1)
-            if not b:
-                continue
-            c = b[0]
-
-            if c == SOH:
-                pkt = ser.read(131)
-                if len(pkt) < 131:
-                    ser.write(bytes([NAK]))
-                    continue
-                blk, nblk, data, checksum = pkt[0], pkt[1], pkt[2:-1], pkt[-1]
-                if blk != (block_num & 0xFF) or nblk != (0xFF - blk):
-                    ser.write(bytes([NAK]))
-                    continue
-                if (sum(data) & 0xFF) != checksum:
-                    ser.write(bytes([NAK]))
-                    continue
-                received.extend(data)
-                ser.write(bytes([ACK]))
-                block_num = (block_num + 1) & 0xFF
-
-            elif c == EOT:
-                ser.write(bytes([ACK]))
-                while received and received[-1] == 0x1A:
-                    received = received[:-1]
-                with open(dest_path, "wb") as f:
-                    f.write(received)
-                _write(ser, "\r\nUpload complete.\r\n")
-                return
-
-            elif c == CAN:
-                _write(ser, "\r\nUpload cancelled by sender.\r\n")
-                return
+def xmodem_receive(ser, dest_path, exact_size=None):
+    from rsh_transfer import xreceive
+    _write(ser, f"\r\nXMODEM RECEIVE: {pathlib.Path(dest_path).name}\r\n")
+    try:
+        total = xreceive(ser, dest_path, exact_size)
+        _write(ser, f"\r\nUpload complete: {total} bytes.\r\n")
+        if exact_size is None:
+            _write(ser, "XMODEM has no file length; final block padding is preserved.\r\n")
+    except (OSError, ValueError) as exc:
+        _write(ser, f"\r\nTransfer stopped: {exc}\r\nIncomplete data remains in a .part file.\r\n")
 
 
 def ymodem_send(ser, file_path):
-    fname = os.path.basename(file_path)
-    fsize = os.path.getsize(file_path)
-    _write(ser, f"\r\nYMODEM SEND: {fname} ({fsize} bytes)\r\n")
+    from rsh_transfer import ysend
+    _write(ser, f"\r\nYMODEM SEND: {pathlib.Path(file_path).name}\r\nWaiting for receiver...\r\n")
     try:
-        with open(file_path, "rb") as f:
-            header = f"{fname}\0{fsize}".encode("ascii")
-            header = header + bytes(128 - len(header))
-            pkt0 = bytearray([SOH, 0x00, 0xFF]) + header
-            pkt0.append(sum(header) & 0xFF)
-
-            start_deadline = time.time() + 20.0
-            while time.time() < start_deadline:
-                if ser.in_waiting:
-                    b = ser.read(1)
-                    if b and b[0] in (NAK, ord('C')):
-                        ser.write(pkt0)
-                        break
-                time.sleep(0.05)
-            else:
-                _write(ser, "No receiver detected. Aborting.\r\n")
-                return
-
-            while True:
-                if ser.in_waiting:
-                    b = ser.read(1)
-                    if b and b[0] == ACK:
-                        break
-                time.sleep(0.05)
-
-            block_num = 1
-            while True:
-                chunk = f.read(1024)
-                if not chunk:
-                    break
-                if len(chunk) < 1024:
-                    chunk += bytes([0x1A]) * (1024 - len(chunk))
-
-                pkt = bytearray([STX, block_num & 0xFF, 0xFF - (block_num & 0xFF)])
-                pkt.extend(chunk)
-                checksum = sum(chunk) & 0xFF
-                pkt.append(checksum)
-
-                ser.write(pkt)
-                ack_deadline = time.time() + 10.0
-                while time.time() < ack_deadline:
-                    if ser.in_waiting:
-                        b = ser.read(1)
-                        if b and b[0] == ACK:
-                            block_num = (block_num + 1) & 0xFF
-                            break
-                        elif b and b[0] == NAK:
-                            ser.write(pkt)
-                        elif b and b[0] == CAN:
-                            _write(ser, "\r\nTransfer cancelled by receiver.\r\n")
-                            return
-                    time.sleep(0.02)
-                else:
-                    _write(ser, "\r\nTimeout waiting for ACK. Aborting.\r\n")
-                    return
-
-            ser.write(bytes([EOT]))
-            while True:
-                if ser.in_waiting:
-                    b = ser.read(1)
-                    if b and b[0] == ACK:
-                        break
-                time.sleep(0.05)
-
-            _write(ser, "\r\nYMODEM transfer complete.\r\n")
-    except Exception as e:
-        _write(ser, f"\r\nYMODEM error: {e}\r\n")
+        total = ysend(ser, file_path)
+        _write(ser, f"\r\nTransfer complete: {total} bytes.\r\n")
+    except (OSError, ValueError) as exc:
+        _write(ser, f"\r\nTransfer stopped: {exc}\r\n")
 
 
 def ascii_send(ser, file_path):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rsh_storage import settings_path
+
 import json
 import pathlib
 import socket
@@ -11,10 +13,7 @@ _context = None
 
 
 def _get_bookmarks():
-    candidates = [
-        pathlib.Path("telnet_bookmarks.json"),
-        pathlib.Path(__file__).parent.parent.parent / "telnet_bookmarks.json",
-    ]
+    candidates = [settings_path("telnet_bookmarks.json")]
     for p in candidates:
         if p.exists():
             try:

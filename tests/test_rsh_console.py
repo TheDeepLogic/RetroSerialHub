@@ -285,5 +285,147 @@ class ConsoleDashboardTests(unittest.TestCase):
             self.assertNotIn("serial:COM1", dashboard.get_user_activities())
 
 
+    def test_serial_reconnect_replaces_stale_selection_for_physical_port(self):
+        import RETRO_SERIAL_HUB as rsh
+        from types import SimpleNamespace
+        dashboard = ConsoleDashboard({'APPLE2': {'serial_port': 'COM2'}})
+        old = SimpleNamespace(_client_id=501, _profile_name='APPLE2', port='COM2')
+        new = SimpleNamespace(_client_id='serial:APPLE2', _profile_name='APPLE2', port='com2')
+        with patch.object(rsh, 'CONSOLE', dashboard):
+            rsh.set_terminal_activity(old, 'bbs')
+            rsh.set_terminal_activity(new, 'wargames')
+            self.assertEqual(dashboard.get_user_activities(), {
+                'serial:APPLE2': {'action': 'wargames', 'user': 'APPLE2'}})
+            # A delayed cleanup from the retired session cannot clear its replacement.
+            rsh.clear_terminal_activity(old)
+            self.assertEqual(dashboard._users_for_action('wargames'), ['APPLE2'])
+            rsh.set_terminal_activity(new, 'audio')
+            self.assertEqual(dashboard._users_for_action('wargames'), [])
+            self.assertEqual(dashboard._users_for_action('audio'), ['APPLE2'])
+            text = '\n'.join(dashboard.render_interface(inner_width=80, use_color=False))
+            self.assertNotIn('*[A] BBS', text)
+            self.assertNotIn('*[H] WOPR', text)
+            self.assertIn('*[G] Audio Play', text)
+
+    def test_serial_port_replacement_preserves_other_ports_and_network_clients(self):
+        dashboard = ConsoleDashboard({})
+        dashboard.set_user_activity('old', 'bbs', user_label='APPLE2', serial_port='COM2')
+        dashboard.set_user_activity('other', 'files', user_label='IBM', serial_port='COM6')
+        dashboard.add_client(42, 'APPLE2', ('10.0.0.5', 6400))
+        dashboard.set_user_activity(42, 'telnet', user_label='APPLE2')
+        dashboard.set_user_activity('new', 'audio', user_label='APPLE2', serial_port='com2')
+        activities = dashboard.get_user_activities()
+        self.assertEqual(set(activities), {'other', 42, 'new'})
+        self.assertEqual(activities[42]['action'], 'telnet')
+        self.assertEqual(activities['other']['action'], 'files')
+
+    def test_reconnect_cleans_legacy_activity_without_port_metadata(self):
+        dashboard = ConsoleDashboard({'APPLE2': {'serial_port': 'COM2'}})
+        dashboard._user_activities[501] = {'action': 'bbs', 'user': 'APPLE2'}
+        dashboard.set_user_activity('serial:APPLE2', 'wargames', user_label='APPLE2', serial_port='COM2')
+        self.assertEqual(set(dashboard.get_user_activities()), {'serial:APPLE2'})
+
+
+    def test_host_interaction_collapses_monitor_until_explicit_clear(self):
+        from rsh_host import HostTerminal
+        dashboard = ConsoleDashboard({})
+        terminal = HostTerminal(dashboard.append_host_output)
+        dashboard.set_host_terminal(terminal)
+        size = os.terminal_size((120, 50))
+        for index in range(60):
+            dashboard.append_host_output(f'Output {index}\n')
+        dashboard._frame(height=50, terminal_size=size)
+        small_page = dashboard._output_page_size
+        self.assertFalse(dashboard._activity_collapsed)
+        dashboard._host_key('h')
+        dashboard._frame(height=50, terminal_size=size)
+        self.assertTrue(dashboard._activity_collapsed)
+        self.assertGreater(dashboard._output_page_size, small_page)
+        with patch.object(dashboard, 'host_input_available', return_value=True):
+            dashboard.handle_host_command('ATM')
+            dashboard.append_host_output('Menu response\n')
+            self.assertTrue(dashboard._activity_collapsed)
+            dashboard.handle_host_command('clear')
+        self.assertFalse(dashboard._activity_collapsed)
+        self.assertEqual(list(dashboard._host_output), [])
+        dashboard._frame(height=50, terminal_size=size)
+        self.assertEqual(dashboard._output_page_size, small_page)
+        # Further asynchronous host output must not collapse the restored monitor.
+        dashboard.append_host_output('Delayed response\n')
+        self.assertFalse(dashboard._activity_collapsed)
+
+    def test_monitor_collapse_survives_clear_and_auto_restores_normal_layout(self):
+        from rsh_host import HostTerminal
+        dashboard = ConsoleDashboard({})
+        terminal = HostTerminal(dashboard.append_host_output)
+        dashboard.set_host_terminal(terminal)
+        dashboard.handle_host_command('monitor collapse')
+        self.assertTrue(dashboard._activity_collapsed)
+        dashboard.append_host_output('Output to clear\n')
+        dashboard.handle_host_command('clear')
+        self.assertTrue(dashboard._activity_collapsed)
+        self.assertEqual(list(dashboard._host_output), [])
+        dashboard.append_host_output('Delayed output\n')
+        self.assertTrue(dashboard._activity_collapsed)
+        dashboard.handle_host_command('monitor auto')
+        self.assertFalse(dashboard._activity_collapsed)
+        dashboard._host_key('h')
+        self.assertTrue(dashboard._activity_collapsed)
+        dashboard.handle_host_command('clear')
+        self.assertFalse(dashboard._activity_collapsed)
+        dashboard.handle_host_command('monitor collapse')
+        dashboard.handle_host_command('monitor expand')
+        dashboard.handle_host_command('clear')
+        self.assertFalse(dashboard._activity_collapsed)
+
+    def test_invalid_monitor_command_preserves_pinned_layout(self):
+        from rsh_host import HostTerminal
+        dashboard = ConsoleDashboard({})
+        dashboard.set_host_terminal(HostTerminal(dashboard.append_host_output))
+        dashboard.handle_host_command('monitor collapse')
+        dashboard.handle_host_command('monitor invalid')
+        dashboard.handle_host_command('clear')
+        self.assertTrue(dashboard._activity_collapsed)
+
+    def test_collapsed_monitor_has_one_selection_row_and_blank_inactive_cells(self):
+        dashboard = ConsoleDashboard({})
+        dashboard._activity_collapsed = True
+        dashboard.set_user_activity('serial:APPLE2', 'wargames', user_label='APPLE2')
+        rows = dashboard.render_interface(inner_width=118, use_color=False)
+        self.assertEqual(len(rows), 6)
+        self.assertTrue(all(len(row) == 118 for row in rows), rows)
+        self.assertIn('*[H] WOPR', rows[2])
+        self.assertIn('APPLE2', rows[2])
+        self.assertNotIn('Bulletin Boards', '\n'.join(rows))
+        self.assertEqual(rows[4].strip('|\u2502 '), '')
+        for width in (40, 50, 80):
+            rendered = dashboard.render_interface(inner_width=width, use_color=False)
+            self.assertTrue(all(len(row) == width for row in rendered), rendered)
+
+    def test_collapsed_layout_redraw_resize_and_scrollback_stay_inside_screen(self):
+        from rsh_host import HostTerminal
+        dashboard = ConsoleDashboard({})
+        dashboard._tty = True
+        dashboard.set_host_terminal(HostTerminal(dashboard.append_host_output))
+        dashboard._host_key('h')
+        dashboard._running = True
+        for index in range(80):
+            dashboard.append_host_output(f'Host response {index}\n')
+        for columns, height in ((120, 50), (80, 24), (40, 24), (20, 5)):
+            output = io.StringIO()
+            screen = VirtualScreen(columns, height)
+            with patch('rsh_console.sys.stdout', output), patch('shutil.get_terminal_size', return_value=os.terminal_size((columns, height))), patch.object(dashboard, 'host_input_available', return_value=True):
+                dashboard._draw_frame()
+            screen.feed(output.getvalue())
+            self.assertEqual(screen.scrolls, 0)
+            self.assertIn('Host>', screen.text())
+            self.assertLessEqual(dashboard._frame_lines, height)
+        dashboard._frame(height=50, terminal_size=os.terminal_size((120, 50)))
+        dashboard._running = False
+        dashboard._host_special_key('page_up')
+        older = '\n'.join(dashboard._frame(height=50, terminal_size=os.terminal_size((120, 50))))
+        self.assertNotIn('Host response 79', older)
+
+
 if __name__ == "__main__":
     unittest.main()

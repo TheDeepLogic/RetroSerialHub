@@ -10,28 +10,14 @@ Interface:
 Session object can be any Python object (dict recommended) and will be passed back to handle_input
 so the module can keep per-session state (e.g., which subsystem the user is in).
 
-This file implements the current WARGAMES behavior extracted from the monolith.
+The IMSAI shell delegates the simulated WOPR terminal to rsh_joshua.
 """
 
-import time
+import re
+import rsh_joshua as joshua
 from rsh_terminal import clear_terminal_screen
 
-GAMES_LIST = [
-    "FALKEN'S MAZE",
-    "BLACK JACK",
-    "GIN RUMMY",
-    "HEARTS",
-    "BRIDGE",
-    "CHECKERS",
-    "CHESS",
-    "POKER",
-    "FIGHTER COMBAT",
-    "GUERRILLA ENGAGEMENT",
-    "DESERT WARFARE",
-    "AIR-TO-GROUND ACTIONS",
-    "THEATERWIDE TACTICAL WARFARE",
-    "THEATERWIDE BIOTOXIC AND CHEMICAL WARFARE",
-]
+GAMES_LIST = joshua.GAMES
 
 
 def _write(ser, s):
@@ -44,11 +30,13 @@ def create_session(ser, use_ansi=True, **kwargs):
     sess = {
         'submode': 'CPM',  # CPM, DIALER, TERM, TERM_SCHOOL, TERM_AIRLINE, TERM_BANK, TERM_PROTO
         'student_name': '',
+        'joshua': joshua.new_state(),
+        'dialed': [],
     }
     # Print header
     _write(ser, "IMSAI 8080 CP/M version 1.0\r\n")
     _write(ser, "(c) 1974 Digital Research Inc.\r\n")
-    _write(ser, "The WarGames plugin is a proof-of-concept and is very much unfinished.\r\n\r\n")
+    _write(ser, "DIR lists programs. HELP lists commands. ATM returns to the hub.\r\n\r\n")
     _write(ser, "A>")
     return sess
 
@@ -70,6 +58,12 @@ def handle_input(sess, line_str, ser, use_ansi=True):
             _write(ser, "A>")
             return True, None
         lower = cmd.lower()
+        if lower in ('help', '?'):
+            joshua.emit(ser, "\nDIR / DIALER / TERM / EXIT\nAll remote systems are local simulations.")
+            _write(ser, "A>")
+            return True, None
+        if lower in ('exit', 'quit'):
+            return True, 'MENU'
         if lower == 'dir':
             _write(ser, "\r\nA: DIALER   COM\r\n")
             _write(ser, "A: TERM     COM\r\n")
@@ -88,36 +82,48 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         _write(ser, "\r\nA>")
         return True, None
 
-    # Dialer: any key returns to CPM prompt
+    # The dialer scans fictional records; no host modem or network is used.
     if sess['submode'] == 'DIALER':
-        sess['submode'] = 'CPM'
-        _write(ser, "\r\n")
-        # Reprint CPM header/prompt
-        _write(ser, "IMSAI 8080 CP/M version 1.0\r\n")
-        _write(ser, "(c) 1974 Digital Research Inc.\r\n\r\n")
-        _write(ser, "A>")
+        if upper in ('Q', 'QUIT', 'EXIT'):
+            sess['submode'] = 'CPM'
+            _write(ser, "\r\nA>")
+        elif cmd:
+            digits = re.sub(r'[^0-9]', '', cmd)
+            if len(digits) not in (3, 6, 7, 10):
+                joshua.emit(ser, "\nENTER AN AREA CODE, PREFIX, OR PHONE NUMBER.")
+                _write(ser, "SCAN: ")
+            else:
+                sess['dialed'] = ['(311) 437-1083 SCHOOL', '(311) 936-2364 AIRLINE',
+                                  '(311) 399-0003 BANK', '(311) 767-7305 UNKNOWN']
+                joshua.emit(ser, "\nSCANNING LOCAL SIMULATION RECORDS\n" + "\n".join(sess['dialed']) +
+                            "\nSCAN COMPLETE. USE TERM TO CONNECT.")
+                sess['submode'] = 'CPM'
+                _write(ser, "A>")
+        else:
+            sess['submode'] = 'CPM'
+            _write(ser, "\r\nA>")
         return True, None
 
     # Terminal menu handling
     if sess['submode'] == 'TERM':
-        if upper == '1':
+        selection = {'3114371083': '1', '3119362364': '2', '3113990003': '3', '3117677305': '4'}.get(re.sub(r'[^0-9]', '', cmd), upper)
+        if selection == '1':
             sess['submode'] = 'TERM_SCHOOL'
             _write(ser, "\r\nENTER STUDENT NAME: ")
             return True, None
-        if upper == '2':
+        if selection == '2':
             sess['submode'] = 'TERM_AIRLINE'
             _write(ser, "\r\nPAN AM AIRLINES RESERVATION SYSTEM\r\n")
             _write(ser, "LOGIN: ")
             return True, None
-        if upper == '3':
+        if selection == '3':
             sess['submode'] = 'TERM_BANK'
             _write(ser, "\r\nWELCOME TO FIRST NATIONAL BANK\r\n\r\n")
             _write(ser, "LOGIN: ")
             return True, None
-        if upper == '4':
+        if selection == '4':
             sess['submode'] = 'TERM_PROTO'
-            _write(ser, "\r\nGREETINGS PROFESSOR FALKEN.\r\n\r\n")
-            _write(ser, "> ")
+            joshua.connect(sess, ser)
             return True, None
         # fallback
         _write(ser, "\r\nInvalid selection. Press any key to return to CP/M.\r\n")
@@ -161,17 +167,9 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         _write(ser, "A>")
         return True, None
 
-    # Protovision prompt
+    # Keep Joshua state on hangup so reconnecting can resume the game.
     if sess['submode'] == 'TERM_PROTO':
-        lower = cmd.lower()
-        if lower == 'list games':
-            _write(ser, "\r\n")
-            for g in GAMES_LIST:
-                _write(ser, g + "\r\n")
-            _write(ser, "\r\n> ")
-            return True, None
-        # default response
-        _write(ser, "\r\nI'M NOT SURE I UNDERSTAND.\r\n\r\n> ")
+        joshua.handle(sess, cmd, ser, use_ansi)
         return True, None
 
     # default: not handled
@@ -183,12 +181,9 @@ def _enter_dialer(ser, use_ansi=True):
     clear_terminal_screen(ser, use_ansi)
     _write(ser, "\r\nTO SCAN FOR CARRIER TONES, PLEASE LIST\r\n")
     _write(ser, "DESIRED AREA CODES AND PREFIXES\r\n\r\n")
-    _write(ser, "     AREA           AREA           AREA           AREA\r\n")
-    _write(ser, "CODE PRFX NUMBER  CODE PRFX NUMBER  CODE PRFX NUMBER  CODE PRFX NUMBER\r\n\r\n")
-    _write(ser, "(311) 399-0001   (311) 437        (311) 767\r\n")
-    _write(ser, "(311) 399-0002\r\n")
-    _write(ser, "(311) 399-0003\r\n")
-    _write(ser, "\r\nDIALING...")
+    joshua.emit(ser, "SCAN AN AREA CODE OR PREFIX.\nEXAMPLE: 311 OR 311767\nQ RETURNS TO CP/M.")
+    _write(ser, "SCAN: ")
+
 
 
 def _enter_term(ser, use_ansi=True):
@@ -197,5 +192,14 @@ def _enter_term(ser, use_ansi=True):
     _write(ser, "1] School System\r\n")
     _write(ser, "2] Airline System\r\n")
     _write(ser, "3] Banking System\r\n")
-    _write(ser, "4] Protovision\r\n\r\n")
-    _write(ser, "Select system (1-4): ")
+    _write(ser, "4] Protovision / Unknown Carrier\r\n\r\n")
+    _write(ser, "Select system (1-4) or phone number: ")
+
+def poll(sess, ser, use_ansi=True):
+    """Advance the active terminal display without blocking other sessions."""
+    if sess and sess.get('submode') == 'TERM_PROTO':
+        joshua.poll(sess, ser, use_ansi)
+
+
+def stop_speech(sess):
+    joshua.stop_speech(sess)

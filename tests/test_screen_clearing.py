@@ -179,7 +179,7 @@ class ScreenClearingTests(unittest.TestCase):
             client, peer = socket.socketpair()
             terminal = SocketTerminal(client)
             terminal._rsh_menu_style = "legacy"
-            peer.sendall(b"4\r1\rQ\r9\rQ\r15\r")
+            peer.sendall(b"4\r1\rQ\rQ\r9\rQ\r15\r")
             read_lines = []
 
             def paginate_note(_ser, lines, **_kwargs):
@@ -204,7 +204,8 @@ class ScreenClearingTests(unittest.TestCase):
                     terminal.close()
                     peer.close()
 
-            self.assertEqual(read_lines, ["Saved note text"])
+            self.assertIn(b"Saved note text", output)
+            self.assertIn(b"Reader:", output)
             self.assertIn(b"FTP / Explicit FTPS", output)
             self.assertNotIn(b"Notes module error", output)
             self.assertNotIn(b"Notes module not available", output)
@@ -511,11 +512,11 @@ class ScreenClearingTests(unittest.TestCase):
         self.assertIn(b"[3]   FILES & MEDIA", output)
         self.assertIn(b"[4]   GAMES", output)
         self.assertIn(b"[5]   ACCESSORIES", output)
-        self.assertIn(b"[6]   SYSTEM", output)
+        self.assertIn(b"[7]   SYSTEM", output)
         self.assertIn(b"A] Bulletin Boards", output)
         self.assertIn(b"B] Telnet Terminal", output)
         self.assertIn(b"C] Web Browser", output)
-        self.assertIn(b"Select [1-6] for section, [A-H] for item", output)
+        self.assertIn(b"Select [1-7] for section, [A-H] for item", output)
 
     def test_accordion_menu_section_expansion(self):
         import RETRO_SERIAL_HUB
@@ -539,14 +540,14 @@ class ScreenClearingTests(unittest.TestCase):
         client, peer = socket.socketpair()
         try:
             term = RETRO_SERIAL_HUB.SocketTerminal(client)
-            term._rsh_flyout_menu = OSFlyoutMenu(5)  # Section 6: System
+            term._rsh_flyout_menu = OSFlyoutMenu(6)  # Section 7: System
             RETRO_SERIAL_HUB.show_main_menu(term, use_ansi=False)
             output = peer.recv(4096)
         finally:
             client.close()
             peer.close()
 
-        self.assertIn(b"[6] > SYSTEM <", output)
+        self.assertIn(b"[7] > SYSTEM <", output)
         self.assertIn(b"H] Disconnect", output)
 
 

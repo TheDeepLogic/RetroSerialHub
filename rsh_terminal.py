@@ -30,7 +30,7 @@ _CP437_ASCII = {
 
 
 def configure_screen_clearing(
-    ser, translate_ansi=False, clear_sequence=b"\x0c", columns=80
+    ser, translate_ansi=False, clear_sequence=b"\x0c", columns=80, rows=24
 ):
     """Attach terminal-specific clearing and width settings to a stream."""
     if isinstance(clear_sequence, str):
@@ -38,12 +38,19 @@ def configure_screen_clearing(
     ser._rsh_translate_ansi = bool(translate_ansi)
     ser._rsh_clear_sequence = clear_sequence
     ser._rsh_columns = columns
+    ser._rsh_rows = rows
 
 
 def terminal_columns(ser):
     """Return the configured terminal width, defaulting to the legacy 80 columns."""
     columns = getattr(ser, "_rsh_columns", 80)
     return columns if columns in (40, 80) else 80
+
+
+def terminal_rows(ser):
+    """Use the saved/configured height; do not infer dimensions from the host."""
+    rows = getattr(ser, '_rsh_rows', 24)
+    return rows if isinstance(rows,int) and 16 <= rows <= 100 else 24
 
 
 def format_numbered_list(items, columns=80, left_pad=38):
@@ -301,3 +308,40 @@ class AnsiToTextTranslator:
         if self.column >= self.columns:
             self.row = min(self.row + 1, self.rows)
             self.column = 0
+
+
+class SerialActivityTracker:
+    """Track received bytes independently of whichever tool is reading serial."""
+
+    def __init__(self, terminal, timeout, on_active, on_idle, clock=None):
+        import threading
+        import time
+        self.terminal = terminal
+        self.timeout = float(timeout)
+        self.clock = clock or time.monotonic
+        self.on_active, self.on_idle = on_active, on_idle
+        self.last_input = None
+        self.active = False
+        self.lock = threading.RLock()
+        self.original_read = terminal.read
+        terminal.read = self.read
+
+    def read(self, *args, **kwargs):
+        data = self.original_read(*args, **kwargs)
+        if data:
+            with self.lock:
+                self.last_input = self.clock()
+                if not self.active:
+                    self.active = True
+                    self.on_active()
+        return data
+
+    def poll(self):
+        with self.lock:
+            if (self.active and self.timeout > 0
+                    and self.clock() - self.last_input >= self.timeout):
+                self.active = False
+                self.on_idle()
+
+    def close(self):
+        self.terminal.read = self.original_read

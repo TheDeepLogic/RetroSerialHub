@@ -389,11 +389,17 @@ def install_core_commands(shell, context, loader):
 
     def xrecv_cmd(args):
         if not args:
-            return "Usage: xrecv <destination_filename>"
+            return "Usage: xrecv <destination_filename> [exact-byte-count]"
         fname = args[0]
         if context.activate_module:
             context.session.active_module = "files"
-            context.activate_module(("file_transfer", "XMODEM_RECV", fname))
+            if len(args) > 1:
+                size = int(args[1])
+                if size < 0:
+                    return 'Expected byte count must be nonnegative.'
+                context.activate_module(("file_transfer", "XMODEM_RECV", fname, size))
+            else:
+                context.activate_module(("file_transfer", "XMODEM_RECV", fname))
             return f"Starting XMODEM receive for {fname}..."
         return f"XMODEM receive: {fname}"
 

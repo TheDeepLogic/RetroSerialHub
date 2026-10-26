@@ -1,14 +1,12 @@
 __pycache__/
 *.py[cod]
-welcome_banner.json
-terminal_ansi_translation.json
-bbs_directory.json
-telnet_bookmarks.json
-mail/
-user_shortcuts.json
-scheduler_tasks.json
-scheduled_tasks.json
-hub_tools/
-telnet_allowlist.json
-host_settings.json
-ai_config.json
+
+# Live settings and personal JSON must never be published accidentally.
+*.json
+/settings/*
+!/settings/defaults/
+!/settings/defaults/*.json
+
+# Non-JSON personal data and legacy locations.
+/mail/
+/hub_tools/

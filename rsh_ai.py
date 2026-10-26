@@ -6,6 +6,7 @@ Uses OpenAI's Chat Completions API with a configurable model and a short
 response budget suitable for serial terminals.
 """
 
+from rsh_storage import settings_dir, settings_path
 import os
 import json
 from pathlib import Path
@@ -13,7 +14,7 @@ from openai import OpenAI
 from rsh_terminal import clear_terminal_screen
 
 # Load OpenAI API key from config file or environment
-CONFIG_FILE = Path(__file__).resolve().parent / "ai_config.json"
+CONFIG_FILE = settings_path("ai_config.json")
 DEFAULT_MODEL = "gpt-5.6-terra"
 SYSTEM_PROMPT = (
     "You are a helpful AI assistant in a retro BBS system. Keep responses "
@@ -52,7 +53,7 @@ def _load_config():
         else:
             if isinstance(config, dict):
                 return config
-            print("Config file error: ai_config.json must contain a JSON object.")
+            print("Config file error: settings/local/ai_config.json must contain a JSON object.")
     return {}
 
 
@@ -66,7 +67,7 @@ def _load_chat_options():
     if model in (None, ""):
         model = DEFAULT_MODEL
     if not isinstance(model, str) or not model.strip():
-        raise ValueError("AI model must be a model ID string in ai_config.json or OPENAI_MODEL.")
+        raise ValueError("AI model must be a model ID string in settings/local/ai_config.json or OPENAI_MODEL.")
     model = model.strip()
     options = {"model": model, "max_completion_tokens": 500}
     effort = os.environ.get("OPENAI_REASONING_EFFORT") or config.get("reasoning_effort")
@@ -91,7 +92,7 @@ def create_session(ser, use_ansi=True):
     if client is None:
         clear_terminal_screen(ser, use_ansi)
         write(ser, "\r\n*** Error: OpenAI API key not configured ***\r\n")
-        write(ser, "Please create ai_config.json with {'api_key': 'your-key'}\r\n")
+        write(ser, "Please create settings/local/ai_config.json with {'api_key': 'your-key'}\r\n")
         write(ser, "or set OPENAI_API_KEY environment variable.\r\n")
         return None
 
@@ -173,7 +174,7 @@ def handle_input(session, line_str, ser, use_ansi=True):
         except Exception as e:
             write(ser, f"*** API Error: {str(e)} ***\r\n")
             if getattr(e, "code", None) == "model_not_found":
-                write(ser, "Choose an available model using the model field in ai_config.json\r\n")
+                write(ser, "Choose an available model using the model field in settings/local/ai_config.json\r\n")
                 write(ser, "or the OPENAI_MODEL environment variable, then reopen the assistant.\r\n")
             # Remove failed message from history
             session['messages'].pop()

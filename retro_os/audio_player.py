@@ -7,6 +7,7 @@ import ctypes
 import os
 import pathlib
 import queue
+import random
 import shutil
 import signal
 import subprocess
@@ -32,6 +33,7 @@ class AudioPlayer:
         self.tracks = []
         self.index = 0
         self.volume = 70
+        self.repeat = False
         self.paused = False
         self.process = None
         self.native = False
@@ -144,6 +146,9 @@ class AudioPlayer:
                         elif self.index + 1 < len(self.tracks):
                             self.index += 1
                             self._start()
+                        elif self.repeat and self.tracks:
+                            self.index = 0
+                            self._start()
                         else:
                             self._close()
                 except (OSError, ValueError) as exc:
@@ -242,9 +247,10 @@ _PLAYER = AudioPlayer()
 
 class AudioTool:
     EXTENSIONS = {".mp3", ".wav", ".wma", ".flac", ".ogg", ".m4a", ".aac", ".aiff"}
-    HELP = ("audio [list | play <file/#/URL> | queue <file/#/URL> | radio <URL> | "
+    HELP = ("audio [list | cd <folder/#> | d/drives | b/parent | h/home | play <file/#/URL> | queue <file/#/URL> | radio <URL> | "
             "pause | resume | stop | next | prev | volume <0-100> | info | tracks | "
-            "save <playlist> | load <playlist> | playlists]\n"
+            "save <playlist> | load <playlist> | playlists | repeat [on|off] | shuffle | "
+            "remove <#> | reorder <#> <position> | station | musicfolder [path]]\n"
             "Playback uses the host speakers. FFmpeg (ffplay) enables internet radio and extra formats.")
 
     def __init__(self, files, player=None):
@@ -261,16 +267,108 @@ class AudioTool:
             path = self.files.path(value, numbered=False)
         path = self.files.path(str(path), numbered=False)
         if not path.is_file() or path.suffix.lower() not in self.EXTENSIONS:
-            raise ValueError("Choose an audio file in shared files, or an HTTP(S) radio URL.")
+            raise ValueError("Choose a host audio file, or an HTTP(S) radio URL.")
         return str(path)
 
     def command(self, args):
         action = args[0].lower() if args else "list"
+        if action == 'repeat':
+            with self.player.lock:
+                self.player.repeat = (args[1].lower() == 'on') if len(args) > 1 else not self.player.repeat
+                return 'Repeat ' + ('on' if self.player.repeat else 'off')
+        if action == 'shuffle':
+            with self.player.lock:
+                # Preserve the currently selected track; shuffle the remaining queue.
+                tail = self.player.tracks[self.player.index+1:]
+                random.shuffle(tail)
+                self.player.tracks[self.player.index+1:] = tail
+            return 'Upcoming queue shuffled.'
+        if action in ('remove','reorder') and len(args) >= 2:
+            with self.player.lock:
+                source = int(args[1]) - 1
+                if not 0 <= source < len(self.player.tracks):
+                    raise ValueError('Choose a valid queue number.')
+                active = getattr(self.player,'native',False) or (getattr(self.player,'process',None) is not None and self.player.process.poll() is None)
+                if source == self.player.index and active:
+                    raise ValueError('Stop playback before moving or removing the current track.')
+                if action == 'remove':
+                    self.player.tracks.pop(source)
+                    if source < self.player.index:
+                        self.player.index -= 1
+                    self.player.index = max(0,min(self.player.index,len(self.player.tracks)-1))
+                else:
+                    if len(args) != 3:
+                        raise ValueError('reorder <queue-number> <new-position>')
+                    destination = int(args[2]) - 1
+                    if not 0 <= destination < len(self.player.tracks):
+                        raise ValueError('Choose a valid destination position.')
+                    current = self.player.index
+                    track = self.player.tracks.pop(source)
+                    self.player.tracks.insert(destination, track)
+                    if source == current:
+                        self.player.index = destination
+                    elif source < current <= destination:
+                        self.player.index -= 1
+                    elif destination <= current < source:
+                        self.player.index += 1
+            return self.command(['tracks'])
+        if action == 'station':
+            rows = [r for r in self.files.browser_store.load() if r.get('kind') == 'station']
+            if len(args) == 1 or args[1] == 'list':
+                return '\n'.join(f"{r['name']}: {r['url']}" for r in rows) or 'No saved radio stations.'
+            if args[1] == 'add' and len(args) == 4:
+                if not is_stream(args[3]):
+                    raise ValueError('Use an HTTP(S) stream URL.')
+                def save(records):
+                    records[:] = [r for r in records if not (r.get('kind') == 'station' and r['name'].casefold() == args[2].casefold())]
+                    records.append({'kind':'station','name':args[2],'url':args[3]})
+                self.files.browser_store.change(save)
+                return 'Station saved.'
+            if args[1] in ('play','delete') and len(args) == 3:
+                row = next((r for r in rows if r['name'].casefold() == args[2].casefold()), None)
+                if row is None:
+                    raise ValueError('Station not found.')
+                if args[1] == 'play':
+                    return self.player.play([row['url']])
+                self.files.browser_store.change(lambda records: records.remove(row))
+                return 'Station deleted.'
+            return 'station [list | add <name> <URL> | play <name> | delete <name>]'
+        if action == 'musicfolder':
+            name = str(getattr(self.files.context.session, 'user', None) or 'default')
+            if len(args) == 2:
+                folder = self.files.path(args[1], numbered=False)
+                if not folder.is_dir():
+                    raise ValueError('Choose a folder.')
+                def save(records):
+                    records[:] = [r for r in records if not (r.get('kind') == 'musicfolder' and r['name'] == name)]
+                    records.append({'kind':'musicfolder','name':name,'path':str(folder)})
+                self.files.browser_store.change(save)
+                return self.command(['cd', str(folder)])
+            row = next((r for r in self.files.browser_store.load() if r.get('kind') == 'musicfolder' and r['name'] == name), None)
+            return self.command(['cd', row['path']]) if row else 'No saved music folder. Use musicfolder <path>.'
+        if action == "toggle":
+            with self.player.lock:
+                return self.player.control("resume" if self.player.paused else "pause")
+        if action == "open" and len(args) == 2:
+            path = self.files.path(args[1])
+            return self.command(["cd" if path.is_dir() else "play", str(path)])
         if action == "help":
             return self.HELP
+        if action in ("d", "drives"):
+            self.entries = []
+            return self.files.command(["drives"])
+        if action in ("cd", "b", "parent", "h", "home"):
+            result = self.files.command(args)
+            self.entries = []
+            if action == "cd" and len(args) != 2:
+                return result
+            return self.command(["list"])
         if action == "list":
-            self.entries = sorted(p for p in self.files.root.rglob('*') if p.is_file() and p.suffix.lower() in self.EXTENSIONS and p.resolve().is_relative_to(self.files.root))
-            return "\n".join(f"{i}. {p.relative_to(self.files.root)}" for i, p in enumerate(self.entries, 1)) or "No audio files in shared files."
+            folder = self.files.cwd
+            self.entries = list(self.files.browse_entries(self.EXTENSIONS))
+            return f"Audio directory: {folder}\nFilter: {self.files.filter_pattern}\n" + ("\n".join(
+                f"{i}. {'[DIR] ' if p.is_dir() else ''}{p.relative_to(folder)}"
+                for i, p in enumerate(self.entries, 1)) or "(empty)") + "\nUse cd <folder/#> to browse; play <file/#> to play."
         if action == "play" and len(args) == 1:
             with self.player.lock:
                 tracks = list(self.player.tracks)

@@ -122,7 +122,32 @@ def _trek_enemy_turn(game):
     return f"Klingons hit for {total_hit} units ({absorbed} absorbed by shields)."
 
 
+def _trek_instructions():
+    return "\n".join((
+        "CAPTAIN'S QUICK START",
+        "Destroy Klingons before time runs out.",
+        "Type these at the Trek prompt:",
+        "",
+        "scan       Local map: E=you, K=enemy,",
+        "           B=starbase, *=star.",
+        "long       Nearby quadrants: K/B/stars.",
+        "move 90 1  Travel east at warp 1.",
+        "Course: 0=N, 90=E, 180=S, 270=W.",
+        "Warp is 1-8; larger moves cost more.",
+        "phasers 500 Fire 500 energy at enemies.",
+        "torpedo 90  Fire one torpedo east.",
+        "shield 500  Move 500 energy to shields.",
+        "Move beside a base to refill supplies.",
+        "Moving/firing uses time; enemies reply.",
+        "",
+        "status=map/stats  help=these controls",
+        "N=new mission     Q=return to menu",
+    ))
+
+
 def _trek_command(game, args):
+    if args and args[0].lower() in ("help", "?"):
+        return _trek_instructions()
     if not args or args[0].lower() in ("status", "i", "show"):
         return _trek_status(game) + "\n\n" + _trek_sector_scan(game)
     command = args[0].lower()
@@ -596,7 +621,9 @@ def register_commands(registry):
             sub = args[1].lower() if len(args) > 1 else ""
             if sub in ("n", "new", "start") or session_id not in _trek_games:
                 _trek_games[session_id] = _new_trek_game()
-                return _trek_status(_trek_games[session_id], "Captain, your mission begins.") + "\n\n" + _trek_sector_scan(_trek_games[session_id])
+                return (_trek_status(_trek_games[session_id], "Captain, your mission begins.")
+                        + "\n\n" + _trek_sector_scan(_trek_games[session_id])
+                        + "\n\n" + _trek_instructions())
             game = _trek_games[session_id]
             if sub in ("q", "quit", "exit"):
                 del _trek_games[session_id]

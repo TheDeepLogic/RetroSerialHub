@@ -1,12 +1,13 @@
 """Direct TCP terminal connections and saved Telnet destinations."""
 
+from rsh_storage import settings_dir, settings_path
 import json
 from pathlib import Path
 
 from rsh_terminal import clear_terminal_screen, terminal_columns
 
 
-TELNET_BOOKMARKS_FILE = Path(__file__).with_name("telnet_bookmarks.json")
+TELNET_BOOKMARKS_FILE = settings_path("telnet_bookmarks.json")
 
 
 def _write(ser, text):

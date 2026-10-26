@@ -42,20 +42,13 @@ bridges the gap between retro hardware and modern computing:
 The main menu uses an accordion flyout layout designed for vintage 40- and
 80-column screens:
 
-* Sections (0 to 6):
+* Sections (0 to 7):
   [0] Shortcuts: Quick user-defined command macros with custom arguments.
-  [1] Communications: BBS, Telnet, Web Browser, FTP, Electronic Mail, Connected Terminals.
-  [2] Host Connectivity: Host Applications, Keyboard Bridge, Terminal Prompt, Host Printing.
-  [3] Files & Media: File Manager, File Transfers, Archive Browser, Text Library,
-      Document Viewer, ASCII Image Viewer, Audio Player.
-  [4] Games: Dedicated retro games (Minesweeper, Solitaire, Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek).
-  [5] Accessories: Notepad, Calendar, Calculator, Address Book, Unit Converter,
-      Weather & News, AI Assistant, LOGO.
-  [6] System: Command Shell (CLI), Task Scheduler, Hardware Settings, Help.
+{MENU_CATALOGUE}
 
 * Navigation Keys:
-  - Enter a section number (0-6) or name (e.g. 'GAMES' or 'SYS') to expand it.
-  - Enter an item letter (A-G) to launch the option in the active section.
+  - Enter a section number (0-7) or name (e.g. 'GAMES' or 'SYS') to expand it.
+  - Enter an item letter (A-H) to launch the option in the active section.
   - Communications > Connected Terminals lists active links; select one to message it or send a text file.
   - In Notepad, P saves the host clipboard as a note and C<number> copies a note to the clipboard.
   - In Accessories > LOGO, enter commands such as REPEAT 4 (FD 80 RT 90). Parentheses or square brackets group commands.
@@ -106,7 +99,7 @@ On the host, PgUp/PgDn scroll output, Up/Down recall commands, and clear clears 
   cli> contacts add <name>       Add a contact; set <id> <field> <value> edits
   cli> contacts mail <id>        Compose a host email draft for a contact
   cli> contacts connect <id>     Connect to a contact's BBS address
-  cli> fileman ls                Browse shared files; help lists operations
+  cli> fileman ls                Browse host files; help lists operations
   cli> archive open <file.zip>   Browse ZIP contents; extract <number|all>
   cli> audio list                Browse host audio; play <number> starts it
   cli> schedule list|add|run     Manage automated periodic background tasks
@@ -174,7 +167,7 @@ Hub bridges this with a real-time extraction pipeline:
 
 * File Manager (A):
   Browse directories, inspect dates and sizes, create folders, rename, copy,
-  move, view, and transfer files. All paths stay inside the shared files folder.
+  move, view, and transfer files. Host paths are supported. D=drives/root, B=parent, H=shared files.
 
 * Archive Browser (C):
   Open ZIP archives and extract a selected member or all contents. Extraction
@@ -186,7 +179,7 @@ Hub bridges this with a real-time extraction pipeline:
   Audio uses the host speakers. Windows supports native local playback;
   FFmpeg (ffplay on PATH) enables radio and additional formats/platforms.
 
-Appointments and contacts are saved in hub_tools/ and shared across terminals.
+Appointments and contacts are saved in settings/local/ and shared across terminals.
 Reminders use the host's local clock and broadcast when due. Today's and overdue
 appointments also appear on connection until marked done. Unit Converter handles
 length, mass, US volume, temperatures, and binary/octal/decimal/hexadecimal.
@@ -227,7 +220,7 @@ Vintage UARTs and early video hardware often require special tuning:
 
 * Screen Width (40 vs 80 Columns):
   Toggle between 40-column (Apple II, C64, TRS-80) and 80-column layouts.
-  Preferences are saved per serial port profile in terminal_columns.json.
+  Preferences are saved per serial port profile in settings/local/terminal_columns.json.
 
 * Caps-Only Mode (Uppercase Only):
   Early machines (Apple II Plus, Commodore PET 2001, TRS-80 Model I) lack
@@ -311,11 +304,11 @@ All games are fully playable on 40- and 80-column vintage displays:
 * Incoming Telnet Approval (host console only):
   - Unknown source IPs wait for host approval before receiving a hub session.
   - At the host computer keyboard: allow <request #> or deny <request #>, then Enter.
-  - Approved IPs are saved in telnet_allowlist.json; it can also be edited manually.
+  - Approved IPs are saved in settings/local/telnet_allowlist.json; it can also be edited manually.
   - Serial connections are exempt. Telnet traffic remains unencrypted.
 
 * Main Menu Hotkeys:
-  - 0-6: Switch accordion section.
+  - 0-7: Switch accordion section.
   - A-H: Activate item in current section.
   - +: Add a user shortcut (in Shortcuts section).
   - -: Delete a user shortcut (in Shortcuts section).
@@ -338,5 +331,9 @@ def get_topic_content(selector: str) -> str:
     s = selector.strip().lower()
     for key, title, content in HELP_TOPICS:
         if s == key or s in title.lower():
-            return content
+            return content.replace("{MENU_CATALOGUE}",menu_guide())
     return "Help topic not found. Enter a topic number (1-9)."
+
+
+# Generated from the same catalogue used by both visible menus.
+from .menu_data import menu_guide

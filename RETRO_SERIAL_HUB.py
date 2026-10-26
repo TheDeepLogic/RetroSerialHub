@@ -20,13 +20,16 @@ UX Design:
 - ATM cancels any active BBS connection and returns to main menu
 """
 
+from rsh_storage import settings_dir, settings_path
 import serial, socket, select, threading, time, os, sys, pathlib, importlib, tempfile, json, platform, re
 from rsh_terminal import (
     AnsiToTextTranslator,
+    SerialActivityTracker,
     clear_terminal_screen,
     configure_screen_clearing,
     format_numbered_list,
     terminal_columns,
+    terminal_rows,
 )
 from rsh_welcome import load_banner, reset_banner, save_banner, validate_banner
 from rsh_console import ConsoleDashboard, VERSION
@@ -76,6 +79,9 @@ TELNET_ACCESS = None
 SURRENDERED_PORTS = set()
 
 def register_active_terminal(terminal):
+    from rsh_session import SessionServices
+    if not getattr(terminal, "_rsh_services", None) and hasattr(terminal,"read"):
+        SessionServices(terminal, BASE_DIR / "hub_tools" / "captures")
     if not hasattr(terminal, "_terminal_name"):
         profile = getattr(terminal, "_profile_name", "Terminal")
         address = getattr(terminal, "_remote_address", None)
@@ -84,6 +90,14 @@ def register_active_terminal(terminal):
         ACTIVE_TERMINALS.add(terminal)
 
 def unregister_active_terminal(terminal):
+    from rsh_speech import SPEECH
+    speech_state = getattr(terminal, "_rsh_joshua_state", None)
+    if speech_state:
+        SPEECH.stop(speech_state["speech_owner"])
+    service = getattr(terminal, "_rsh_services", None)
+    if service:
+        service.close()
+        terminal._rsh_services = None
     with ACTIVE_TERMINALS_LOCK:
         ACTIVE_TERMINALS.discard(terminal)
 
@@ -93,7 +107,8 @@ def broadcast_to_terminals(text):
         terminals = list(ACTIVE_TERMINALS)
     for term in terminals:
         try:
-            write(term, text)
+            from rsh_session import notify
+            notify(term, text)
         except Exception:
             pass
 
@@ -185,11 +200,11 @@ BASE_DIR = pathlib.Path(__file__).resolve().parent
 FILES_DIR = BASE_DIR / "files"
 TEXT_DIR  = BASE_DIR / "text"
 NOTES_DIR = BASE_DIR / "notes"
-WELCOME_BANNER_FILE = BASE_DIR / "welcome_banner.json"
-TELNET_ALLOWLIST_FILE = BASE_DIR / "telnet_allowlist.json"
-COLUMN_SETTINGS_FILE = BASE_DIR / "terminal_columns.json"
-ANSI_TRANSLATION_SETTINGS_FILE = BASE_DIR / "terminal_ansi_translation.json"
-HOST_SETTINGS_FILE = BASE_DIR / "host_settings.json"
+WELCOME_BANNER_FILE = settings_path("welcome_banner.json", BASE_DIR)
+TELNET_ALLOWLIST_FILE = settings_path("telnet_allowlist.json", BASE_DIR)
+COLUMN_SETTINGS_FILE = settings_path("terminal_columns.json", BASE_DIR)
+ANSI_TRANSLATION_SETTINGS_FILE = settings_path("terminal_ansi_translation.json", BASE_DIR)
+HOST_SETTINGS_FILE = settings_path("host_settings.json", BASE_DIR)
 FILES_DIR.mkdir(exist_ok=True)
 TEXT_DIR.mkdir(exist_ok=True)
 NOTES_DIR.mkdir(exist_ok=True)
@@ -395,6 +410,8 @@ def read_input_line(ser):
     """Read a line of interactive terminal input with echo and backspace."""
     buf = b""
     while True:
+        if getattr(ser,"_rsh_reconnect_pending",False):
+            return "Q"
         if ser.in_waiting:
             ch = ser.read(1)
             if not ch:
@@ -417,7 +434,8 @@ def read_input_line(ser):
         time.sleep(0.02)
     return buf.decode(errors="ignore").strip()
 
-def paginate_lines(ser, lines, page_lines=22, quit_msg=False):
+def paginate_lines(ser, lines, page_lines=None, quit_msg=False):
+    page_lines = page_lines or max(1,terminal_rows(ser)-2)
     count = 0
     for ln in lines:
         write(ser, ln + "\r\n")
@@ -453,6 +471,12 @@ def console_log(message, level="info"):
         CONSOLE.log(message, level=level)
 
 
+# Tool menu names come from the shared feature registry.
+from retro_os.modules.toolkit import TOOL_MENUS as _TOOL_MENUS
+HUB_TOOL_ALIASES.update({name.upper(): name for name in _TOOL_MENUS})
+HUB_TOOL_ALIASES.update({'MACHINE':'machine', 'PRESETS':'presets', 'NOTIFICATIONS':'notifications'})
+
+
 def get_terminal_client_id(ser, default_name=None):
     cid = getattr(ser, "_client_id", None)
     if cid is not None:
@@ -463,13 +487,21 @@ def get_terminal_client_id(ser, default_name=None):
 
 
 def set_terminal_activity(ser, action, user_label=None, default_name=None):
+    ser._rsh_last_action = action
+    tracker = getattr(ser, "_rsh_activity_tracker", None)
+    if tracker is not None and not tracker.active:
+        return
     if CONSOLE:
         cid = get_terminal_client_id(ser, default_name)
         if user_label is None:
             pname = getattr(ser, "_profile_name", default_name)
             if not isinstance(ser, SocketTerminal) and pname:
                 user_label = pname
-        CONSOLE.set_user_activity(cid, action, user_label=user_label)
+        serial_port = None
+        if not isinstance(ser, SocketTerminal) and not getattr(ser, "_rsh_host_console", False):
+            pname = getattr(ser, "_profile_name", default_name)
+            serial_port = getattr(ser, "port", None) or SERIAL_CONFIGS.get(pname, {}).get("port")
+        CONSOLE.set_user_activity(cid, action, user_label=user_label, serial_port=serial_port)
 
 
 def clear_terminal_activity(ser, default_name=None):
@@ -486,6 +518,8 @@ def get_active_connection_counts():
 
 
 def show_main_menu(ser, use_ansi=True, auto_flyout=True):
+    ser._rsh_reconnect_pending = False
+    ser._rsh_return_to_menu = False
     if getattr(ser, "_rsh_menu_style", "flyout") == "legacy":
         return show_legacy_main_menu(ser, use_ansi)
     columns = terminal_columns(ser)
@@ -494,7 +528,7 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
     from retro_os.menu import OSFlyoutMenu
     from retro_os.shortcuts import ShortcutsManager
     if not hasattr(ser, "_rsh_shortcuts_manager"):
-        ser._rsh_shortcuts_manager = ShortcutsManager(BASE_DIR / "user_shortcuts.json")
+        ser._rsh_shortcuts_manager = ShortcutsManager(settings_path("user_shortcuts.json", BASE_DIR))
     if not hasattr(ser, "_rsh_flyout_menu"):
         ser._rsh_flyout_menu = OSFlyoutMenu(shortcuts_manager=ser._rsh_shortcuts_manager)
     else:
@@ -525,13 +559,20 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
             f"Serial ports: {serial_count} | Telnet clients: {remote_count}"
         )
 
+    service = getattr(ser, '_rsh_services', None)
+    reminder = getattr(ser,'_rsh_reminder_notice','')
+    if service and reminder:
+        service.notify(reminder)
+    if service and service.pending:
+        status += f" | Msg {len(service.pending)}"
     output = ser._rsh_flyout_menu.render(
         columns=columns,
+        rows=terminal_rows(ser),
         translate_ansi=getattr(ser, "_rsh_translate_ansi", False),
         welcome_banner=WELCOME_BANNER,
         version=VERSION,
         is_remote=remote_client,
-        status=status + ("\r\n" + ser._rsh_reminder_notice if getattr(ser, "_rsh_reminder_notice", "") else ""),
+        status=status,
     )
     write(ser, output)
     ser._rsh_reminder_notice = ""
@@ -757,6 +798,7 @@ def port_worker(name, cfg):
                 translate_ansi=cfg.get("translate_ansi", False),
                 clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
                 columns=columns,
+                rows=cfg.get("rows",24),
             )
             if CONSOLE:
                 CONSOLE.update_profile(name, serial="OPEN")
@@ -767,6 +809,31 @@ def port_worker(name, cfg):
                 ACTIVE_PORTS[cfg['port'].upper()] = {'thread': name, 'serial': ser}
             except Exception:
                 pass
+            def became_active():
+                ser._rsh_input_seen = True
+                if CONSOLE:
+                    CONSOLE.update_profile(name, terminal="ACTIVE")
+                set_terminal_activity(ser, getattr(ser, "_rsh_last_action", "section:1"))
+
+            def became_idle():
+                ser._rsh_input_seen = False
+                clear_terminal_activity(ser, default_name=name)
+                if CONSOLE:
+                    CONSOLE.update_profile(name, terminal="WAITING")
+
+            tracker = SerialActivityTracker(
+                ser, cfg.get("idle_timeout_seconds", getattr(_config, "SERIAL_IDLE_TIMEOUT_SECONDS", 300)),
+                became_active, became_idle,
+            )
+            ser._rsh_activity_tracker = tracker
+            stop_activity = threading.Event()
+
+            def watch_activity():
+                while not stop_activity.wait(1):
+                    tracker.poll()
+
+            activity_thread = threading.Thread(target=watch_activity, daemon=True, name=f"{name}-Activity")
+            activity_thread.start()
             # Run bridge loop until it throws (e.g. port disappears)
             try:
                 bridge_loop(
@@ -778,7 +845,10 @@ def port_worker(name, cfg):
                     ansi_home_clears_screen=cfg.get("ansi_home_clears_screen", False),
                 )
             finally:
+                stop_activity.set()
+                activity_thread.join()
                 unregister_active_terminal(ser)
+                tracker.close()
                 clear_terminal_activity(ser, default_name=name)
             # When bridge_loop exits normally, unregister
             try:
@@ -858,6 +928,7 @@ def remote_client_worker(name, cfg, client_socket, address):
             translate_ansi=cfg.get("translate_ansi", False),
             clear_sequence=cfg.get("ansi_clear_sequence", b"\x0c"),
             columns=columns,
+            rows=cfg.get("rows",24),
         )
         try:
             bridge_loop(
@@ -1000,7 +1071,7 @@ def bridge_loop(
     from retro_os.menu import OSFlyoutMenu
     from retro_os.shortcuts import ShortcutsManager
     if not hasattr(ser, "_rsh_shortcuts_manager"):
-        ser._rsh_shortcuts_manager = ShortcutsManager(BASE_DIR / "user_shortcuts.json")
+        ser._rsh_shortcuts_manager = ShortcutsManager(settings_path("user_shortcuts.json", BASE_DIR))
     shortcuts_mgr = ser._rsh_shortcuts_manager
     if not hasattr(ser, "_rsh_flyout_menu"):
         ser._rsh_flyout_menu = OSFlyoutMenu(shortcuts_manager=shortcuts_mgr)
@@ -1011,10 +1082,28 @@ def bridge_loop(
     bridge_serial = None
     pending_bridge = None
     input_buffer = b""
+
+    def read_session_line():
+        nonlocal input_buffer
+        if getattr(ser,'_rsh_reconnect_pending',False) or getattr(ser,'_rsh_return_to_menu',False):
+            return 'Q'
+        separators = [input_buffer.find(value) for value in (b'\r',b'\n') if value in input_buffer]
+        if separators:
+            index = min(separators)
+            value = input_buffer[:index].decode(errors='replace')
+            input_buffer = input_buffer[index+1:].lstrip(b'\r\n')
+        else:
+            prefix, input_buffer = input_buffer, b''
+            value = prefix.decode(errors='replace') + read_input_line(ser)
+        if value.strip().upper() == 'ATM':
+            ser._rsh_return_to_menu = True
+            return 'Q'
+        return value
     mode = "MENU"  # MENU, TELNET, BBS, FILES, TEXT, BROWSER
     retro_session = Session(
         client_type="host" if getattr(ser, "_rsh_host_console", False) is True else "telnet" if isinstance(ser, SocketTerminal) else "serial",
         cols=terminal_columns(ser),
+        rows=terminal_rows(ser),
         user="Host" if getattr(ser, "_rsh_host_console", False) is True else getattr(ser, "_terminal_name", name),
     )
     shell_requested_module = []
@@ -1028,19 +1117,27 @@ def bridge_loop(
             "notes": NOTES_DIR,
             "text": TEXT_DIR,
             "files": FILES_DIR,
-            "bookmarks": BASE_DIR / "browser_bookmarks.json",
-            "mail": BASE_DIR / "mail",
-            "tasks": BASE_DIR / "scheduled_tasks.json",
-            "shortcuts": BASE_DIR / "user_shortcuts.json",
+            "bookmarks": settings_path("browser_bookmarks.json", BASE_DIR),
+            "mail": settings_dir(BASE_DIR),
+            "tool_data": settings_dir(BASE_DIR),
+            "tasks": settings_path("scheduled_tasks.json", BASE_DIR),
+            "shortcuts": settings_path("user_shortcuts.json", BASE_DIR),
         },
         session=retro_session,
         activate_module=activate_retro_module,
-        profiles_path=BASE_DIR / "keyboard_profiles.json",
-        shortcuts_path=BASE_DIR / "user_shortcuts.json",
+        profiles_path=settings_path("keyboard_profiles.json", BASE_DIR),
+        shortcuts_path=settings_path("user_shortcuts.json", BASE_DIR),
     )
     host_env.shortcuts_manager = shortcuts_mgr
+    host_env.terminal = ser
+    from retro_os.session_tools import apply_preferences
+    machine_preferences = host_env.session_tools.preferences
+    try:
+        apply_preferences(ser, machine_preferences.get(name), retro_session)
+    except (OSError, ValueError) as exc:
+        console_log(f"{name}: machine preferences unavailable: {exc}", level="yellow")
     if getattr(ser, "_rsh_host_console", False) is True:
-        retro_shell.register_command("help", lambda _args: retro_shell.help() + "\nHost controls: allow <#>, deny <#>, pending, clear. ATM opens menus. PgUp/PgDn scroll output; Up/Down recall commands.")
+        retro_shell.register_command("help", lambda _args: retro_shell.help() + "\nHost controls: allow <#>, deny <#>, pending, clear, monitor collapse/auto. Collapse keeps the activity monitor compact across clear; auto restores normal layout. ATM opens menus. PgUp/PgDn scroll output; Up/Down recall commands.")
     if hasattr(host_env, "scheduler") and host_env.scheduler:
         host_env.scheduler.broadcaster = broadcast_scheduler_event
     from retro_os.toolkit import CalendarTool, start_calendar_reminders
@@ -1052,7 +1149,7 @@ def bridge_loop(
         except (OSError, ValueError, KeyError) as exc:
             console_log(f"Calendar reminders could not load: {exc}", level="yellow")
 
-    def render_shell_result(result):
+    def render_shell_result(result, page_lines=None):
         from retro_os.viewer import paginate_text
 
         text = str(result)
@@ -1062,7 +1159,7 @@ def bridge_loop(
             return
         cols = getattr(retro_session, "cols", terminal_columns(ser))
         rows = getattr(retro_session, "rows", 24)
-        pages = paginate_text(text, cols, page_lines=max(1, rows - 2))
+        pages = paginate_text(text, cols, page_lines=page_lines or max(1, rows - 2))
 
         page_index = 0
         while page_index < len(pages):
@@ -1174,7 +1271,8 @@ def bridge_loop(
             ]
             for term in matches:
                 try:
-                    write(term, f"\r\n*** [MESSAGE from {sender}] {msg} ***\r\n")
+                    from rsh_session import notify
+                    notify(term, f"\r\n*** [MESSAGE from {sender}] {msg} ***\r\n")
                     evt["delivered"] = True
                 except Exception:
                     pass
@@ -1186,7 +1284,9 @@ def bridge_loop(
     event_bus.subscribe("notify", on_notify_event)
 
     def run_mail_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             try:
                 mgr = host_env.mail_manager
                 cur_mode = mgr.get_mode() if mgr else "hub"
@@ -1204,8 +1304,10 @@ def bridge_loop(
             write(ser, "[7] Delete Message\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 write(ser, "\r\n")
@@ -1217,7 +1319,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nMessage ID or Number (Q to cancel): ")
-                mid = read_input_line(ser).strip()
+                mid = read_session_line().strip()
                 if mid and mid.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"mail read {mid}")
@@ -1228,20 +1330,20 @@ def bridge_loop(
             elif choice == "3":
                 if cur_mode == "internet":
                     write(ser, "\r\nTo (recipient email address, Q to cancel): ")
-                    to_addr = read_input_line(ser).strip()
+                    to_addr = read_session_line().strip()
                     if not to_addr or to_addr.upper() == "Q":
                         continue
                 else:
                     write(ser, "\r\nRecipient or Machine (leave blank for All, Q to cancel): ")
-                    to_addr = read_input_line(ser).strip()
+                    to_addr = read_session_line().strip()
                     if to_addr.upper() == "Q":
                         continue
                     if not to_addr:
                         to_addr = "All"
                 write(ser, "Subject: ")
-                subj = read_input_line(ser).strip()
+                subj = read_session_line().strip()
                 write(ser, "Body: ")
-                body = read_input_line(ser).strip()
+                body = read_session_line().strip()
                 try:
                     res = retro_shell.execute(f"mail send {to_addr} {subj} | {body}")
                     write(ser, f"\r\n{res}\r\n")
@@ -1265,10 +1367,10 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "6":
                 write(ser, "\r\nEnter email address (Q to cancel): ")
-                addr = read_input_line(ser).strip()
+                addr = read_session_line().strip()
                 if addr and addr.upper() != "Q":
                     write(ser, "Subject (optional): ")
-                    subj = read_input_line(ser).strip()
+                    subj = read_session_line().strip()
                     try:
                         cmd = f"mail mailto {addr} {subj}" if subj else f"mail mailto {addr}"
                         res = retro_shell.execute(cmd)
@@ -1278,7 +1380,7 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "7":
                 write(ser, "\r\nMessage ID or Number to delete (Q to cancel): ")
-                mid = read_input_line(ser).strip()
+                mid = read_session_line().strip()
                 if mid and mid.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"mail delete {mid}")
@@ -1293,7 +1395,7 @@ def bridge_loop(
         write(ser, res + "\r\n")
         while True:
             write(ser, "\r\nMines [R/F row col, N=new, Q=quit]> ")
-            cmd = read_input_line(ser).strip()
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 break
             if cmd.upper() in ("NEW", "RESTART"):
@@ -1318,7 +1420,7 @@ def bridge_loop(
         write(ser, res + "\r\n")
         while True:
             write(ser, "\r\nSolitaire [D=draw, M=move, A=auto, N=new, Q=quit]> ")
-            cmd = read_input_line(ser).strip()
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 break
             if cmd.upper() in ("NEW", "RESTART"):
@@ -1342,7 +1444,7 @@ def bridge_loop(
         write(ser, retro_shell.execute("games wumpus new") + "\r\n")
         while True:
             write(ser, "\r\nWumpus [M room, S rooms, N=new, Q=quit]> ")
-            cmd = read_input_line(ser).strip()
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 retro_shell.execute("games wumpus quit")
                 break
@@ -1361,7 +1463,7 @@ def bridge_loop(
         write(ser, retro_shell.execute("games lander new") + "\r\n")
         while True:
             write(ser, "\r\nLander [B 0-4, I=status, N=new, Q=quit]> ")
-            cmd = read_input_line(ser).strip()
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 retro_shell.execute("games lander quit")
                 break
@@ -1383,7 +1485,7 @@ def bridge_loop(
         write(ser, retro_shell.execute(f"games {command} new") + "\r\n")
         while True:
             write(ser, f"\r\n{prompt}")
-            cmd = read_input_line(ser).strip()
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 retro_shell.execute(f"games {command} quit")
                 break
@@ -1402,7 +1504,7 @@ def bridge_loop(
         write(ser, retro_shell.execute("games wordguess new") + "\r\n")
         while True:
             write(ser, "\r\nWord [five letters, N=new, Q=quit]> ")
-            cmd = read_input_line(ser).strip()
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 retro_shell.execute("games wordguess quit")
                 break
@@ -1418,10 +1520,10 @@ def bridge_loop(
 
     def run_trek_session():
         write(ser, "\r\n--- STAR TREK ---\r\n")
-        write(ser, retro_shell.execute("games trek new") + "\r\n")
+        render_shell_result(retro_shell.execute("games trek new"))
         while True:
-            write(ser, "\r\nTrek [command, N=new, Q=quit]> ")
-            cmd = read_input_line(ser).strip()
+            write(ser, "\r\nTrek [command, HELP, N=new, Q=quit]> ")
+            cmd = read_session_line().strip()
             if not cmd or cmd.upper() in ("Q", "QUIT", "EXIT"):
                 retro_shell.execute("games trek quit")
                 break
@@ -1430,7 +1532,8 @@ def bridge_loop(
             else:
                 res = retro_shell.execute(f"games trek {cmd}")
             res = str(res)
-            write(ser, "\r\n" + res + "\r\n")
+            write(ser, "\r\n")
+            render_shell_result(res)
             lower = res.lower()
             if "victory!" in lower or "destroyed!" in lower or "mission time expired" in lower:
                 write(ser, "Press any key to continue...\r\n")
@@ -1438,7 +1541,9 @@ def bridge_loop(
                 break
 
     def run_games_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- RETRO GAMES ---\r\n")
             write(ser, "[1] Minesweeper\r\n")
             write(ser, "[2] Solitaire\r\n")
@@ -1450,8 +1555,10 @@ def bridge_loop(
             write(ser, "[8] Star Trek\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 return None
             elif choice in ("3", "L", "LANDER", "LUNAR LANDER"):
                 run_lander_session()
@@ -1472,15 +1579,19 @@ def bridge_loop(
 
     def run_help_menu():
         from retro_os.help_data import get_help_topics, get_topic_content
+        clear_screen(ser,use_ansi)
         topics = get_help_topics()
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- RETRO SERIAL HUB HELP & USER GUIDE ---\r\n")
             for tid, title in topics:
                 write(ser, f"[{tid}] {title}\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Select topic (1-9, or Q): ")
-            choice = read_input_line(ser).strip()
-            if not choice or choice.upper() in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip()
+            if not choice:
+                continue
+            if choice.upper() in ("Q", "QUIT", "EXIT", "0"):
                 break
             content = get_topic_content(choice)
             write(ser, "\r\n")
@@ -1490,30 +1601,72 @@ def bridge_loop(
     def run_tool_menu(tool):
         import shlex
         from retro_os.modules.toolkit import TOOL_MENUS
+        from retro_os.menu_layout import spaced_result
         from retro_os.core import Shell
 
+        clear_screen(ser,use_ansi)
+        def dispatch():
+            changed = False
+            while shell_requested_module:
+                changed = bool(handle_shell_action(shell_requested_module.pop(0))) or changed
+            return changed
+
+        if tool == "audio":
+            from retro_os.audio_menu import run_audio_menu
+            return run_audio_menu(retro_shell.execute, lambda: read_session_line(),
+                                  lambda text: write(ser, text), render_shell_result,
+                                  lambda: clear_screen(ser, use_ansi), rows=getattr(retro_session,"rows",24))
+        if tool in ('fileman','files','archive','view','findfiles','textlib'):
+            from retro_os.file_browser import run_file_browser
+            initial = None
+            if tool == 'textlib':
+                host_env.file_tools.cwd = TEXT_DIR
+            if tool == 'findfiles':
+                write(ser, 'Filename pattern (Enter cancels): ')
+                pattern = read_session_line().strip()
+                if not pattern:
+                    return False
+                write(ser, 'Search folder (Enter=current): ')
+                folder = read_session_line().strip() or str(host_env.file_tools.cwd)
+                initial = retro_shell.execute(shlex.join(['findfiles',pattern,folder]))
+            return run_file_browser(host_env.file_tools, retro_shell.execute, lambda: read_session_line(),
+                                    lambda text: write(ser,text), render_shell_result,
+                                    lambda: clear_screen(ser,use_ansi), dispatch,
+                                    purpose={'fileman':'files','files':'transfer','view':'view','archive':'archive','findfiles':'find','textlib':'view'}[tool],
+                                    rows=getattr(retro_session,'rows',24), initial=initial)
         title, initial, choices = TOOL_MENUS[tool]
-        clear_screen(ser, use_ansi)
-        write(ser, f"\r\n--- {title} ---\r\n")
-        render_shell_result(retro_shell.execute(f"{tool} {initial}"))
+        result = retro_shell.execute(shlex.join([tool, *([initial] if initial else [])]))
+        page = 0
         while True:
+            clear_screen(ser, use_ansi)
             write(ser, f"\r\n--- {title} ---\r\n")
-            for index, (label, _, _) in enumerate(choices, 1):
+            visible = choices[page*8:(page+1)*8]
+            for index, (label, _, _) in enumerate(visible, 1):
                 write(ser, f"[{index}] {label}\r\n")
-            write(ser, "[Q] Return to Main Menu\r\nChoice (or command): ")
-            choice = read_input_line(ser).strip()
-            if not choice or choice.upper() in ("Q", "QUIT", "EXIT", "ATM"):
+            write(ser,"\r\n")
+            if len(choices) > 8:
+                write(ser, "N=Next actions B=Previous actions\r\n")
+            write(ser, "Q=Back Enter=Refresh\r\n\r\n")
+            result_rows=max(1,retro_session.rows-len(visible)-7-(1 if len(choices)>8 else 0))
+            render_shell_result(spaced_result(tool,result), page_lines=result_rows)
+            write(ser, "\r\nChoice (or command): ")
+            choice = read_session_line().strip()
+            if choice.upper() in ("Q", "QUIT", "EXIT", "ATM"):
                 return False
-            if choice.isdigit() and 1 <= int(choice) <= len(choices):
-                _, fixed, prompts = choices[int(choice) - 1]
+            if not choice:
+                result = retro_shell.execute(shlex.join([tool,*([initial] if initial else [])])); continue
+            if choice.upper() in ('N','B') and len(choices) > 8:
+                page = (page + (1 if choice.upper() == 'N' else -1)) % ((len(choices)+7)//8)
+                continue
+            if choice.isdigit() and 1 <= int(choice) <= len(visible):
+                _, fixed, prompts = visible[int(choice)-1]
                 arguments = list(fixed)
                 cancelled = False
                 for prompt in prompts:
-                    write(ser, prompt + " (Enter cancels): ")
-                    value = read_input_line(ser).strip()
-                    if not value:
-                        cancelled = True
-                        break
+                    write(ser,prompt + " (Enter cancels): ")
+                    value = read_session_line().strip()
+                    if not value or value.upper() in ("Q","ATM"):
+                        cancelled = True; break
                     arguments.append(value)
                 if cancelled:
                     continue
@@ -1521,16 +1674,12 @@ def bridge_loop(
                 try:
                     arguments = Shell.split_line(choice)
                 except ValueError as exc:
-                    write(ser, f"\r\n{exc}\r\n")
-                    continue
+                    result = str(exc); continue
                 if arguments and HUB_TOOL_ALIASES.get(arguments[0].upper()) == tool:
                     arguments = arguments[1:]
-            result = retro_shell.execute(shlex.join([tool, *arguments]))
-            render_shell_result(result)
-            if shell_requested_module:
-                handled = handle_shell_action(shell_requested_module.pop())
-                if handled:
-                    return True
+            result = retro_shell.execute(shlex.join([tool,*arguments]))
+            if dispatch():
+                return True
 
     def run_calc_session():
         write(ser, "\r\n--- RETRO CALCULATOR ---\r\n")
@@ -1538,7 +1687,7 @@ def bridge_loop(
         write(ser, "Type 'q' or 'exit' to return to Main Menu.\r\n")
         while True:
             write(ser, "Calc> ")
-            expr = read_input_line(ser).strip()
+            expr = read_session_line().strip()
             if not expr or expr.upper() in ("Q", "QUIT", "EXIT"):
                 break
             try:
@@ -1557,7 +1706,7 @@ def bridge_loop(
         write(ser, logo.help_text() + "\r\n")
         while not logo.done:
             write(ser, logo.prompt)
-            command = read_input_line(ser).strip()
+            command = read_session_line().strip()
             if not command:
                 continue
             response = logo.execute(command)
@@ -1565,7 +1714,9 @@ def bridge_loop(
                 write(ser, response.replace("\n", "\r\n") + "\r\n")
 
     def run_keyboard_profiles_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             prof = getattr(retro_session, "kb_profile", "default")
             write(ser, f"\r\n--- KEYBOARD BRIDGE PROFILES ---\r\n")
             write(ser, f"Active Profile: {prof}\r\n")
@@ -1574,8 +1725,10 @@ def bridge_loop(
             write(ser, "[3] Map Key to Shortcut\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 write(ser, "\r\n")
@@ -1587,7 +1740,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nProfile name to activate (Q to cancel): ")
-                pname = read_input_line(ser).strip()
+                pname = read_session_line().strip()
                 if pname and pname.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"kb profile {pname}")
@@ -1597,11 +1750,11 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "3":
                 write(ser, "\r\nKey to map (e.g. CTRL+W, Q to cancel): ")
-                k = read_input_line(ser).strip()
+                k = read_session_line().strip()
                 if not k or k.upper() == "Q":
                     continue
                 write(ser, "Host action/shortcut (e.g. WIN or WIN+R): ")
-                a = read_input_line(ser).strip()
+                a = read_session_line().strip()
                 if a:
                     try:
                         res = retro_shell.execute(f"kb map {k} {a}")
@@ -1611,7 +1764,9 @@ def bridge_loop(
                     wait_for_key(ser)
 
     def run_document_viewer_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- DOCUMENT VIEWER ---\r\n")
             write(ser, "Formats: PDF, DOCX, XLSX, CSV, TXT, MD, HTML, Web URLs\r\n")
             write(ser, "[1] Browse Local Files (files/ and text/)\r\n")
@@ -1619,8 +1774,10 @@ def bridge_loop(
             write(ser, "[3] Download and View from Internet (URL)\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 found_files = []
@@ -1637,7 +1794,7 @@ def bridge_loop(
                 for idx, fpath in enumerate(found_files, 1):
                     write(ser, f"[{idx}] {fpath.name} ({fpath.parent.name}/)\r\n")
                 write(ser, "Select file number (Q to cancel): ")
-                f_idx = read_input_line(ser).strip()
+                f_idx = read_session_line().strip()
                 if not f_idx or f_idx.upper() == "Q":
                     continue
                 try:
@@ -1652,7 +1809,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nEnter local file path (Q to cancel): ")
-                fpath_input = read_input_line(ser).strip()
+                fpath_input = read_session_line().strip()
                 if fpath_input and fpath_input.upper() != "Q":
                     try:
                         clean_path = fpath_input.strip("'\"")
@@ -1663,7 +1820,7 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "3":
                 write(ser, "\r\nEnter URL to download and view (e.g. https://wttr.in/Austin?format=3, Q to cancel):\r\nURL: ")
-                url_input = read_input_line(ser).strip()
+                url_input = read_session_line().strip()
                 if url_input and url_input.upper() != "Q":
                     write(ser, f"\r\nDownloading and extracting {url_input}...\r\n")
                     try:
@@ -1862,7 +2019,7 @@ def bridge_loop(
             write(ser, "  [1] Keyboard Bridge (launch & type into host window) [Default]\r\n")
             write(ser, "  [2] Background (run on host without terminal interaction)\r\n")
             write(ser, "Choice [1-2, default=1]: ")
-            l_mode = read_input_line(ser).strip()
+            l_mode = read_session_line().strip()
             if l_mode in ("2", "B", "BG", "BACKGROUND"):
                 try:
                     res = retro_shell.execute(f"launch -b {app_name}")
@@ -1877,7 +2034,7 @@ def bridge_loop(
             write(ser, "  [2] Keyboard Bridge (launch & type into host window)\r\n")
             write(ser, "  [3] Background (run on host without terminal interaction)\r\n")
             write(ser, "Choice [1-3, default=1]: ")
-            l_mode = read_input_line(ser).strip()
+            l_mode = read_session_line().strip()
             if l_mode in ("2", "K", "KEYBOARD"):
                 run_keyboard_bridge_session(app_name)
             elif l_mode in ("3", "B", "BG", "BACKGROUND"):
@@ -1891,23 +2048,29 @@ def bridge_loop(
                 run_interactive_app(app_name)
 
     def run_apps_menu(launch_first=False):
+        clear_screen(ser,use_ansi)
         if launch_first:
             write(ser, "\r\nApplication name or path to launch (Q to cancel): ")
-            app_to_launch = read_input_line(ser).strip()
+            app_to_launch = read_session_line().strip()
             if app_to_launch and app_to_launch.upper() != "Q":
                 prompt_and_launch_app(app_to_launch)
             return
 
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- HOST APPLICATIONS ---\r\n")
             write(ser, "[1] List All Applications (A-Z Paginated)\r\n")
             write(ser, "[2] Search Applications by Name\r\n")
-            write(ser, "[3] Launch Application\r\n")
+            write(ser, "[3] Launch Application\r\n[4] Launch Presets\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
+            elif choice == "4":
+                run_tool_menu("presets")
             elif choice == "1":
                 write(ser, "\r\n")
                 try:
@@ -1918,7 +2081,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nSearch term or letter (Q to cancel): ")
-                term = read_input_line(ser).strip()
+                term = read_session_line().strip()
                 if term and term.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"apps {term}")
@@ -1928,12 +2091,13 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "3":
                 write(ser, "\r\nApplication name to launch (Q to cancel): ")
-                app_name = read_input_line(ser).strip()
+                app_name = read_session_line().strip()
                 if app_name and app_name.upper() != "Q":
                     prompt_and_launch_app(app_name)
 
     def run_host_terminal_menu(initial_cmd=None):
         import platform
+        clear_screen(ser,use_ansi)
         shell_info = host_env.get_host_shell()
         target_shell = shell_info["default_shell"]
         target_args = list(shell_info["default_args"])
@@ -1983,7 +2147,7 @@ def bridge_loop(
             write(ser, "  [Q] Return to Main Menu\r\n\r\n")
             write(ser, "Choice [1-5, Enter=Quick Launch]: ")
 
-            choice = read_input_line(ser).strip()
+            choice = read_session_line().strip()
             if not choice or choice in ("1", "L", "LAUNCH", "QUICK", "START"):
                 run_interactive_app(
                     target_shell,
@@ -2014,7 +2178,7 @@ def bridge_loop(
                 continue
             elif choice in ("5", "CUSTOM", "CMD"):
                 write(ser, "\r\nEnter custom command or shell (Q to cancel): ")
-                custom_cmd = read_input_line(ser).strip()
+                custom_cmd = read_session_line().strip()
                 if custom_cmd and custom_cmd.upper() != "Q":
                     c_parts = custom_cmd.split()
                     c_app = c_parts[0]
@@ -2032,18 +2196,22 @@ def bridge_loop(
                 break
 
     def run_print_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- HOST PRINTING ---\r\n")
             write(ser, "[1] Print Text Message\r\n")
             write(ser, "[2] Print File from Disk\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 write(ser, "\r\nText to print on host printer (Q to cancel): ")
-                txt = read_input_line(ser).strip()
+                txt = read_session_line().strip()
                 if txt and txt.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"print {txt}")
@@ -2053,7 +2221,7 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nPath of file to print (Q to cancel): ")
-                fpath = read_input_line(ser).strip()
+                fpath = read_session_line().strip()
                 if fpath and fpath.upper() != "Q":
                     try:
                         clean_path = fpath.strip("'\"")
@@ -2064,7 +2232,9 @@ def bridge_loop(
                     wait_for_key(ser)
 
     def run_connected_terminals_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             with ACTIVE_TERMINALS_LOCK:
                 terminals = sorted(
                     list(ACTIVE_TERMINALS),
@@ -2077,12 +2247,22 @@ def bridge_loop(
                 return
             for index, terminal in enumerate(terminals, 1):
                 label = getattr(terminal, "_terminal_name", getattr(terminal, "_profile_name", "Terminal"))
-                write(ser, f"[{index}] {label}\r\n")
-            write(ser, "\r\nSelect a terminal number, R=Refresh, Q=Return: ")
-            choice = read_input_line(ser).strip().upper()
-            if choice in ("", "Q", "QUIT", "EXIT"):
+                service = getattr(terminal,'_rsh_services',None)
+                details = ''
+                if service:
+                    age = f'{int(time.monotonic()-service.last_input)}s' if service.last_input is not None else 'none'
+                    details = f' | last input {age} | pending {len(service.pending)}'
+                    if service.progress:
+                        details += ' | transferring'
+                write(ser, f"[{index}] {label}{details}\r\n")
+            write(ser, "\r\nNumber=Terminal R=Refresh N=Notifications Q=Back: ")
+            choice = read_session_line().strip().upper()
+            if choice in ("Q", "QUIT", "EXIT"):
                 return
-            if choice in ("R", "REFRESH"):
+            if choice in ("", "R", "REFRESH"):
+                continue
+            if choice == "N":
+                run_tool_menu("notifications")
                 continue
             try:
                 index = int(choice) - 1
@@ -2094,22 +2274,23 @@ def bridge_loop(
             target_name = getattr(target, "_terminal_name", getattr(target, "_profile_name", "Terminal"))
             sender_name = getattr(ser, "_profile_name", name)
             write(ser, f"\r\n{target_name}\r\n[M] Send message  [F] Send file  [R] Return\r\nChoice: ")
-            action = read_input_line(ser).strip().upper()
+            action = read_session_line().strip().upper()
             if action in ("R", "RETURN", "Q"):
                 continue
             if action in ("M", "MESSAGE"):
                 write(ser, "Message (Q to cancel): ")
-                message = read_input_line(ser).strip()
+                message = read_session_line().strip()
                 if message and message.upper() != "Q":
                     try:
-                        write(target, f"\r\n*** [MESSAGE from {sender_name}] {message} ***\r\n")
-                        write(ser, f"Message sent to {target_name}.\r\n")
+                        from rsh_session import notify
+                        notify(target, f"\r\n*** [MESSAGE from {sender_name}] {message} ***\r\n")
+                        write(ser, f"Message queued for {target_name}.\r\n")
                     except Exception as exc:
                         write(ser, f"Message failed: {exc}\r\n")
                 continue
             if action in ("F", "FILE"):
                 write(ser, "File path or file name from files/ (Q to cancel): ")
-                raw_path = read_input_line(ser).strip().strip("'\"")
+                raw_path = read_session_line().strip().strip("'\"")
                 if not raw_path or raw_path.upper() == "Q":
                     continue
                 file_path = pathlib.Path(raw_path).expanduser()
@@ -2120,10 +2301,12 @@ def bridge_loop(
                     wait_for_key(ser)
                     continue
                 try:
-                    fm = importlib.import_module("rsh_files")
-                    write(target, f"\r\n*** Incoming text file from {sender_name}: {file_path.name} ***\r\n")
-                    fm.ascii_send(target, str(file_path))
-                    write(ser, f"\r\nSent {file_path.name} to {target_name} as ASCII text.\r\n")
+                    from rsh_session import notify
+                    if file_path.stat().st_size > 1024 * 1024:
+                        raise ValueError('Text delivery is limited to 1 MiB; use a file transfer for larger files.')
+                    content = file_path.read_text(encoding='utf-8',errors='replace')
+                    notify(target, f"\nIncoming text from {sender_name}: {file_path.name}\n" + content)
+                    write(ser,f"Queued {file_path.name} for {target_name}.\r\n")
                 except Exception as exc:
                     write(ser, f"File delivery failed: {exc}\r\n")
                 wait_for_key(ser)
@@ -2131,15 +2314,19 @@ def bridge_loop(
             write(ser, "Choose M, F, or R.\r\n")
 
     def run_ascii_viewer_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- ASCII IMAGE VIEWER ---\r\n")
             write(ser, "Preview images as terminal ASCII art\r\n")
             write(ser, "[1] Browse Files Directory for Images\r\n")
             write(ser, "[2] Enter Image Path Directly\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 img_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
@@ -2156,7 +2343,7 @@ def bridge_loop(
                 for idx, img in enumerate(images, 1):
                     write(ser, f"[{idx}] {img.name}\r\n")
                 write(ser, "Select image number (Q to cancel): ")
-                sel = read_input_line(ser).strip()
+                sel = read_session_line().strip()
                 if not sel or sel.upper() == "Q":
                     continue
                 try:
@@ -2171,7 +2358,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "2":
                 write(ser, "\r\nEnter image path (Q to cancel): ")
-                ipath = read_input_line(ser).strip()
+                ipath = read_session_line().strip()
                 if ipath and ipath.upper() != "Q":
                     try:
                         clean_ipath = ipath.strip("'\"")
@@ -2182,8 +2369,10 @@ def bridge_loop(
                     wait_for_key(ser)
 
     def run_scheduler_menu():
+        clear_screen(ser,use_ansi)
         sched = getattr(host_env, "scheduler", None)
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- TASK SCHEDULER ---\r\n")
             write(ser, "[1] List Scheduled Tasks\r\n")
             write(ser, "[2] Add New Scheduled Task\r\n")
@@ -2193,8 +2382,10 @@ def bridge_loop(
             write(ser, "[6] View Available Modules & Usage\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 write(ser, "\r\n")
@@ -2207,18 +2398,18 @@ def bridge_loop(
             elif choice == "2":
                 write(ser, "\r\n--- ADD SCHEDULED TASK ---\r\n")
                 write(ser, "Task Name (e.g. Morning News, Q to cancel): ")
-                t_name = read_input_line(ser).strip()
+                t_name = read_session_line().strip()
                 if not t_name or t_name.upper() == "Q":
                     continue
                 write(ser, "Command (e.g. 'news : weather Austin : broadcast Good Morning', or 'help'): ")
-                t_cmd = read_input_line(ser).strip()
+                t_cmd = read_session_line().strip()
                 if not t_cmd or t_cmd.upper() == "Q":
                     continue
                 if t_cmd.lower() in ("help", "modules"):
                     res = retro_shell.execute("schedule modules")
                     render_shell_result(res)
                     write(ser, "Enter command to schedule (chain with ' : '): ")
-                    t_cmd = read_input_line(ser).strip()
+                    t_cmd = read_session_line().strip()
                     if not t_cmd or t_cmd.upper() == "Q":
                         continue
                 raw_segments = [c.strip() for c in re.split(r"\s+:\s+|\s*;\s*", t_cmd) if c.strip()]
@@ -2236,7 +2427,7 @@ def bridge_loop(
                 write(ser, "  [4] Weekly (on day of week at specified time)\r\n")
                 write(ser, "  [5] Monthly (on day of month at specified time)\r\n")
                 write(ser, "Choice [1-5]: ")
-                freq_choice = read_input_line(ser).strip()
+                freq_choice = read_session_line().strip()
                 freq_map = {"1": "interval", "2": "hourly", "3": "daily", "4": "weekly", "5": "monthly"}
                 freq = freq_map.get(freq_choice, "interval")
                 interval_mins = 60
@@ -2245,39 +2436,39 @@ def bridge_loop(
                 dom = None
                 if freq == "interval":
                     write(ser, "Every how many minutes? [default 15]: ")
-                    mins_str = read_input_line(ser).strip()
+                    mins_str = read_session_line().strip()
                     try:
                         interval_mins = int(mins_str) if mins_str else 15
                     except ValueError:
                         interval_mins = 15
                 elif freq == "hourly":
                     write(ser, "At minute of each hour (0-59) [default 0]: ")
-                    min_str = read_input_line(ser).strip()
+                    min_str = read_session_line().strip()
                     run_time = f":{int(min_str):02d}" if min_str and min_str.isdigit() else ":00"
                 elif freq == "daily":
                     write(ser, "Run time (HH:MM 24-hr) [default 08:00]: ")
-                    t_str = read_input_line(ser).strip()
+                    t_str = read_session_line().strip()
                     run_time = t_str if t_str else "08:00"
                 elif freq == "weekly":
                     write(ser, "Day of week (mon/tue/wed/thu/fri/sat/sun) [default mon]: ")
-                    dow_str = read_input_line(ser).strip().lower()
+                    dow_str = read_session_line().strip().lower()
                     dow = dow_str if dow_str in ("mon", "tue", "wed", "thu", "fri", "sat", "sun") else "mon"
                     write(ser, "Run time (HH:MM 24-hr) [default 08:00]: ")
-                    t_str = read_input_line(ser).strip()
+                    t_str = read_session_line().strip()
                     run_time = t_str if t_str else "08:00"
                 elif freq == "monthly":
                     write(ser, "Day of month (1-31) [default 1]: ")
-                    dom_str = read_input_line(ser).strip()
+                    dom_str = read_session_line().strip()
                     try:
                         dom = int(dom_str) if dom_str else 1
                     except ValueError:
                         dom = 1
                     write(ser, "Run time (HH:MM 24-hr) [default 08:00]: ")
-                    t_str = read_input_line(ser).strip()
+                    t_str = read_session_line().strip()
                     run_time = t_str if t_str else "08:00"
 
                 write(ser, "Broadcast output to all connected terminals? (Y/N) [default Y]: ")
-                bcast_input = read_input_line(ser).strip().upper()
+                bcast_input = read_session_line().strip().upper()
                 bcast = False if bcast_input in ("N", "NO") else True
 
                 try:
@@ -2301,7 +2492,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "3":
                 write(ser, "\r\nTask ID to run immediately (Q to cancel): ")
-                tid = read_input_line(ser).strip()
+                tid = read_session_line().strip()
                 if tid and tid.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"schedule run {tid}")
@@ -2311,7 +2502,7 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "4":
                 write(ser, "\r\nTask ID to toggle enabled/disabled (Q to cancel): ")
-                tid = read_input_line(ser).strip()
+                tid = read_session_line().strip()
                 if tid and tid.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"schedule toggle {tid}")
@@ -2321,7 +2512,7 @@ def bridge_loop(
                     wait_for_key(ser)
             elif choice == "5":
                 write(ser, "\r\nTask ID to delete (Q to cancel): ")
-                tid = read_input_line(ser).strip()
+                tid = read_session_line().strip()
                 if tid and tid.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"schedule delete {tid}")
@@ -2335,7 +2526,7 @@ def bridge_loop(
                     res = retro_shell.execute("schedule modules")
                     render_shell_result(res)
                     write(ser, "\r\nView detailed info for a module (name or Enter to skip): ")
-                    mod_name = read_input_line(ser).strip()
+                    mod_name = read_session_line().strip()
                     if mod_name:
                         info_res = retro_shell.execute(f"schedule info {mod_name}")
                         render_shell_result(info_res)
@@ -2426,7 +2617,9 @@ def bridge_loop(
                 time.sleep(0.05)
 
     def run_host_media_menu():
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- SYSTEM MONITOR & MEDIA ---\r\n")
             write(ser, "[1] Host System Monitor (Real-Time Live)\r\n")
             write(ser, "[2] View Host Clipboard\r\n")
@@ -2441,8 +2634,10 @@ def bridge_loop(
             write(ser, "[S] System Status Snapshot (Single View)\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT"):
                 break
             elif choice in ("1", "LIVE", "MONITOR"):
                 run_sysinfo_display(realtime=True)
@@ -2457,7 +2652,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "3":
                 write(ser, "\r\nEnter text to copy to host clipboard (Q to cancel): ")
-                clip_text = read_input_line(ser).strip()
+                clip_text = read_session_line().strip()
                 if clip_text and clip_text.upper() != "Q":
                     try:
                         res = retro_shell.execute(f"clip {clip_text}")
@@ -2495,6 +2690,7 @@ def bridge_loop(
                 time.sleep(0.3)
 
     def run_weather_news_menu():
+        clear_screen(ser,use_ansi)
         def show_news_interactive(source, label):
             write(ser, f"\r\nFetching {label} headlines...\r\n")
             try:
@@ -2513,7 +2709,7 @@ def bridge_loop(
                     render_shell_result("\n".join(lines))
 
                     write(ser, f"\r\nEnter article number to read (1-{len(items)}), or Q to return: ")
-                    art_choice = read_input_line(ser).strip().upper()
+                    art_choice = read_session_line().strip().upper()
                     if not art_choice or art_choice in ("Q", "QUIT", "EXIT", "0"):
                         break
                     if art_choice.isdigit() and 1 <= int(art_choice) <= len(items):
@@ -2523,7 +2719,7 @@ def bridge_loop(
 
                         if item.get("link"):
                             write(ser, "[F] Fetch Full Webpage | [Q/Enter] Back to Headlines\r\nAction: ")
-                            sub_choice = read_input_line(ser).strip().upper()
+                            sub_choice = read_session_line().strip().upper()
                             if sub_choice == "F":
                                 write(ser, f"\r\nFetching full web article from {item['link']}...\r\n")
                                 try:
@@ -2541,6 +2737,7 @@ def bridge_loop(
                 wait_for_key(ser)
 
         while True:
+            clear_screen(ser,use_ansi)
             write(ser, "\r\n--- WEATHER & NEWS ---\r\n")
             write(ser, "[1] Morning / Desk Briefing\r\n")
             write(ser, "[2] Live Weather Forecast (Auto Location)\r\n")
@@ -2550,8 +2747,10 @@ def bridge_loop(
             write(ser, "[6] BBC News Headlines\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
             elif choice == "1":
                 write(ser, "\r\nGenerating briefing...\r\n")
@@ -2562,14 +2761,14 @@ def bridge_loop(
                     items = get_cached_news_items()
                     if items:
                         write(ser, f"\r\nEnter article number to read (1-{len(items)}), or Enter to return: ")
-                        art_choice = read_input_line(ser).strip().upper()
+                        art_choice = read_session_line().strip().upper()
                         if art_choice.isdigit() and 1 <= int(art_choice) <= len(items):
                             item = items[int(art_choice) - 1]
                             art_display = format_article(item)
                             render_shell_result(art_display)
                             if item.get("link"):
                                 write(ser, "[F] Fetch Full Webpage | [Q/Enter] Continue\r\nAction: ")
-                                sub_choice = read_input_line(ser).strip().upper()
+                                sub_choice = read_session_line().strip().upper()
                                 if sub_choice == "F":
                                     write(ser, f"\r\nFetching full web article from {item['link']}...\r\n")
                                     try:
@@ -2594,7 +2793,7 @@ def bridge_loop(
                 wait_for_key(ser)
             elif choice == "3":
                 write(ser, "\r\nEnter city or zip code (e.g. Austin, 90210, London; Q to cancel): ")
-                loc = read_input_line(ser).strip()
+                loc = read_session_line().strip()
                 if loc and loc.upper() != "Q":
                     write(ser, f"\r\nFetching weather for {loc}...\r\n")
                     try:
@@ -2612,7 +2811,9 @@ def bridge_loop(
 
     def run_terminal_settings_menu():
         nonlocal use_ansi
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             cur_cols = terminal_columns(ser)
             cur_caps = getattr(ser, "_rsh_caps_only", None) is True
             cur_pace = getattr(ser, "_rsh_pace_delay", 0.0)
@@ -2624,21 +2825,42 @@ def bridge_loop(
             pace_ms = int(cur_pace * 1000)
 
             write(ser, "\r\n--- TERMINAL HARDWARE SETTINGS ---\r\n")
-            write(ser, f"Screen Width:    {cur_cols} columns\r\n")
+            write(ser, f"Screen Size:     {cur_cols} x {terminal_rows(ser)}\r\n")
             write(ser, f"Caps-Only Mode:  {'ON (Apple II / PET)' if cur_caps else 'OFF (Standard ASCII)'}\r\n")
             write(ser, f"Serial Pacing:   {pace_ms} ms/char ({'None' if pace_ms == 0 else 'Throttled'})\r\n")
             write(ser, f"ANSI Code Strip: {'ON (Filter color codes)' if cur_ansi else 'OFF (Pass-through)'}\r\n")
             write(ser, "----------------------------------\r\n")
-            write(ser, "[1] Toggle Screen Width (40 / 80 cols)\r\n")
+            write(ser, "[1] Screen Size (Width / Height)\r\n")
             write(ser, "[2] Toggle Caps-Only Mode (Uppercase)\r\n")
             write(ser, "[3] Adjust Serial Pacing Delay\r\n")
             write(ser, "[4] Toggle ANSI Code Filter\r\n")
+            write(ser, "[5] Transfer Protocol  [6] Starting Screen\r\n[7] Reconnect Policy   [8] Idle Timeout\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 break
+            elif choice in ('5','6','7','8'):
+                key = {'5':'protocol','6':'start','7':'reconnect','8':'idle_seconds'}[choice]
+                write(ser,key + ' (XMODEM/YMODEM/ASCII; menu/cli; resume/menu; seconds): ')
+                value = read_session_line().strip()
+                if value:
+                    import shlex
+                    render_shell_result(retro_shell.execute(shlex.join(['machine',key,value])))
+                    wait_for_key(ser)
             elif choice == "1":
+                clear_screen(ser,use_ansi)
+                write(ser,f"SCREEN SIZE: {cur_cols} x {terminal_rows(ser)}\r\n[1] Toggle 40/80 columns\r\n[2] Set terminal height\r\nQ=Back\r\nChoice: ")
+                size_choice=read_session_line().strip().upper()
+                if size_choice == '2':
+                    write(ser,'Terminal rows (16-100, default 24; Enter cancels): ')
+                    value=read_session_line().strip()
+                    if value:
+                        render_shell_result(retro_shell.execute('machine rows ' + value))
+                        wait_for_key(ser)
+                    continue
+                if size_choice != '1':
+                    continue
                 new_cols = 40 if cur_cols == 80 else 80
                 try:
                     with COLUMN_PREFERENCES_LOCK:
@@ -2654,6 +2876,7 @@ def bridge_loop(
                     SERIAL_CONFIGS[name]["columns"] = new_cols
                 ser._rsh_columns = new_cols
                 retro_session.cols = new_cols
+                machine_preferences.set(name,"columns",new_cols)
                 if inbound_translator:
                     inbound_translator.columns = new_cols
                 write(ser, f"\r\nTerminal width set to {new_cols} columns.\r\n")
@@ -2662,19 +2885,21 @@ def bridge_loop(
                 new_caps = not cur_caps
                 ser._rsh_caps_only = new_caps
                 retro_session.caps_only = new_caps
+                machine_preferences.set(name,"caps",new_caps)
                 write(ser, f"\r\nCaps-Only mode set to {'ON' if new_caps else 'OFF'}.\r\n")
                 wait_for_key(ser)
             elif choice == "3":
                 write(ser, f"\r\nCurrent pacing: {pace_ms} ms/char.\r\n")
                 write(ser, "Pacing adds a slight delay after each character to prevent buffer overruns on vintage UARTs.\r\n")
                 write(ser, "Enter delay in milliseconds (0=off, 2=low, 5=medium, Q to cancel): ")
-                p_str = read_input_line(ser).strip()
+                p_str = read_session_line().strip()
                 if p_str and p_str.upper() != "Q":
                     try:
                         ms = max(0.0, float(p_str))
                         sec = ms / 1000.0
                         ser._rsh_pace_delay = sec
                         retro_session.pace_delay = sec
+                        machine_preferences.set(name,"pace_ms",ms)
                         write(ser, f"Pacing set to {int(ms)} ms/character.\r\n")
                     except ValueError:
                         write(ser, "Invalid pacing delay.\r\n")
@@ -2700,21 +2925,28 @@ def bridge_loop(
 
     def run_host_settings_menu():
         global HOST_SETTINGS
+        clear_screen(ser,use_ansi)
         while True:
+            clear_screen(ser,use_ansi)
             with HOST_SETTINGS_LOCK:
                 current_binding = HOST_SETTINGS["keyboard_exit_binding"]
             write(ser, "\r\n--- HOST SETTINGS ---\r\n")
             write(ser, f"Keyboard Bridge Exit Binding: {current_binding}\r\n")
             write(ser, "[1] Change Exit Binding (Ctrl+A through Ctrl+Z)\r\n")
-            write(ser, "[2] Restore Default (Ctrl+X)\r\n")
+            write(ser, "[2] Restore Default (Ctrl+X)\r\n[3] Machine Preferences\r\n")
             write(ser, "[Q] Return to Main Menu\r\n")
             write(ser, "Choice: ")
-            choice = read_input_line(ser).strip().upper()
-            if not choice or choice in ("Q", "QUIT", "EXIT", "0"):
+            choice = read_session_line().strip().upper()
+            if not choice:
+                continue
+            if choice in ("Q", "QUIT", "EXIT", "0"):
                 return
+            if choice == "3":
+                run_tool_menu("machine")
+                continue
             if choice == "1":
                 write(ser, "Enter exit binding (CTRL+A through CTRL+Z, Q to cancel): ")
-                binding = read_input_line(ser).strip().upper()
+                binding = read_session_line().strip().upper()
                 if binding == "Q":
                     continue
             elif choice == "2":
@@ -2748,6 +2980,23 @@ def bridge_loop(
                 else:
                     write(ser, f"Failed to connect to {host}:{port}.\r\n")
                     return False
+            elif act == 'reader':
+                from retro_os.reader import run_reader
+                try:
+                    run_reader(requested_module[1], settings_path('reading_positions.json', BASE_DIR),
+                               lambda: read_session_line(), lambda text: write(ser,text),
+                               lambda: clear_screen(ser,use_ansi), columns=terminal_columns(ser), rows=retro_session.rows)
+                except (OSError, ValueError) as exc:
+                    write(ser, f"Reader error: {exc}\r\n")
+                return False
+            elif act == 'preset_launch':
+                row = requested_module[1]
+                if row['mode'] == 'keyboard':
+                    host_env.launch_app(row['app'], row['args'], cwd=row['cwd'])
+                    run_keyboard_bridge_session()
+                else:
+                    run_interactive_app(row['app'], row['args'], work_dir=row['cwd'])
+                return False
             elif act in ("app_interactive", "host_terminal"):
                 _, target, app_args = requested_module
                 echo_opt = False if "powershell" in str(target).lower() else True
@@ -2758,7 +3007,7 @@ def bridge_loop(
                 launch_with_keyboard_bridge(target, app_args)
                 return False
             elif act == "file_transfer":
-                _, transfer_action, fname = requested_module
+                _, transfer_action, fname, *transfer_options = requested_module
                 try:
                     importlib.invalidate_caches()
                     fm = importlib.import_module("rsh_files")
@@ -2782,18 +3031,20 @@ def bridge_loop(
                         else:
                             fm.ascii_send(ser, str(fpath))
                     elif transfer_action == "XMODEM_RECV":
-                        dest = FILES_DIR / fpath.name
-                        fm.xmodem_receive(ser, str(dest))
+                        dest = fpath
+                        fm.xmodem_receive(ser, str(dest), exact_size=transfer_options[0] if transfer_options else None)
                 except Exception as exc:
                     write(ser, f"\r\nFile transfer error: {exc}\r\n")
                 return False
             elif act == "set_caps":
                 ser._rsh_caps_only = requested_module[1]
                 retro_session.caps_only = requested_module[1]
+                machine_preferences.set(name,"caps",requested_module[1])
                 return False
             elif act == "set_pace":
                 ser._rsh_pace_delay = requested_module[1]
                 retro_session.pace_delay = requested_module[1]
+                machine_preferences.set(name,"pace_ms",requested_module[1]*1000)
                 return False
             elif act == "set_columns":
                 new_cols = requested_module[1]
@@ -2811,6 +3062,7 @@ def bridge_loop(
                     SERIAL_CONFIGS[name]["columns"] = new_cols
                 ser._rsh_columns = new_cols
                 retro_session.cols = new_cols
+                machine_preferences.set(name,"columns",new_cols)
                 if inbound_translator:
                     inbound_translator.columns = new_cols
                 return False
@@ -2901,7 +3153,7 @@ def bridge_loop(
     def run_add_shortcut_flow():
         write(ser, "\r\n--- ADD SHORTCUT ---\r\n")
         write(ser, "Enter a short label/name (Q to cancel): ")
-        name = read_input_line(ser).strip()
+        name = read_session_line().strip()
         if not name or name.upper() in ("Q", "QUIT", "CANCEL"):
             write(ser, "Cancelled.\r\n")
             wait_for_key(ser)
@@ -2910,7 +3162,7 @@ def bridge_loop(
         write(ser, "Examples: 'view https://news.ycombinator.com', 'calc 50*12',\r\n")
         write(ser, "          'games mines 9 9 10', 'mail inbox', 'launch notepad.exe'\r\n")
         write(ser, "Command: ")
-        cmd = read_input_line(ser).strip()
+        cmd = read_session_line().strip()
         if not cmd or cmd.upper() in ("Q", "QUIT", "CANCEL"):
             write(ser, "Cancelled.\r\n")
             wait_for_key(ser)
@@ -2930,7 +3182,7 @@ def bridge_loop(
             letter = chr(ord("A") + idx)
             write(ser, f"[{letter}] {sc['name']}: {sc['command']}\r\n")
         write(ser, "\r\nEnter letter or number to remove (Q to cancel): ")
-        choice = read_input_line(ser).strip().upper()
+        choice = read_session_line().strip().upper()
         if not choice or choice in ("Q", "QUIT", "CANCEL"):
             write(ser, "Cancelled.\r\n")
             wait_for_key(ser)
@@ -2957,7 +3209,7 @@ def bridge_loop(
             mode = "MENU"
             show_main_menu(ser, use_ansi)
 
-    if getattr(ser, "_rsh_host_console", False) is True:
+    if getattr(ser, "_rsh_host_console", False) is True or getattr(ser,"_rsh_machine_settings",{}).get("start") == "cli":
         mode = "CLI"
         retro_session.active_module = "shell"
         set_terminal_activity(ser, "cli", user_label="Host")
@@ -2967,10 +3219,15 @@ def bridge_loop(
 
     while True:
         # serial, network, or local host input
-        if getattr(ser, "_rsh_host_console", False) is True:
+        if hasattr(ser,"__dict__"):
             ser.secret_input = mode == "FTP" and ftp_session is not None and ftp_session.get("submode") == "PASSWORD"
         if ser.in_waiting:
+            first_input = not getattr(ser, "_rsh_input_seen", False)
             data = ser.read(ser.in_waiting)
+            if getattr(ser,'_rsh_reconnect_pending',False):
+                ser._rsh_reconnect_pending = False
+                input_buffer = b''
+                data = b'ATM\r'
             if not data and isinstance(ser, SocketTerminal):
                 console_log(f"{name}: remote terminal disconnected.", level="yellow")
                 retro_session.state = "disconnected"
@@ -2978,7 +3235,6 @@ def bridge_loop(
                 return
 
             if data:
-                first_input = not getattr(ser, "_rsh_input_seen", False)
                 ser._rsh_input_seen = True
                 if first_input and CONSOLE and not isinstance(ser, SocketTerminal):
                     CONSOLE.update_profile(name, terminal="ACTIVE")
@@ -3122,6 +3378,8 @@ def bridge_loop(
 
                 # Global ATM: return to menu, drop any BBS connection
                 if upper == "ATM":
+                    if mode == "WARGAMES" and wargames_module:
+                        wargames_module.stop_speech(wargames_session)
                     if tcp_sock:
                         write(ser, "\r\nDisconnecting...\r\n")
                         tcp_sock.close()
@@ -3161,6 +3419,7 @@ def bridge_loop(
 
                 menu_action = None
                 if mode == "MENU" and upper in ("CLI", "SHELL", "OS"):
+                    clear_screen(ser,use_ansi)
                     mode = "CLI"
                     retro_session.cols = terminal_columns(ser)
                     retro_session.active_module = "shell"
@@ -3169,6 +3428,9 @@ def bridge_loop(
                     continue
 
                 if mode in ("SHELL", "CLI"):
+                    service = getattr(ser,'_rsh_services',None)
+                    if service and service.pending and not service.quiet:
+                        render_shell_result(service.deliver())
                     write(ser, "\r\n")
                     if upper in ("EXIT", "QUIT", "MENU"):
                         mode = "MENU"
@@ -3353,7 +3615,7 @@ def bridge_loop(
                                 menu_action = "scheduler"
                             elif upper in ("FETCH", "DOWNLOAD") or upper.startswith("FETCH ") or upper.startswith("DOWNLOAD "):
                                 menu_action = "fetch"
-                            elif upper in ("WARGAMES",):
+                            elif upper in ("WARGAMES", "WOPR"):
                                 menu_action = "wargames"
                             elif upper in ("WUMPUS", "HUNT"):
                                 menu_action = "wumpus"
@@ -3368,10 +3630,14 @@ def bridge_loop(
                             else:
                                 menu_action = MAIN_MENU_ACTIONS.get(upper)
 
+                    if menu_action == "shortcut_page":
+                        show_main_menu(ser,use_ansi,auto_flyout=False)
+                        continue
                     if menu_action is not None:
                         set_terminal_activity(ser, menu_action, default_name=name)
+                        clear_screen(ser,use_ansi)
 
-                    if menu_action in HUB_TOOL_ALIASES.values():
+                    if menu_action in HUB_TOOL_ALIASES.values() or menu_action in ("files","view","textlib"):
                         parts = line_str.split(maxsplit=1) if line_str else []
                         if len(parts) > 1 and HUB_TOOL_ALIASES.get(parts[0].upper()) == menu_action:
                             render_shell_result(retro_shell.execute(line_str))
@@ -3811,12 +4077,12 @@ def bridge_loop(
                             cmd = f"mail mailto {addr} {subj}" if subj else f"mail mailto {addr}"
                         else:
                             write(ser, "\r\nEnter email address for host mailto (Q to cancel): ")
-                            addr = read_input_line(ser).strip()
+                            addr = read_session_line().strip()
                             if not addr or addr.upper() == "Q":
                                 show_main_menu(ser, use_ansi)
                                 continue
                             write(ser, "Subject (optional): ")
-                            subj = read_input_line(ser).strip()
+                            subj = read_session_line().strip()
                             cmd = f"mail mailto {addr} {subj}" if subj else f"mail mailto {addr}"
                         try:
                             res = retro_shell.execute(cmd)
@@ -4387,6 +4653,11 @@ def bridge_loop(
                     # Delegate to notes module if available
                     if notes_module:
                         try:
+                            if line_str.isdigit() and 1 <= int(line_str) <= len(notes_session.get('notes',[])):
+                                chosen = NOTES_DIR / notes_session['notes'][int(line_str)-1]
+                                handle_shell_action(('reader',str(chosen)))
+                                refresh_notes_session()
+                                continue
                             consumed, action = notes_module.handle_input(notes_session, line_str, ser, use_ansi)
                             if consumed:
                                 # module may return ('SHOW_NOTE', lines)
@@ -4454,7 +4725,7 @@ def bridge_loop(
                                         refresh_notes_session(clip_text)
                                         continue
                                     write(ser, "\r\nSave host clipboard as a note. Name (Q=Cancel): ")
-                                    clip_title = read_input_line(ser).strip()
+                                    clip_title = read_session_line().strip()
                                     if not clip_title or clip_title.upper() == "Q":
                                         refresh_notes_session("Clipboard capture cancelled.")
                                         continue
@@ -4638,6 +4909,8 @@ def bridge_loop(
                                     else:
                                         # generic mode change
                                         mode = new_mode
+                                        if mode == "MENU":
+                                            show_main_menu(ser, use_ansi)
                                 continue
                         except Exception as e:
                             write(ser, f"\r\n*** Wargames module error: {e} ***\r\n")
@@ -4689,6 +4962,9 @@ def bridge_loop(
                         data = inbound_translator.feed(data)
                     if data:
                         ser.write(data)
+
+        if mode == "WARGAMES" and wargames_module and wargames_session:
+            wargames_module.poll(wargames_session, ser, use_ansi)
 
         # COM bridge routing: delegate polling/forwarding to the bridge module if present
         if bridge_session:

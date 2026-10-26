@@ -161,6 +161,55 @@ class HostHubIntegrationTests(unittest.TestCase):
         self.terminal.submit("calc 12 * 12")
         self.wait_for(lambda: b"\r\n144\r\n" in self.output)
 
+    def test_workshop_and_new_h_entries_work_through_host_session(self):
+        sample = self.root / 'sample.bin'
+        sample.write_bytes(b'Hello, Workshop!')
+        for command in ('ATM','6','B','1',str(sample),'0','16','Q',
+                        '1','G','1','testcapture','2','Q',
+                        '2','H','Q','3','H','*.bin',str(self.root),'Q',
+                        'CLI','calc 111 + 222'):
+            self.terminal.submit(command)
+        self.wait_for(lambda: b'\r\n333\r\n' in self.output)
+        self.assertIn(b'HEX VIEWER',self.output)
+        self.assertIn(b'48 65 6C 6C 6F',self.output)
+        self.assertIn(b'SESSION CAPTURE',self.output)
+        self.assertIn(b'SERIAL DIAGNOSTICS',self.output)
+        self.assertIn(b'FIND FILES',self.output)
+        self.assertTrue((self.root/'hub_tools/captures/testcapture.txt').exists())
+
+    def test_atm_unwinds_a_nested_file_action_prompt(self):
+        sample=self.root/'files'/'nested.txt'; sample.write_text('Nested file')
+        for command in ('ATM','3','A','1','ATM','CLI','calc 101 + 202'):
+            self.terminal.submit(command)
+        self.wait_for(lambda: b'\r\n303\r\n' in self.output)
+        self.assertIn(b'FILE MANAGER',self.output)
+
+    def test_terminal_height_menu_saves_profile_and_clears_submenu_redraws(self):
+        import json
+        self.terminal._rsh_translate_ansi=True
+        self.terminal._rsh_clear_sequence=b'\x1bv'
+        for command in ('ATM','7','C','1','2','30','','Q','CLI','calc 400 + 509'):
+            self.terminal.submit(command)
+        self.wait_for(lambda: b'\r\n909\r\n' in self.output)
+        preferences=json.loads((self.root/'settings/local/machine_preferences.json').read_text())
+        self.assertEqual(preferences['Host']['rows'],30)
+        self.assertEqual(self.terminal._rsh_rows,30)
+        self.assertIn(b'Screen Size:     80 x 30',self.output)
+        marker=b'--- TERMINAL HARDWARE SETTINGS ---'
+        position=self.output.rfind(marker)
+        self.assertIn(b'\x1bv',self.output[max(0,position-20):position])
+
+    def test_basic_listing_tool_has_separators_between_actions_help_and_prompt(self):
+        for command in ('ATM','6','E'):
+            self.terminal.submit(command)
+        self.wait_for(lambda: b'loading.\r\n\r\nChoice (or command): ' in self.output)
+        self.assertIn(b'[2] Renumber to New File\r\n\r\nQ=Back Enter=Refresh\r\n\r\nbasicprep',self.output)
+        self.assertIn(b'[step=10]\r\n\r\nWithout output:',self.output)
+        self.terminal.submit('Q')
+        self.terminal.submit('CLI')
+        self.terminal.submit('calc 7 + 8')
+        self.wait_for(lambda: b'\r\n15\r\n' in self.output)
+
     def test_host_and_remote_runtime_keep_their_context_and_share_one_scheduler(self):
         from retro_os.core import Session
         from retro_os.runtime import create_runtime

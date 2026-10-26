@@ -1,5 +1,6 @@
 """Tkinter GUI window for configuring email settings on the host desktop."""
 
+from rsh_storage import settings_dir, settings_path
 import json
 import os
 import pathlib
@@ -237,5 +238,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         run_gui(sys.argv[1])
     else:
-        cfg = pathlib.Path.home() / "RetroSerialHub" / "mail" / "mail_config.json"
+        cfg = settings_path("mail_config.json")
         run_gui(str(cfg))

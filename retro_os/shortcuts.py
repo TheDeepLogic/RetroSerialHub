@@ -1,6 +1,7 @@
 """User shortcuts manager for Retro Serial OS."""
 
 from __future__ import annotations
+from rsh_storage import settings_dir, settings_path
 
 import json
 import pathlib
@@ -12,7 +13,7 @@ class ShortcutsManager:
 
     def __init__(self, storage_path: pathlib.Path | str | None = None):
         if storage_path is None:
-            self.storage_path = pathlib.Path(__file__).parent.parent / "user_shortcuts.json"
+            self.storage_path = settings_path("user_shortcuts.json")
         else:
             self.storage_path = pathlib.Path(storage_path)
         self.shortcuts: List[Dict[str, Any]] = []

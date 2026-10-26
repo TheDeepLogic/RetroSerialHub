@@ -13,6 +13,7 @@ class HostTerminal:
     _terminal_name = "Host"
     _client_id = "host-console"
     _rsh_columns = 80
+    _rsh_rows = 24
     _rsh_input_seen = True
     secret_input = False
     port = None

@@ -9,7 +9,7 @@ class DefaultBookmarkTests(unittest.TestCase):
     def test_browser_has_the_requested_default_bookmarks(self):
         self.assertEqual(
             rsh_browser._load_bookmarks(
-                Path(__file__).resolve().parents[1] / "browser_bookmarks.json"
+                Path(__file__).resolve().parents[1] / "settings" / "defaults" / "browser_bookmarks.json"
             ),
             [
                 {
@@ -31,7 +31,7 @@ class DefaultBookmarkTests(unittest.TestCase):
 
     def test_ftp_has_the_requested_anonymous_plain_ftp_defaults(self):
         bookmarks = rsh_ftp._load_bookmarks(
-            Path(__file__).resolve().parents[1] / "ftp_bookmarks.json"
+            Path(__file__).resolve().parents[1] / "settings" / "defaults" / "ftp_bookmarks.json"
         )
         self.assertEqual(
             bookmarks,

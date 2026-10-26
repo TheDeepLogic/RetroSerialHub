@@ -76,3 +76,52 @@ class AnsiToTextTranslatorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SerialActivityTests(unittest.TestCase):
+    def test_idle_timeout_and_resume_track_input_in_any_tool(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from rsh_terminal import SerialActivityTracker
+        clock = Mock(return_value=0)
+        active, idle = Mock(), Mock()
+        terminal = SimpleNamespace(read=Mock(return_value=b""), write=Mock())
+        original = terminal.read
+        tracker = SerialActivityTracker(terminal, 300, active, idle, clock)
+        tracker.poll()
+        idle.assert_not_called()
+        terminal.read()
+        active.assert_not_called()
+        original.return_value = b"A"
+        terminal.read(1)
+        active.assert_called_once()
+        clock.return_value = 299
+        tracker.poll()
+        idle.assert_not_called()
+        terminal.write(b"hub output")
+        clock.return_value = 300
+        tracker.poll()
+        idle.assert_called_once()
+        tracker.poll()
+        idle.assert_called_once()
+        terminal.read(1)
+        self.assertEqual(active.call_count, 2)
+        clock.return_value = 599
+        tracker.poll()
+        self.assertTrue(tracker.active)
+        tracker.close()
+        self.assertIs(terminal.read, original)
+
+    def test_timeout_can_be_disabled(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from rsh_terminal import SerialActivityTracker
+        clock = Mock(return_value=0)
+        idle = Mock()
+        terminal = SimpleNamespace(read=Mock(return_value=b"A"))
+        tracker = SerialActivityTracker(terminal, 0, Mock(), idle, clock)
+        terminal.read()
+        clock.return_value = 100000
+        tracker.poll()
+        idle.assert_not_called()
+        tracker.close()

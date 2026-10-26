@@ -39,10 +39,16 @@ WELCOME_BANNER = "Welcome to the Retro Serial Hub"
 #   ansi_clear_sequence: Bytes sent to clear the screen on translated terminals
 #   ansi_home_clears_screen: Treat cursor-home as a clear for screen redraws
 #   columns: 40 or 80 column terminal layout
+#   rows: Terminal height, default 24 (16-100); can be saved per profile in Terminal Settings
+#   idle_timeout_seconds: Override SERIAL_IDLE_TIMEOUT_SECONDS for this machine
 #
 # Example configurations are provided below for common vintage systems.
 # Modify the port assignments and parameters to match your setup.
 # ============================================================================
+
+# Seconds without received serial input before showing Waiting / Inactive.
+# Set to 0 to disable; profiles may override with idle_timeout_seconds.
+SERIAL_IDLE_TIMEOUT_SECONDS = 300
 
 SERIAL_CONFIGS = {
     "APPLE2": {
@@ -99,7 +105,7 @@ SERIAL_CONFIGS = {
 # Binding to 0.0.0.0 allows other devices on the LAN to connect; do not expose
 # these unauthenticated, unencrypted terminal sessions directly to the Internet.
 # Every new source IP also requires approval at the host console, or an entry
-# in telnet_allowlist.json. Approval applies to all profiles. Serial is exempt.
+# in settings/local/telnet_allowlist.json. Approval applies to all profiles. Serial is exempt.
 TELNET_SERVER_CONFIGS = {
     "APPLE2": {"host": "0.0.0.0", "port": 6400},
     "IBM": {"host": "0.0.0.0", "port": 6401},
@@ -112,7 +118,7 @@ TELNET_SERVER_CONFIGS = {
 # ============================================================================
 # Default bulletin board systems (BBSs) used to seed the saved directory.
 # The hub's Bulletin Boards manager can edit or remove these entries; saved
-# changes are stored in bbs_directory.json and override these defaults.
+# changes are stored in settings/local/bbs_directory.json and override these defaults.
 # Each default BBS needs corresponding entries in BBSS, IPS, and PORTS.
 # The entries must be in the same order across all three lists.
 #
@@ -307,3 +313,12 @@ PORTS = [
     23,     # TRS: Level 29 BBS
     23      # TRS: The Keep BBS
 ]
+
+# Joshua narration uses eSpeak NG on the host (Windows, macOS, or Linux).
+WOPR_SPEECH_ENABLED = True
+WOPR_SPEECH_RATE = 145      # Words per minute (80-450)
+WOPR_SPEECH_VOLUME = 85     # 0-100
+WOPR_SPEECH_VOICE = "en-us" # eSpeak language/variant, e.g. en-us or en-us+m3
+WOPR_SPEECH_PITCH = 25      # 0-99; lower is deeper, default eSpeak pitch is 50
+WOPR_SPEECH_GAP = 3         # Extra word spacing, units of about 10 ms
+WOPR_SPEECH_EXECUTABLE = "" # Empty auto-detects; otherwise full path to espeak-ng

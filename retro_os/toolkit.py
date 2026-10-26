@@ -1,8 +1,10 @@
 """Persistent accessories and shared-file tools, scoped to a terminal session."""
 
 from __future__ import annotations
+from rsh_storage import settings_dir, settings_path
 
 import calendar
+import fnmatch
 import copy
 import datetime as dt
 import json
@@ -262,39 +264,125 @@ class ContactsTool:
 
 
 class FileTools:
-    HELP = ("fileman [ls | cd <folder/#> | info <file/#> | mkdir <folder> | "
+    HELP = ("fileman [ls | d/drives | b/parent | h/home | cd <folder/#> | info <file/#> | mkdir <folder> | "
             "rename <file/#> <name> | copy <file/#> <destination> | move <file/#> <destination> | "
-            "view <file/#> | send <file/#> [x|y|ascii]]\nPaths stay within the shared files folder.")
+            "view <file/#> | send <file/#> [x|y|ascii] | filter <pattern> | favorites | "
+            "favorite add/go/delete <name> | mark <file/#> | unmark | copy/move marked <folder>]\nHost paths supported. D=drives/root, B=parent, H=shared files.")
     ARCHIVE_HELP = ("archive [list | open <ZIP file> | members | extract <member #|all> [folder]]\n"
                     "Extraction creates files without replacing existing files.")
 
-    def __init__(self, root, context):
+    def __init__(self, root, context, allow_host=True):
+        self.allow_host = allow_host
         self.root = pathlib.Path(root).resolve()
         self.cwd, self.context = self.root, context
         self.entries = []
         self.archive = None
+        self.filter_pattern = '*'
+        self.marked = set()
+        self.browser_store = JsonRecords(context.fs.get('tool_data', settings_dir(self.root.parent)) / 'browser_preferences.json')
+        self.last_destination = next((r['path'] for r in self.browser_store.load() if r.get('kind') == 'destination'), '')
 
     def path(self, value, numbered=True):
         if numbered and value.isdigit() and 1 <= int(value) <= len(self.entries):
             target = self.entries[int(value) - 1]
         else:
-            target = self.cwd / value
+            target = self.cwd / pathlib.Path(value).expanduser()
         resolved = target.resolve()
-        if not resolved.is_relative_to(self.root):
+        if not self.allow_host and not resolved.is_relative_to(self.root):
             raise ValueError("Choose a path inside the shared files folder.")
         return resolved
 
+    def browse_entries(self, extensions=None):
+        self.root.mkdir(parents=True, exist_ok=True)
+        entries = []
+        for path in self.cwd.iterdir():
+            try:
+                if path.is_dir() or (path.is_file() and (extensions is None or path.suffix.lower() in extensions)
+                                     and fnmatch.fnmatchcase(path.name.casefold(), self.filter_pattern.casefold())):
+                    entries.append(path)
+            except OSError:
+                continue
+        self.entries = sorted(entries, key=lambda p: (not p.is_dir(), p.name.casefold()))
+        return self.entries
+
     def listing(self):
         self.root.mkdir(parents=True, exist_ok=True)
-        self.entries = sorted(self.cwd.iterdir(), key=lambda p: (not p.is_dir(), p.name.casefold()))
-        lines = [f"Shared files /{self.cwd.relative_to(self.root).as_posix().strip('.')}"]
+        self.browse_entries()
+        lines = [f"Directory: {self.cwd}", f"Filter: {self.filter_pattern}"]
         for index, path in enumerate(self.entries, 1):
             kind = "<DIR>" if path.is_dir() else f"{path.stat().st_size} B"
-            lines.append(f"{index:3} {kind:>10} {path.name}")
+            lines.append(f"{index:3} {kind:>10} {path.name}" + (" [marked]" if path in self.marked else ""))
         return "\n".join(lines + ([] if self.entries else ["(empty)"]))
 
     def command(self, args):
         action = args[0].lower() if args else "ls"
+        if action == 'filter':
+            self.filter_pattern = args[1] if len(args) > 1 and args[1] else '*'
+            return self.listing()
+        if action == 'mark' and len(args) == 2:
+            path = self.path(args[1])
+            if path in self.marked:
+                self.marked.remove(path)
+            else:
+                self.marked.add(path)
+            return self.listing()
+        if action == 'unmark':
+            self.marked.clear()
+            return self.listing()
+        if action in ('favorites', 'favorite'):
+            rows = [r for r in self.browser_store.load() if r.get('kind') == 'favorite']
+            if len(args) == 1:
+                return '\n'.join(f"{r['name']}: {r['path']}" for r in rows) or 'No folder favorites.'
+            operation = args[1].lower()
+            if operation == 'add' and len(args) >= 3:
+                path = self.path(args[3], numbered=False) if len(args) > 3 else self.cwd
+                if not path.is_dir():
+                    raise ValueError('Choose a directory.')
+                def save(records):
+                    records[:] = [r for r in records if not (r.get('kind') == 'favorite' and r['name'].casefold() == args[2].casefold())]
+                    records.append({'kind':'favorite','name':args[2],'path':str(path)})
+                self.browser_store.change(save)
+                return 'Folder favorite saved.'
+            if operation in ('go','delete') and len(args) == 3:
+                row = next((r for r in rows if r['name'].casefold() == args[2].casefold()), None)
+                if row is None:
+                    raise ValueError('Favorite not found.')
+                if operation == 'go':
+                    return self.command(['cd', row['path']])
+                self.browser_store.change(lambda records: records.remove(row))
+                return 'Favorite deleted.'
+            return 'favorite [add <name> [folder] | go <name> | delete <name>]'
+        if action in ('copy','move') and len(args) >= 2 and args[1] == 'marked':
+            if not self.marked:
+                raise ValueError('Mark at least one item first.')
+            destination = args[2] if len(args) > 2 else self.last_destination
+            if not destination or not self.path(destination, numbered=False).is_dir():
+                raise ValueError('Choose a destination directory.')
+            folder = self.path(destination, numbered=False)
+            paths = sorted(self.marked)
+            for path in paths:
+                if not path.exists():
+                    raise ValueError("A marked item no longer exists; refresh and mark it again.")
+                if action == "copy" and path.is_dir() and any(p.is_symlink() or (hasattr(p,"is_junction") and p.is_junction()) for p in path.rglob("*")):
+                    raise ValueError("A marked directory contains linked entries; copy individual files instead.")
+                if path == self.root or path == pathlib.Path(path.anchor) or (folder / path.name).exists() or folder.is_relative_to(path):
+                    raise ValueError('Batch destination conflicts with a source or existing item.')
+                if any(other != path and path.is_relative_to(other) for other in paths):
+                    raise ValueError('Do not mark both a folder and its contents.')
+            for path in paths:
+                self.command([action, str(path), str(folder)])
+            self.marked.clear()
+            return self.listing()
+        if action in ('copy','move') and len(args) == 2 and self.last_destination:
+            args = [*args, self.last_destination]
+        if action in ("d", "drives"):
+            from rsh_files import _root_directories
+            self.entries = _root_directories()
+            return "Drives / filesystem roots:\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(self.entries, 1)) + "\nUse cd <number> to open."
+        if action in ("b", "parent"):
+            return self.command(["cd", ".."])
+        if action in ("h", "home"):
+            return self.command(["cd", str(self.root)])
         if action in ("ls", "list"):
             return self.listing()
         if action == "help":
@@ -312,11 +400,12 @@ class FileTools:
             return self.listing()
         if action == "info":
             data = target.stat()
-            return f"{target.relative_to(self.root)}\nType: {'Directory' if target.is_dir() else 'File'}\nSize: {data.st_size} bytes\nModified: {dt.datetime.fromtimestamp(data.st_mtime):%Y-%m-%d %H:%M:%S}"
+            return f"{target}\nType: {'Directory' if target.is_dir() else 'File'}\nSize: {data.st_size} bytes\nModified: {dt.datetime.fromtimestamp(data.st_mtime):%Y-%m-%d %H:%M:%S}"
         if action in ("rename", "copy", "move") and len(args) == 3:
-            if target == self.root:
-                raise ValueError("Choose an item below the shared files root.")
+            if target == self.root or target == pathlib.Path(target.anchor):
+                raise ValueError("Choose an item other than the shared folder or filesystem root.")
             destination = self.path(args[2], numbered=False)
+            remembered_destination = destination if destination.is_dir() else destination.parent
             if action != "rename" and destination.is_dir():
                 destination = destination / target.name
             if destination.exists():
@@ -333,8 +422,16 @@ class FileTools:
                     shutil.copy2(target, destination)
             else:
                 shutil.move(str(target), str(destination))
+                if target in self.marked:
+                    self.marked.remove(target)
+                    self.marked.add(destination)
                 if self.cwd.is_relative_to(target):
                     self.cwd = destination / self.cwd.relative_to(target)
+            self.last_destination = str(remembered_destination)
+            def remember(records):
+                records[:] = [r for r in records if r.get('kind') != 'destination']
+                records.append({'kind':'destination','path':self.last_destination})
+            self.browser_store.change(remember)
             return self.listing()
         if action in ("view", "send"):
             if not target.is_file():
@@ -342,7 +439,8 @@ class FileTools:
             if action == "view":
                 command = "view"
             else:
-                protocol = args[2].lower() if len(args) > 2 else "x"
+                preferred = getattr(getattr(self.context.host_env,'terminal',None),'_rsh_transfer_mode','XMODEM')
+                protocol = args[2].lower() if len(args) > 2 else {'XMODEM':'x','YMODEM':'y','ASCII':'ascii'}.get(preferred,'x')
                 if protocol not in ("x", "y", "ascii"):
                     raise ValueError("Transfer protocol: x, y, or ascii.")
                 command = {"x": "xsend", "y": "ysend", "ascii": "asend"}[protocol]
@@ -386,7 +484,7 @@ class FileTools:
                     if member_path.is_absolute() or '..' in member_path.parts or ':' in item.filename or stat.S_ISLNK(item.external_attr >> 16):
                         raise ValueError(f"Unsafe ZIP entry: {item.filename}")
                     target = (destination / str(member_path)).resolve()
-                    if not target.is_relative_to(destination) or not target.is_relative_to(self.root):
+                    if not target.is_relative_to(destination) or (not self.allow_host and not target.is_relative_to(self.root)):
                         raise ValueError(f"ZIP entry escapes destination: {item.filename}")
                     if target in seen or (target.exists() and not (item.is_dir() and target.is_dir())):
                         raise ValueError(f"Destination already exists or is duplicated: {item.filename}")
@@ -403,5 +501,5 @@ class FileTools:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         with archive.open(item) as source, target.open('xb') as output:
                             shutil.copyfileobj(source, output)
-                return f"Extracted {len(selected)} entries into {destination.relative_to(self.root)}."
+                return f"Extracted {len(selected)} entries into {destination}."
         return self.ARCHIVE_HELP

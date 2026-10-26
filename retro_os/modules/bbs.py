@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rsh_storage import settings_path
+
 import json
 import pathlib
 import socket
@@ -11,10 +13,7 @@ _context = None
 
 
 def _get_entries():
-    candidates = [
-        pathlib.Path("bbs_directory.json"),
-        pathlib.Path(__file__).parent.parent.parent / "bbs_directory.json",
-    ]
+    candidates = [settings_path("bbs_directory.json")]
     for p in candidates:
         if p.exists():
             try:

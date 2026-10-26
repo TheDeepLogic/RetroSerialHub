@@ -1,10 +1,11 @@
 """Persistent BBS directory storage."""
 
+from rsh_storage import settings_dir, settings_path
 import json
 from pathlib import Path
 
 
-BBS_DIRECTORY_FILE = Path(__file__).with_name("bbs_directory.json")
+BBS_DIRECTORY_FILE = settings_path("bbs_directory.json")
 
 
 def validate_entries(entries):

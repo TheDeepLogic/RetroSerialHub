@@ -1,6 +1,7 @@
 """Per-session keyboard shortcut profiles stored as JSON."""
 
 from __future__ import annotations
+from rsh_storage import settings_dir, settings_path
 
 import json
 import pathlib
@@ -15,7 +16,7 @@ DEFAULT_PROFILES = {
 
 class KeyboardProfiles:
     def __init__(self, path=None):
-        self.path = pathlib.Path(path) if path else pathlib.Path(__file__).with_name("keyboard_profiles.json")
+        self.path = pathlib.Path(path) if path else settings_path("keyboard_profiles.json")
         self._lock = threading.RLock()
         self._profiles = self._load()
 

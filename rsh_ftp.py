@@ -1,5 +1,6 @@
 """Interactive FTP/explicit-FTPS directory browsing and downloads."""
 
+from rsh_storage import settings_dir, settings_path
 import ftplib
 import json
 import os
@@ -10,7 +11,7 @@ from pathlib import Path
 from rsh_terminal import clear_terminal_screen, terminal_columns
 
 
-DEFAULT_BOOKMARKS_PATH = Path(__file__).resolve().parent / "ftp_bookmarks.json"
+DEFAULT_BOOKMARKS_PATH = settings_path("ftp_bookmarks.json")
 
 
 def _write(ser, text):

@@ -1,6 +1,6 @@
 Image: Retro Serial Hub
 
-Retro Serial Hub v2.4
+Retro Serial Hub v2.5
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -102,6 +102,221 @@ Installation
 5. Run the hub:
    python RETRO_SERIAL_HUB.py
 
+v2.5 tools and session guide
+
+Menu map
+
+The terminal menu, host activity monitor, and navigation help share one catalogue.
+Each category has at most eight entries, A-H. Workshop is section 6 and System
+is now section 7. Existing command names remain available. Shortcuts show eight entries per page;
+use < and > to change pages.
+
+| Location | New entry |
+|---|---|
+| Communications G | Session Capture |
+| Host Connectivity H | Serial Diagnostics |
+| Files & Media H | Find Files |
+
+Workshop's initial tools:
+
+| Key | Tool | What it does |
+|---|---|---|
+| A | Disk Image Inspector | Image size, size hints, raw sector inspection and extraction |
+| B | Hex Viewer | Bounded byte-range view with hex offsets and printable ASCII |
+| C | Checksums | SHA-256, SHA-1, MD5, or CRC-32, streamed for large files |
+| D | Text Converter | Strict character-set conversion, LF/CRLF/CR, upper/lower case |
+| E | BASIC Listing Tools | Validate numbered ASCII listings and renumber common line references |
+| F | Split / Join Files | Chunk a file, then verify sizes and SHA-256 before reassembly |
+| G | Binary / Text Encoding | Hex or Base64 encoding and decoding |
+| H | Compare Files | Stream a comparison and report the first differing byte |
+
+Workshop creates new outputs and refuses to replace existing files. Conversion,
+encoding, and BASIC operations accept source files up to 8 MiB; raw sector
+extraction is limited to 16 MiB per operation. Hashes, comparisons, splitting, and
+joining stream data. Inspecting a disk image does not identify or modify its
+filesystem. Raw sector extraction is not ProDOS/CP/M/DOS filesystem extraction.
+BASIC preparation works on text listings; it does not tokenize programs or convert
+between dialects. Inspect dialect-specific constructs before loading a result.
+Split parts need a compatible reassembly tool on the destination machine.
+
+Browsing and finding files
+
+File Manager, File Transfers, Archive Browser, Document Viewer, and Text Library
+use one browser. Audio uses the same directory/filter/favorites model with audio
+filtering and playback controls. The current directory and filename filter are
+shared within a session; folder favorites persist across sessions. Full host
+filesystem access remains available.
+
+- A number opens a directory or a file's action menu.
+- D lists drives/root, B opens the parent, H opens the shared folder, G accepts a path.
+- F changes the filename filter; * clears it. The current filter is displayed.
+- V manages folder favorites, M manages marked items, O opens other operations.
+- A selected file offers relevant view/play/image/ZIP actions, plus copy, move,
+  rename, transfer, and marking.
+- Copy/move accepts = to reuse the remembered destination. Mark multiple items
+  to copy/move a batch; conflicting destinations are rejected before starting.
+- Other operations include folder creation, upload, protocol selection, search,
+  opening a web URL, and reading notifications.
+
+Find Files accepts a filename wildcard and a host folder. Plain text searches are
+also supported (manual matches names containing that text). Searches stop after
+200 results or 5 seconds and report that limit, so narrow the folder if needed.
+Inaccessible directories are skipped and counted. Results use the same file actions.
+
+Tool screens separate action lists, navigation controls, usage syntax, information,
+and input prompts with blank rows. Page budgets reserve those rows so the added
+spacing does not push results off the configured screen.
+
+All generic tool menus show at most eight actions per page. N/B changes action
+pages when necessary. Q goes back, Enter refreshes ordinary menus, and empty
+prompted arguments cancel. ATM unwinds the standard nested tool menus to the
+main menu. Reader/game-specific controls are shown on their own screens.
+
+Reading and notes
+
+The reader supports Enter=next, B=back, F=find, N=next match, M=bookmark,
+R=recall bookmark, G=page, and Q=back. Position and bookmark are saved by file
+and terminal width. The Text Library and note selections open this reader.
+Files selected for viewing use the host's existing extraction support.
+
+In Notepad, O opens edit, rename, export, and search operations. E<number> edits
+an existing note. The line editor accepts replace <line> <text>, append <text>,
+delete <line>, save, N/B for preview pages, and Q to cancel changes. Quotes in
+replacement text are retained. R<number> renames a note, X<number> exports to a new
+host path, F text searches names and content, and ALL resets the search.
+Large content searches inspect note text up to 1 MiB, while filenames are always searched.
+Clipboard creation/copy and the original read/create/delete operations remain.
+
+Audio
+
+The player stays compact. Queue/playlists opens queue editing (remove/reorder),
+repeat, shuffle, and Radio / Music Folder. Save radio stations by name and save a
+preferred music folder. Browse Files opens the saved music folder when one exists.
+Stop playback before removing or reordering the current track;
+shuffle preserves that track and randomizes the upcoming queue.
+
+CLI examples:
+
+text
+audio station add "Retro Radio" "https://example.org/stream"
+audio station play "Retro Radio"
+audio musicfolder "F:/Music"
+audio remove 3
+audio reorder 4 2
+audio repeat on
+audio shuffle
+
+
+Capture, diagnostics, notifications
+
+Session Capture records readable outgoing terminal text, including locally echoed
+conversation, to hub_tools/captures/. Control sequences are translated/removed;
+raw binary transfers and secret input/output are excluded. Captures can be stopped,
+listed, viewed, and exported. It does not replay captured keystrokes or commands.
+
+Serial Diagnostics lists connected sessions, byte counters, last-input age,
+settings and modem signals where supported, recent ASCII/hex traffic, and active
+transfer progress. The host can request cancellation using
+diagnostics cancel <terminal-name-or-port>. It never opens a second connection
+to a busy port or toggles modem control lines automatically.
+
+Messages, reminders, scheduled broadcasts, and text-file deliveries are queued.
+They are not injected into another terminal's prompts or binary transfer stream.
+The main menu shows a pending count; Connected Terminals N or notifications
+reads them. At a CLI command boundary, pending messages are shown unless quiet
+mode is enabled. notifications quiet on/off changes quiet mode for that session.
+machine quiet on/off also saves the default. Connected Terminals shows input age
+and queued counts. The host status panel shows transfer byte/retry progress.
+
+Transfers
+
+XMODEM supports checksum and CRC send negotiation, fragmented reads, duplicate
+block acknowledgment, bounded waits/retries, and host-requested cancellation.
+YMODEM sends CRC headers/data and completes the end-of-batch handshake. Progress
+is host-side and is excluded from the protocol byte stream.
+
+XMODEM does not carry the original length. Received final-block padding is
+preserved by default; trailing 0x1A bytes are never blindly removed. For an exact
+binary length, use:
+
+text
+xrecv "F:/Incoming/program.bin" 12345
+
+
+A completed receive is published to its destination only after successful receipt.
+Failed receives keep a uniquely named .part file; inspect or remove it yourself.
+Existing destination files are not replaced. Hardware testing with your vintage
+terminal software is still necessary alongside the automated protocol tests.
+
+Machine preferences and launch presets
+
+Terminal Settings includes transfer protocol, starting screen, reconnect behavior,
+and idle timeout. Host Settings > Machine Preferences exposes all saved settings.
+Width, uppercase mode, character pacing, and ANSI preferences remain available.
+
+text
+machine list
+machine pace_ms 5
+machine caps on
+machine columns 40
+machine protocol YMODEM
+machine start menu
+machine reconnect menu
+machine idle_seconds 300
+machine clear_sequence 1b76
+
+
+Clear sequences are hex bytes. reconnect resume retains the active screen;
+reconnect menu returns to a fresh menu on input after the serial idle timeout.
+An idle timeout is inferred inactivity, not proof that a cable was disconnected.
+Starting-screen changes apply on the next session. Preferences live in
+settings/local/machine_preferences.json and are separate from the existing width/ANSI
+preference files; setting width through the menus/CLI keeps them in agreement.
+
+Host Applications > Launch Presets saves a name, application, working directory,
+and background/terminal/keyboard launch mode. The CLI also accepts arguments:
+
+text
+presets add "Build BASIC" terminal "F:/Retro/Project" python build.py
+presets run "Build BASIC"
+
+
+New preparation/session tools use Python's standard library. Existing optional
+viewer, audio, keyboard, and speech dependencies remain unchanged.
+
+
+Terminal height, stable menu footers, and console borders
+
+System (7) > Terminal Settings (C) > Screen Size (1) has width and height controls.
+Height defaults to 24 rows and is saved per profile. Set it to the actual
+terminal height (16-100); the hub does not guess a vintage terminal's dimensions.
+The CLI equivalents are machine rows 25 or height 25. rows: 24 can also be
+supplied in a serial profile in config.py before a saved preference exists.
+
+At both 40 and 80 columns, the main menu retains a blank row between the version
+and Shortcuts. Its footer ends at the configured last row, with padding above the
+status line so selecting a short category does not move the prompt. At both widths
+there is a blank row between the ATM note and the input prompt. On a 24-row
+screen, the status/ATM/prompt rows are 21/22/24 at both widths (row 23 is blank). Shorter screens page active entries
+using < and > when needed. Submenu entry/redraw uses the configured clearing
+sequence before displaying new work.
+
+The modern host dashboard uses Unicode box borders when stdout's encoding can
+represent them. This is independent of the vintage terminal's character set;
+serial/Telnet menus retain their existing ASCII output. Windows, macOS, and Linux
+Unicode-capable terminals need a font with box-drawing glyphs. An incompatible
+output encoding automatically uses ASCII borders. Set RSH_ASCII_BORDERS=1
+before starting the hub to force the old borders if your font or terminal needs it.
+
+JSON settings and personal data
+
+JSON files now live in settings/local/ (ignored by Git). Public starter
+templates live in settings/defaults/ and retain supplied bookmarks. Missing
+files are seeded from templates or generated as needed. Existing root, mail/,
+hub_tools/, and retro_os/ JSON migrates automatically; conflicting old copies
+are retained in settings/local/legacy/. Back up local/ privately and publish
+only deliberately sanitized templates. config.py remains startup configuration.
+
 Configuration
 
 All configuration is centralized in config.py. This is the first file you
@@ -125,7 +340,8 @@ SERIAL_CONFIGS = {
         "translate_ansi": False,  # Optional: translate incoming ANSI/VT100 for a non-ANSI terminal
         "ansi_clear_sequence": b"\x0c",  # Replacement bytes for supported clear requests
         "ansi_home_clears_screen": False, # Optional: treat cursor-home as a screen clear
-        "columns": 80                    # 40- or 80-column terminal layout
+        "columns": 80,                   # 40- or 80-column terminal layout
+        "rows": 24                       # Terminal height
     },
     # Add more computers as needed...
 }
@@ -272,7 +488,7 @@ AI Assistant Configuration (Optional)
 
 To enable the AI Assistant feature:
 
-1. Create ai_config.json in the project directory:
+1. Edit settings/local/ai_config.json:
    {
        "api_key": "your-openai-api-key-here",
        "model": "gpt-5.6-terra"
@@ -318,19 +534,21 @@ Main Menu
 The accordion main menu groups features into:
 
 * [1] Communications: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client,
-  Electronic Mail, and Connected Terminals (list, message, or deliver a text file)
+  Electronic Mail, Connected Terminals, Session Capture, and WOPR
 * [2] Host Connectivity: Host Applications, Launch Host App, Keyboard Bridge,
-  COM Port Bridge, Host Terminal, System Monitor & Media, and Host Printing
+  COM Port Bridge, Host Terminal, System Monitor & Media, Host Printing, and Serial Diagnostics
 * [3] Files & Media: File Manager, File Transfers, Archive Browser, Text Library,
-  Document Viewer, ASCII Image Viewer, Audio Player
+  Document Viewer, ASCII Image Viewer, Audio Player, Find Files
 * [4] Games: Minesweeper, Solitaire, Lunar Lander, Hunt the Wumpus, Blackjack,
-  Mastermind, Word Guess, and Star Trek. WarGames remains available with the WARGAMES CLI command.
+  Mastermind, Word Guess, and Star Trek. WOPR is in Communications H or available through WARGAMES.
 * [5] Accessories: Notepad, Calendar, Calculator, Address Book, Unit Converter,
   Weather & News, AI Assistant, LOGO
-* [6] System: Command Shell, Task Scheduler, Terminal Settings, Keyboard Profiles,
+* [6] Workshop: Disk Image Inspector, Hex Viewer, Checksums, Text Converter,
+  BASIC Listing Tools, Split / Join Files, Binary / Text Encoding, Compare Files.
+* [7] System: Command Shell, Task Scheduler, Terminal Settings, Keyboard Profiles,
   Help & User Guide, Welcome Banner, Host Settings, and remote-client Disconnect
 
-Enter a section number (0-6) to expand it and an item letter to launch it. At 80
+Enter a section number (0-7) to expand it and an item letter to launch it. At 80
 columns, the menu is arranged in three columns; at 40 columns, it uses a compact
 layout. The Keyboard option types into the focused host
 application. Enter, Tab, Backspace, and Escape are supported. The configured
@@ -364,14 +582,16 @@ Type hub commands directly at Host>, just as in the terminal CLI:
 
 Other machines can reply using msg to Host <text>. ATM opens the regular menus;
 CLI returns to commands. PgUp/PgDn scroll host output, Up/Down recall commands,
-and clear clears the output pane. Blank Enter responds to prompts; Ctrl+X is
+and clear clears output and normally expands the activity monitor.
+Use monitor collapse to keep it compact across clear; monitor auto (or
+monitor expand) restores automatic behavior. This lasts until changed or restart. Blank Enter responds to prompts; Ctrl+X is
 forwarded to the active session. Host commands work with Telnet listeners off.
 The allow/deny/pending approval commands remain local host-console controls.
 
 New Accessories and Media Tools
 
 Calendar saves appointments using the host's local clock. Timed
-reminders broadcast to connected terminals; today's and overdue appointments
+reminders are queued for connected terminals; today's and overdue appointments
 also appear when connecting. Use calendar month, calendar agenda, or
 calendar add YYYY-MM-DD HH:MM "Title". Use calendar done <id> to complete one.
 
@@ -381,11 +601,12 @@ convert 72 F C; convert 1 mi km; convert FF hex bin.
 Address Book stores names, email, phone, BBS addresses, and notes. Use contacts
 add "Name", contacts set <id> email user@example.org, contacts mail <id> to
 compose a host draft, or contacts connect <id> to open a saved BBS destination.
-Appointments and contacts are shared across terminals in hub_tools/.
+Appointments and contacts are shared across terminals in settings/local/.
 
 File Manager browses files, creates folders, renames, copies, moves, views, and
 transfers files. Archive Browser lists ZIP members and extracts selected files
-or all contents. Both stay inside files/ and do not replace existing files.
+or all contents. Both can browse accessible host folders outside files/; existing output files
+are not replaced.
 Try fileman ls or archive open software.zip; each command accepts help.
 
 Audio Player plays through host speakers with a shared queue, playback controls,
@@ -397,8 +618,7 @@ radio, additional formats, and playback on other platforms.
 Terminal Games
 
 The Games menu contains Minesweeper, Solitaire, Lunar Lander, Hunt the Wumpus,
-Blackjack, Mastermind, Word Guess, and Star Trek. WarGames is still available by typing WARGAMES at
-the CLI. Blackjack uses H to hit, S to stand, N to start a new hand, and Q to
+Blackjack, Mastermind, Word Guess, and Star Trek. WOPR is available in Communications H or through WARGAMES. Blackjack uses H to hit, S to stand, N to start a new hand, and Q to
 quit. Other games display their available single-key actions at their prompt.
 
 The ANSI Translation option toggles translating incoming ANSI/VT100 BBS
@@ -578,6 +798,23 @@ Garbled Text
 * Try a different cable
 
 Release Notes
+
+v2.5
+
+* Star Trek shows command examples, course directions, and resupply guidance
+  on launch, with terminal output paged to the configured screen size.
+* Consolidated JSON under settings/: public defaults/ templates and ignored
+  local/ personal data, with automatic migration from legacy locations.
+- Added Workshop as category 6 with disk-image inspection, hex viewing, checksums, text conversion, BASIC listing preparation, split/join, hex/Base64 encoding, and file comparison. System moves to category 7; categories retain at most eight A–H entries.
+- Unified host-file browsing across file tools, with drives/root, parent folders, direct paths, favorites, filters, marking, and batch copy/move. Audio can select files anywhere the host can access. Added Find Files under Files & Media H.
+- Added searchable, resumable reading and bookmarks, plus note editing, renaming, exporting, and content search.
+- Simplified the audio player menu; added queue editing, repeat/shuffle, named radio stations, and a remembered music folder.
+- Added Session Capture under Communications G and Serial Diagnostics under Host Connectivity H, including transfer progress and host cancellation.
+- Improved XMODEM/YMODEM negotiation, retries, fragmented reads, and completion handling. Receives preserve binary padding, avoid overwriting files, and publish completed files only after success.
+- Added serial inactivity timeouts and cleared stale menu selections when a port becomes active again. Queued notifications keep messages out of prompts and transfer streams, with optional quiet mode.
+- Added saved machine preferences and host application launch presets. Terminal height defaults to 24 rows per profile; menus keep the footer stable, clear submenus, and reserve readable spacing in 40- and 80-column layouts.
+- Updated the host dashboard with Unicode borders and ASCII fallback, a single color-coded Connections list, and an activity monitor that collapses during host interaction to give output more room. clear normally restores the expanded layout; monitor collapse pins it compact and monitor auto restores automatic behavior.
+- Enhanced the WOPR/Joshua interaction while retaining the IMSAI/CP/M dialer, with movie-style displays, gentler pacing, and optional synchronized host speech. Open it from Communications H or wargames.
 
 v2.4
 

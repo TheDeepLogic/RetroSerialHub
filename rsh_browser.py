@@ -1,5 +1,6 @@
 """Text-first web browser for serial terminals."""
 
+from rsh_storage import settings_dir, settings_path
 from html.parser import HTMLParser
 import json
 import os
@@ -16,7 +17,7 @@ PAGE_LINES = 20
 LINE_WIDTH = 76
 NARROW_PAGE_LINES = 14
 MAX_RESPONSE_BYTES = 1024 * 1024
-DEFAULT_BOOKMARKS_PATH = Path(__file__).resolve().parent / "browser_bookmarks.json"
+DEFAULT_BOOKMARKS_PATH = settings_path("browser_bookmarks.json")
 BLOCK_TAGS = {
     "address", "article", "blockquote", "dd", "div", "dl", "dt", "fieldset",
     "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",

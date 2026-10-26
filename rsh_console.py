@@ -12,90 +12,11 @@ import unicodedata
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-VERSION = "2.4"
+VERSION = "2.5"
 
-MENU_SECTIONS = [
-    (
-        "1",
-        "COMMUNICATIONS",
-        [
-            ("A", "Bulletin Boards", "BBS", "bbs"),
-            ("B", "Telnet Terminal", "Telnet", "telnet"),
-            ("C", "Web Browser", "Browser", "browser"),
-            ("D", "FTP Client", "FTP", "ftp"),
-            ("E", "Electronic Mail", "Mail", "mail"),
-            ("F", "Connected Terminals", "Terminals", "terminals"),
-        ],
-    ),
-    (
-        "2",
-        "HOST CONNECTIVITY",
-        [
-            ("A", "Host Applications", "Apps", "apps"),
-            ("B", "Launch Host App", "Launch", "launch"),
-            ("C", "Keyboard Bridge", "Keyboard", "keyboard"),
-            ("D", "COM Port Bridge", "COM Bridge", "com_bridge"),
-            ("E", "Host Terminal", "Terminal", "host_terminal"),
-            ("F", "Sys Monitor & Media", "Sys/Media", "host_media"),
-            ("G", "Host Printing", "Print", "print"),
-        ],
-    ),
-    (
-        "3",
-        "FILES & MEDIA",
-        [
-            ("A", "File Manager", "File Manager", "fileman"),
-            ("B", "File Transfers", "Transfers", "files"),
-            ("C", "Archive Browser", "Archives", "archive"),
-            ("D", "Text Library", "TextLib", "text"),
-            ("E", "Document Viewer", "Viewer", "view"),
-            ("F", "ASCII Image Viewer", "ASCII Art", "ascii_viewer"),
-            ("G", "Audio Player", "Audio Player", "audio"),
-        ],
-    ),
-    (
-        "4",
-        "GAMES",
-        [
-            ("A", "Minesweeper", "Mines", "mines"),
-            ("B", "Solitaire", "Solitaire", "solitaire"),
-            ("C", "Lunar Lander", "Lander", "lander"),
-            ("D", "Hunt the Wumpus", "Wumpus", "wumpus"),
-            ("E", "Blackjack", "Blackjack", "blackjack"),
-            ("F", "Mastermind", "Mastermind", "mastermind"),
-            ("G", "Word Guess", "Word Guess", "wordguess"),
-            ("H", "Star Trek", "Star Trek", "trek"),
-        ],
-    ),
-    (
-        "5",
-        "ACCESSORIES",
-        [
-            ("A", "Notepad", "Notepad", "notes"),
-            ("B", "Calendar", "Calendar", "calendar"),
-            ("C", "Calculator", "Calculator", "calc"),
-            ("D", "Address Book", "Address Book", "contacts"),
-            ("E", "Unit Converter", "Converter", "convert"),
-            ("F", "Weather & News", "Weather/News", "weather_news"),
-            ("G", "AI Assistant", "AI Chat", "ai"),
-            ("H", "LOGO", "Logo", "logo"),
-        ],
-    ),
-    (
-        "6",
-        "SYSTEM",
-        [
-            ("A", "Command Shell (CLI)", "Shell (CLI)", "cli"),
-            ("B", "Task Scheduler", "Scheduler", "scheduler"),
-            ("C", "Terminal Settings", "Settings", "terminal_settings"),
-            ("D", "Keyboard Profiles", "KB Profiles", "kb"),
-            ("E", "Help & User Guide", "Help/Guide", "help_menu"),
-            ("F", "Welcome Banner", "Banner", "welcome_banner"),
-            ("G", "Host Settings", "Host Settings", "host_settings"),
-            ("H", "Disconnect", "Disconnect", "disconnect"),
-        ],
-    ),
-]
+from retro_os.menu_data import console_sections
+
+MENU_SECTIONS = console_sections()
 
 ACTION_ALIASES = {
     "calendar": "calendar", "cal": "calendar",
@@ -168,6 +89,7 @@ ACTION_ALIASES = {
     "startrek": "trek",
     "star_trek": "trek",
     "wargames": "wargames",
+    "wopr": "wargames",
     "games": "wargames",
     "notes": "notes",
     "calc": "calc",
@@ -205,19 +127,19 @@ def normalize_action(action):
     if not action:
         return "menu"
     act = str(action).strip().lower()
-    if act in ("0", "1", "2", "3", "4", "5", "6"):
+    if act in ("0", "1", "2", "3", "4", "5", "6", "7"):
         return f"section:{act}"
     if act.startswith("section:"):
         sec_num = act.split(":", 1)[1].strip()
-        if sec_num in ("0", "1", "2", "3", "4", "5", "6"):
+        if sec_num in ("0", "1", "2", "3", "4", "5", "6", "7"):
             return f"section:{sec_num}"
     if act.startswith("section_"):
         sec_num = act.split("_", 1)[1].strip()
-        if sec_num in ("0", "1", "2", "3", "4", "5", "6"):
+        if sec_num in ("0", "1", "2", "3", "4", "5", "6", "7"):
             return f"section:{sec_num}"
     if act.startswith("sec_"):
         sec_num = act.split("_", 1)[1].strip()
-        if sec_num in ("0", "1", "2", "3", "4", "5", "6"):
+        if sec_num in ("0", "1", "2", "3", "4", "5", "6", "7"):
             return f"section:{sec_num}"
     if act in ("main_menu", "root", "home"):
         return "section:0"
@@ -237,6 +159,7 @@ class ConsoleDashboard:
         self._events = deque(maxlen=4)
         self._clients = {}
         self._user_activities = {}
+        self._activity_ports = {}
         self._running = False
         self._thread = None
         self._input_thread = None
@@ -249,6 +172,8 @@ class ConsoleDashboard:
         self._host_output_escape = ""
         self._host_output_offset = 0
         self._output_page_size = 8
+        self._activity_collapsed = False
+        self._activity_pinned = False
         self._command_history = deque(maxlen=50)
         self._history_index = None
         self._history_draft = ""
@@ -366,6 +291,7 @@ class ConsoleDashboard:
 
     def clear_host_output(self):
         with self._lock:
+            self._activity_collapsed = self._activity_pinned
             self._host_output.clear()
             self._host_output_line = ""
             self._host_output_column = self._host_output_offset = 0
@@ -373,6 +299,8 @@ class ConsoleDashboard:
 
     def _host_special_key(self, action):
         with self._lock:
+            if self._host_terminal is not None:
+                self._activity_collapsed = True
             if action in ("page_up", "page_down"):
                 change = self._output_page_size if action == "page_up" else -self._output_page_size
                 self._host_output_offset = max(0, self._host_output_offset + change)
@@ -407,21 +335,33 @@ class ConsoleDashboard:
                 if len(parts) != 2 or not parts[1].isdigit():
                     raise ValueError("Use allow <request #> or deny <request #>.")
                 if not self.host_input_available():
-                    raise ValueError("Local keyboard approval is unavailable. Edit telnet_allowlist.json instead.")
+                    raise ValueError("Local keyboard approval is unavailable. Edit settings/local/telnet_allowlist.json instead.")
                 getattr(self._telnet_access, parts[0])(int(parts[1]))
+            elif parts and parts[0] == "monitor":
+                if len(parts) != 2 or parts[1] not in ("collapse", "auto", "expand"):
+                    raise ValueError("Use monitor collapse or monitor auto (expand also restores automatic mode).")
+                with self._lock:
+                    self._activity_pinned = parts[1] == "collapse"
+                    self._activity_collapsed = self._activity_pinned
+                self.log("Activity monitor pinned collapsed; clear keeps this layout."
+                         if self._activity_pinned else "Activity monitor expanded; automatic layout restored.")
             elif parts == ["clear"]:
                 self.clear_host_output()
             elif self._host_terminal is not None:
                 if not self.host_input_available():
                     raise ValueError("Host commands require the local interactive console.")
+                self._activity_collapsed = True
                 self._host_output_offset = 0
                 self._host_terminal.submit(command)
             elif parts:
-                self.log("Host commands: allow <request #>, deny <request #>, pending (then Enter).", level="yellow")
+                self.log("Host commands: allow <request #>, deny <request #>, pending, clear, monitor collapse/auto (then Enter).", level="yellow")
         except (OSError, ValueError) as exc:
             self.log(f"Host command failed: {exc}", level="red")
 
     def _host_key(self, key):
+        if self._host_terminal is not None:
+            with self._lock:
+                self._activity_collapsed = True
         if key in ("\r", "\n"):
             with self._lock:
                 command, self._host_command = self._host_command, ""
@@ -531,6 +471,7 @@ class ConsoleDashboard:
     def remove_client(self, client_id):
         with self._lock:
             self._user_activities.pop(client_id, None)
+            self._activity_ports.pop(client_id, None)
             client = self._clients.pop(client_id, None)
             if self._tty and self._running:
                 self._draw_frame()
@@ -543,7 +484,21 @@ class ConsoleDashboard:
     def _strip_ansi(text):
         return _ANSI_REGEX.sub("", text)
 
-    def set_user_activity(self, user_id, action, user_label=None):
+    def _serial_activity_port(self, user_id, user_label=None):
+        if user_id in self._clients:
+            return None
+        if user_id in self._activity_ports:
+            return self._activity_ports[user_id]
+        if isinstance(user_id,str) and user_id.lower().startswith('serial:'):
+            profile=user_id.split(':',1)[1]
+            return str(self.profiles.get(profile,{}).get('serial_port') or profile).strip().casefold()
+        if user_label in self.profiles:
+            port=self.profiles[user_label].get('serial_port')
+            if port:
+                return str(port).strip().casefold()
+        return None
+
+    def set_user_activity(self, user_id, action, user_label=None, serial_port=None):
         with self._lock:
             if not user_label:
                 client = self._clients.get(user_id)
@@ -557,6 +512,15 @@ class ConsoleDashboard:
                         user_label = str(client)
                 else:
                     user_label = str(user_id)
+            port=(str(serial_port).strip().casefold() if serial_port else self._serial_activity_port(user_id,user_label))
+            if port is not None:
+                for previous,activity in list(self._user_activities.items()):
+                    previous_port=self._serial_activity_port(previous,activity.get('user'))
+                    legacy_same_label=(previous_port is None and previous not in self._clients and activity.get('user') == str(user_label))
+                    if previous != user_id and (previous_port == port or legacy_same_label):
+                        self._user_activities.pop(previous,None)
+                        self._activity_ports.pop(previous,None)
+                self._activity_ports[user_id]=port
             self._user_activities[user_id] = {
                 "action": str(action) if action else "menu",
                 "user": str(user_label),
@@ -566,6 +530,7 @@ class ConsoleDashboard:
 
     def clear_user_activity(self, user_id):
         with self._lock:
+            self._activity_ports.pop(user_id,None)
             if user_id in self._user_activities:
                 del self._user_activities[user_id]
                 if self._tty and self._running:
@@ -642,11 +607,62 @@ class ConsoleDashboard:
         colored_cell = self._paint(raw_cell, color, force_color=force_color) if color else raw_cell
         return raw_cell, colored_cell
 
+    def _box_style(self, rows):
+        if os.environ.get('RSH_ASCII_BORDERS') == '1':
+            return rows
+        try:
+            '┌┐└┘─│'.encode(getattr(sys.stdout,'encoding',None) or 'utf-8')
+        except (UnicodeError,LookupError):
+            return rows
+        styled=[]
+        for index,(row,color) in enumerate(rows):
+            plain=self._strip_ansi(row)
+            if plain.startswith('+') and plain.endswith('+'):
+                left,right=('┌','┐') if index == 0 else ('└','┘')
+                row=row.replace('+',left,1)
+                prefix,_,suffix=row.rpartition('+')
+                row=(prefix+right+suffix).replace('-','─')
+            elif plain.startswith('|-- ') and plain.endswith('|'):
+                row=row.replace('|','├',1)
+                prefix,_,suffix=row.rpartition('|')
+                row=(prefix+'┤'+suffix).replace('-','─')
+            elif plain.startswith('|') and plain.endswith('|'):
+                row=row.replace('|','│')
+            styled.append((row,color))
+        return styled
+
+    def _compact_interface_rows(self, box_width, force_color=False):
+        inner_width=box_width-5
+        columns=4 if inner_width >= 100 else 3 if inner_width >= 70 else 2 if inner_width >= 46 else 1
+        cell_width=(inner_width-columns+1)//columns
+        rows=[(self._paint('+-- Activity Monitor '+'-'*(box_width-22)+'+','dim',force_color=force_color),'raw')]
+        def row(cells):
+            content=' '.join(cells)
+            return (self._paint('|  ','dim',force_color=force_color)+content+' '*max(0,inner_width-len(self._strip_ansi(content)))+self._paint(' |','dim',force_color=force_color),'raw')
+        for start in range(0,len(MENU_SECTIONS),columns):
+            group=MENU_SECTIONS[start:start+columns]
+            headers,selections=[],[]
+            for number,title,items in group:
+                headers.append(self._format_cell('',title,title,'',cell_width,True,number,force_color=force_color)[1])
+                selected=[item for item in items if self._users_for_action(item[3])]
+                if len(selected)==1:
+                    selections.append(self._format_cell(*selected[0],cell_width,force_color=force_color)[1])
+                elif selected:
+                    summary=' / '.join(item[2]+' '+','.join(self._users_for_action(item[3])) for item in selected)
+                    selections.append(self._paint(summary[:cell_width].ljust(cell_width),'highlight',force_color=force_color))
+                else:
+                    selections.append(' '*cell_width)
+            rows.extend((row(headers),row(selections)))
+        rows.append((self._paint('+'+'-'*(box_width-2)+'+','dim',force_color=force_color),'raw'))
+        return self._box_style(rows)
+
     def _interface_rows(self, width=None, force_color=False):
         if width is None:
             width = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns - 1)
         box_width = max(40, min(width, 118))
         inner_width = box_width - 5
+        if self._activity_collapsed:
+            return self._compact_interface_rows(box_width,force_color)
 
         rows = []
         title = " Connected Terminal Activity Monitor "
@@ -669,84 +685,23 @@ class ConsoleDashboard:
         mm_colored = self._paint(mm_padded, "highlight" if mm_active else "bold", force_color=force_color)
         rows.append((self._paint("|  ", "dim", force_color=force_color) + mm_colored + self._paint(" |", "dim", force_color=force_color), "raw"))
 
-        if inner_width >= 70:
-            col_width = (inner_width - 2) // 3
-            # Top half: Sec 1, 2, 3
-            sec1, sec2, sec3 = MENU_SECTIONS[0], MENU_SECTIONS[1], MENU_SECTIONS[2]
-            h1_raw, h1 = self._format_cell("", sec1[1], sec1[1], "", col_width, True, sec1[0], force_color=force_color)
-            h2_raw, h2 = self._format_cell("", sec2[1], sec2[1], "", col_width, True, sec2[0], force_color=force_color)
-            h3_raw, h3 = self._format_cell("", sec3[1], sec3[1], "", col_width, True, sec3[0], force_color=force_color)
-            top_line = f"{h1} {h2} {h3}"
-            raw_len = len(h1_raw) + 1 + len(h2_raw) + 1 + len(h3_raw)
-            pad = " " * max(0, inner_width - raw_len)
-            rows.append((self._paint("|  ", "dim", force_color=force_color) + top_line + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
-
-            max_top = max(len(sec1[2]), len(sec2[2]), len(sec3[2]))
-            for i in range(max_top):
-                c1_raw, c1 = self._format_cell(*sec1[2][i], col_width=col_width, force_color=force_color) if i < len(sec1[2]) else (" " * col_width, " " * col_width)
-                c2_raw, c2 = self._format_cell(*sec2[2][i], col_width=col_width, force_color=force_color) if i < len(sec2[2]) else (" " * col_width, " " * col_width)
-                c3_raw, c3 = self._format_cell(*sec3[2][i], col_width=col_width, force_color=force_color) if i < len(sec3[2]) else (" " * col_width, " " * col_width)
-                row_raw_len = len(c1_raw) + 1 + len(c2_raw) + 1 + len(c3_raw)
-                pad = " " * max(0, inner_width - row_raw_len)
-                rows.append((self._paint("|  ", "dim", force_color=force_color) + f"{c1} {c2} {c3}" + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
-
-            # Keep a consistent visual break between the upper and lower menu bands.
-            rows.append((self._paint("|  ", "dim", force_color=force_color) + (" " * inner_width) + self._paint(" |", "dim", force_color=force_color), "raw"))
-
-            # Bottom half: Sec 4, 5, 6
-            sec4, sec5, sec6 = MENU_SECTIONS[3], MENU_SECTIONS[4], MENU_SECTIONS[5]
-            h4_raw, h4 = self._format_cell("", sec4[1], sec4[1], "", col_width, True, sec4[0], force_color=force_color)
-            h5_raw, h5 = self._format_cell("", sec5[1], sec5[1], "", col_width, True, sec5[0], force_color=force_color)
-            h6_raw, h6 = self._format_cell("", sec6[1], sec6[1], "", col_width, True, sec6[0], force_color=force_color)
-            bot_line = f"{h4} {h5} {h6}"
-            raw_len = len(h4_raw) + 1 + len(h5_raw) + 1 + len(h6_raw)
-            pad = " " * max(0, inner_width - raw_len)
-            rows.append((self._paint("|  ", "dim", force_color=force_color) + bot_line + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
-
-            max_bot = max(len(sec4[2]), len(sec5[2]), len(sec6[2]))
-            for i in range(max_bot):
-                c4_raw, c4 = self._format_cell(*sec4[2][i], col_width=col_width, force_color=force_color) if i < len(sec4[2]) else (" " * col_width, " " * col_width)
-                c5_raw, c5 = self._format_cell(*sec5[2][i], col_width=col_width, force_color=force_color) if i < len(sec5[2]) else (" " * col_width, " " * col_width)
-                c6_raw, c6 = self._format_cell(*sec6[2][i], col_width=col_width, force_color=force_color) if i < len(sec6[2]) else (" " * col_width, " " * col_width)
-                row_raw_len = len(c4_raw) + 1 + len(c5_raw) + 1 + len(c6_raw)
-                pad = " " * max(0, inner_width - row_raw_len)
-                rows.append((self._paint("|  ", "dim", force_color=force_color) + f"{c4} {c5} {c6}" + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
-
-        elif inner_width >= 46:
-            col_width = (inner_width - 1) // 2
-            col0_cells = []
-            for s_idx in (0, 2, 4):
-                sec = MENU_SECTIONS[s_idx]
-                col0_cells.append(self._format_cell("", sec[1], sec[1], "", col_width, True, sec[0], force_color=force_color))
-                for it in sec[2]:
-                    col0_cells.append(self._format_cell(*it, col_width=col_width, force_color=force_color))
-            col1_cells = []
-            for s_idx in (1, 3, 5):
-                sec = MENU_SECTIONS[s_idx]
-                col1_cells.append(self._format_cell("", sec[1], sec[1], "", col_width, True, sec[0], force_color=force_color))
-                for it in sec[2]:
-                    col1_cells.append(self._format_cell(*it, col_width=col_width, force_color=force_color))
-            max_rows = max(len(col0_cells), len(col1_cells))
-            for i in range(max_rows):
-                c0_raw, c0 = col0_cells[i] if i < len(col0_cells) else (" " * col_width, " " * col_width)
-                c1_raw, c1 = col1_cells[i] if i < len(col1_cells) else (" " * col_width, " " * col_width)
-                row_raw_len = len(c0_raw) + 1 + len(c1_raw)
-                pad = " " * max(0, inner_width - row_raw_len)
-                rows.append((self._paint("|  ", "dim", force_color=force_color) + f"{c0} {c1}" + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
-        else:
-            col_width = inner_width
-            for sec in MENU_SECTIONS:
-                h_raw, h = self._format_cell("", sec[1], sec[1], "", col_width, True, sec[0], force_color=force_color)
-                pad = " " * max(0, inner_width - len(h_raw))
-                rows.append((self._paint("|  ", "dim", force_color=force_color) + h + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
-                for it in sec[2]:
-                    c_raw, c = self._format_cell(*it, col_width=col_width, force_color=force_color)
-                    pad = " " * max(0, inner_width - len(c_raw))
-                    rows.append((self._paint("|  ", "dim", force_color=force_color) + c + pad + self._paint(" |", "dim", force_color=force_color), "raw"))
+        columns=4 if inner_width >= 100 else 3 if inner_width >= 70 else 2 if inner_width >= 46 else 1
+        col_width=(inner_width-columns+1)//columns
+        for start in range(0,len(MENU_SECTIONS),columns):
+            group=MENU_SECTIONS[start:start+columns]
+            def append_cells(cells):
+                content=' '.join(cells)
+                pad=' '*max(0,inner_width-len(self._strip_ansi(content)))
+                rows.append((self._paint('|  ','dim',force_color=force_color)+content+pad+self._paint(' |','dim',force_color=force_color),'raw'))
+            append_cells([self._format_cell('',section[1],section[1],'',col_width,True,section[0],force_color=force_color)[1] for section in group])
+            for index in range(max(len(section[2]) for section in group)):
+                append_cells([self._format_cell(*section[2][index],col_width,force_color=force_color)[1] if index<len(section[2]) else ' '*col_width for section in group])
+            if start+columns < len(MENU_SECTIONS):
+                append_cells([' '*col_width for _ in group])
 
         bot_border = "+" + ("-" * (box_width - 2)) + "+"
         rows.append((self._paint(bot_border, "dim", force_color=force_color), "raw"))
-        return rows
+        return self._box_style(rows)
 
     def render_interface(self, width=None, inner_width=None, use_color=None):
         with self._lock:
@@ -834,8 +789,7 @@ class ConsoleDashboard:
         bottom = "+" + ("-" * (box_width - 2)) + "+"
         rows = [(self._paint(top, "dim", force_color=force_color), "raw")]
 
-        active = []
-        inactive = []
+        connections = []
         for name, profile in self.profiles.items():
             client_count = sum(
                 client_name == name
@@ -854,28 +808,32 @@ class ConsoleDashboard:
                 if tcp_port
                 else "TCP: DISABLED"
             )
+            transfer_detail=''
+            from rsh_session import services
+            for service in services():
+                if getattr(service.terminal,'_profile_name',None)==name and service.progress:
+                    progress=service.progress
+                    transfer_detail=f" | {progress['direction']} {progress['bytes']}/{progress['total'] or '?'} B retries {progress['retries']}"
+                    break
             if is_active:
-                line = f"{name} | {serial} | {tcp}"
+                line = f"{name} | {serial} | {tcp}" + transfer_detail
                 if endpoint:
                     line += f" | Connect {endpoint}"
                 if client_count:
                     line += f" | Clients: {client_count}"
-                active.append((f"  {line}", "green"))
+                connections.append((f"  {line}", "green"))
             else:
                 line = f"{name} | {serial} | {tcp}"
                 if endpoint:
                     line += f" | Connect {endpoint}"
-                inactive.append((f"  {line}", self._profile_status_color(name)))
+                connections.append((f"  {line}", self._profile_status_color(name)))
 
         content = [(f"  {self._status_line()}", "cyan")]
-        if active:
-            content.append(("Active Connections", "dim"))
-            content.extend(active)
-        if inactive:
-            content.append(("Waiting / Inactive", "dim"))
-            content.extend(inactive)
+        if connections:
+            content.append(("Connections", "dim"))
+            content.extend(connections)
         for line, color in content:
-            if line in ("Active Connections", "Waiting / Inactive"):
+            if line == "Connections":
                 divider_prefix = f"|-- {line} "
                 divider = divider_prefix + ("-" * max(0, box_width - len(divider_prefix) - 1)) + "|"
                 rows.append((self._paint(divider, "dim", force_color=force_color), "raw"))
@@ -894,7 +852,7 @@ class ConsoleDashboard:
                 value = self._paint(padded, color, force_color=force_color)
                 rows.append((border + value + end, "raw"))
         rows.append((self._paint(bottom, "dim", force_color=force_color), "raw"))
-        return rows
+        return self._box_style(rows)
 
     def _profile_status_color(self, name):
         profile = self.profiles[name]
@@ -913,6 +871,29 @@ class ConsoleDashboard:
         rows.extend(self._status_panel_rows(width, force_color=self._color))
         rows.extend(self._interface_rows(width=width, force_color=self._color))
         footer_start = len(rows)
+        footer=[]
+        if self._telnet_access is not None:
+            pending = self._telnet_access.pending()
+            if pending:
+                footer.append(("TELNET APPROVAL REQUIRED", "yellow"))
+                for request in pending[:3]:
+                    footer.append((f"#{request['id']} {request['ip']} -> {request['profile']} ({request['seconds_left']}s)", "yellow"))
+                if len(pending) > 3:
+                    footer.append((f"{len(pending) - 3} more approval requests waiting.", "yellow"))
+            if self.host_input_available():
+                footer.append(("Host: allow <#> / deny <#> / pending [Enter]", "dim"))
+        if self._host_terminal is not None:
+            footer.append(("Hub: help | ATM | clear | monitor collapse/auto | Up/Down=history", "dim"))
+        for message, level in self._events:
+            footer.append((f"Event: {message}", level))
+        if (self._telnet_access is not None or self._host_terminal is not None) and self.host_input_available():
+            command_width = max(1, terminal_size.columns - 7)
+            command = self._host_command
+            if getattr(self._host_terminal, "secret_input", False) is True:
+                command = "*" * len(command)
+            if len(command) > command_width:
+                command = "..." + command[-max(1, command_width - 3):]
+            footer.append(("Host> " + command, "bold"))
         if self._host_terminal is not None:
             output_lines = list(self._host_output)
             if self._host_output_line:
@@ -921,34 +902,18 @@ class ConsoleDashboard:
             output_width = max(1, terminal_size.columns - 1)
             for line in output_lines:
                 wrapped.extend(textwrap.wrap(line, width=output_width, replace_whitespace=False, drop_whitespace=False) or [""])
-            self._output_page_size = min(10, max(3, (height or terminal_size.lines) // 3))
+            if self._activity_collapsed:
+                self._output_page_size=max(1,(height or terminal_size.lines)-len(rows)-len(footer)-1)
+            else:
+                self._output_page_size=min(10,max(3,(height or terminal_size.lines)//3))
             self._host_output_offset = min(self._host_output_offset, max(0, len(wrapped) - self._output_page_size))
             end = len(wrapped) - self._host_output_offset
             visible_output = wrapped[max(0, end - self._output_page_size):end]
             rows.append(("HOST SESSION OUTPUT (PgUp/PgDn to scroll)", "cyan"))
+            if self._activity_collapsed:
+                rows.extend(('',None) for _ in range(self._output_page_size-len(visible_output)))
             rows.extend((line, None) for line in visible_output)
-        if self._telnet_access is not None:
-            pending = self._telnet_access.pending()
-            if pending:
-                rows.append(("TELNET APPROVAL REQUIRED", "yellow"))
-                for request in pending[:3]:
-                    rows.append((f"#{request['id']} {request['ip']} -> {request['profile']} ({request['seconds_left']}s)", "yellow"))
-                if len(pending) > 3:
-                    rows.append((f"{len(pending) - 3} more approval requests waiting.", "yellow"))
-            if self.host_input_available():
-                rows.append(("Host: allow <#> / deny <#> / pending [Enter]", "dim"))
-        if self._host_terminal is not None:
-            rows.append(("Hub: help | ATM=menu | clear=output | Up/Down=history", "dim"))
-        for message, level in self._events:
-            rows.append((f"Event: {message}", level))
-        if (self._telnet_access is not None or self._host_terminal is not None) and self.host_input_available():
-            command_width = max(1, terminal_size.columns - 7)
-            command = self._host_command
-            if getattr(self._host_terminal, "secret_input", False) is True:
-                command = "*" * len(command)
-            if len(command) > command_width:
-                command = "..." + command[-max(1, command_width - 3):]
-            rows.append(("Host> " + command, "bold"))
+        rows.extend(footer)
         if height is not None and len(rows) > height:
             if height <= 1:
                 rows = rows[:max(0, height)]

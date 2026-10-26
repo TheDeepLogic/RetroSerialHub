@@ -1,6 +1,7 @@
 """Operating-system integration for apps and keyboard shortcuts."""
 
 from __future__ import annotations
+from rsh_storage import settings_dir, settings_path
 
 import datetime
 import os
@@ -164,7 +165,7 @@ class HostEnvironment:
         profile_path = (
             pathlib.Path(profiles_path)
             if profiles_path
-            else pathlib.Path(__file__).with_name("keyboard_profiles.json")
+            else settings_path("keyboard_profiles.json")
         )
         key = str(profile_path.resolve())
         with _PROFILE_STORES_LOCK:

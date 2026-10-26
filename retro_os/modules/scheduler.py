@@ -1,6 +1,7 @@
 """Task scheduler module for Retro Serial OS."""
 
 from __future__ import annotations
+from rsh_storage import settings_dir, settings_path
 
 import re
 from typing import Any
@@ -17,7 +18,7 @@ def init(context):
     _context = context
     tasks_file = context.fs.get("tasks")
     if not tasks_file:
-        tasks_file = context.fs.get("files", context.fs.get("notes")).parent / "scheduled_tasks.json"
+        tasks_file = settings_path("scheduled_tasks.json", context.fs.get("files", context.fs.get("notes")).parent)
     key = str(tasks_file.resolve())
     if key in _schedulers_by_path:
         context.host_env.scheduler = _schedulers_by_path[key]

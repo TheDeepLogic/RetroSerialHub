@@ -365,7 +365,7 @@ class RetroOsMenuAndLauncherTests(unittest.TestCase):
         self.assertIn("[3]   FILES & MEDIA", rendered_80)
         self.assertIn("[4]   GAMES", rendered_80)
         self.assertIn("[5]   ACCESSORIES", rendered_80)
-        self.assertIn("[6]   SYSTEM", rendered_80)
+        self.assertIn("[7]   SYSTEM", rendered_80)
         self.assertIn("A] Bulletin Boards", rendered_80)
 
         rendered_40 = menu.render(columns=40)
@@ -1051,7 +1051,7 @@ class RetroWorkstationCompanionTests(unittest.TestCase):
         self.assertEqual(menu.get_action_for_key("F"), "weather_news")
 
         # System section: Terminal Settings (C), Help & User Guide (E)
-        menu.select_section("6")
+        menu.select_section("7")
         self.assertEqual(menu.active_section_name, "System")
         self.assertEqual(menu.get_action_for_key("C"), "terminal_settings")
         self.assertEqual(menu.get_action_for_key("E"), "help_menu")

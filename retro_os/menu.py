@@ -10,88 +10,7 @@ from rsh_console import VERSION
 class OSFlyoutMenu:
     """Flyout menu where only the selected category is expanded."""
 
-    SECTIONS: List[Tuple[str, str, List[Tuple[str, str, str]]]] = [
-        (
-            "Communications",
-            "1",
-            [
-                ("A", "Bulletin Boards", "bbs"),
-                ("B", "Telnet Terminal", "telnet"),
-                ("C", "Web Browser", "browser"),
-                ("D", "FTP Client", "ftp"),
-                ("E", "Electronic Mail", "mail"),
-                ("F", "Connected Terminals", "terminals"),
-            ],
-        ),
-        (
-            "Host Connectivity",
-            "2",
-            [
-                ("A", "Host Applications", "apps"),
-                ("B", "Launch Host App", "launch"),
-                ("C", "Keyboard Bridge", "keyboard"),
-                ("D", "COM Port Bridge", "com_bridge"),
-                ("E", "Host Terminal / Prompt", "host_terminal"),
-                ("F", "System Monitor & Media", "host_media"),
-                ("G", "Host Printing", "print"),
-            ],
-        ),
-        (
-            "Files & Media",
-            "3",
-            [
-                ("A", "File Manager", "fileman"),
-                ("B", "File Transfers", "files"),
-                ("C", "Archive Browser", "archive"),
-                ("D", "Text Library", "textlib"),
-                ("E", "Document Viewer", "view"),
-                ("F", "ASCII Image Viewer", "ascii_viewer"),
-                ("G", "Audio Player", "audio"),
-            ],
-        ),
-        (
-            "Games",
-            "4",
-            [
-                ("A", "Minesweeper", "mines"),
-                ("B", "Solitaire", "solitaire"),
-                ("C", "Lunar Lander", "lander"),
-                ("D", "Hunt the Wumpus", "wumpus"),
-                ("E", "Blackjack", "blackjack"),
-                ("F", "Mastermind", "mastermind"),
-                ("G", "Word Guess", "wordguess"),
-                ("H", "Star Trek", "trek"),
-            ],
-        ),
-        (
-            "Accessories",
-            "5",
-            [
-                ("A", "Notepad", "notes"),
-                ("B", "Calendar", "calendar"),
-                ("C", "Calculator", "calc"),
-                ("D", "Address Book", "contacts"),
-                ("E", "Unit Converter", "convert"),
-                ("F", "Weather & News", "weather_news"),
-                ("G", "AI Assistant", "ai"),
-                ("H", "LOGO", "logo"),
-            ],
-        ),
-        (
-            "System",
-            "6",
-            [
-                ("A", "Command Shell (CLI)", "cli"),
-                ("B", "Task Scheduler", "scheduler"),
-                ("C", "Terminal Settings", "terminal_settings"),
-                ("D", "Keyboard Profiles", "kb"),
-                ("E", "Help & User Guide", "help_menu"),
-                ("F", "Welcome Banner", "welcome_banner"),
-                ("G", "Host Settings", "host_settings"),
-                ("H", "Disconnect", "disconnect"),
-            ],
-        ),
-    ]
+    from .menu_data import SECTIONS
 
     def __init__(
         self,
@@ -106,6 +25,10 @@ class OSFlyoutMenu:
         else:
             self.shortcuts_manager = shortcuts_manager
 
+        self.shortcuts_page = 0
+        self.section_page = 0
+        self.page_capacity = 8
+        self.shortcut_capacity = 8
         if initial_section is not None:
             if isinstance(initial_section, str):
                 self.select_section(initial_section)
@@ -144,7 +67,9 @@ class OSFlyoutMenu:
     def get_shortcuts_items(self) -> List[Tuple[str, str, str]]:
         items = []
         if self.shortcuts_manager:
-            for idx, sc in enumerate(self.shortcuts_manager.list_shortcuts()):
+            all_shortcuts = self.shortcuts_manager.list_shortcuts()
+            self.shortcuts_page = min(self.shortcuts_page,max(0,(len(all_shortcuts)-1)//self.shortcut_capacity))
+            for idx, sc in enumerate(all_shortcuts[self.shortcuts_page*self.shortcut_capacity:(self.shortcuts_page+1)*self.shortcut_capacity]):
                 letter = chr(ord("A") + idx)
                 items.append((
                     letter,
@@ -157,8 +82,9 @@ class OSFlyoutMenu:
         return items
 
     def select_section(self, selector: str) -> bool:
-        """Select active section by number (0-6, S) or name (case-insensitive)."""
+        """Select active section by number (0-7, S) or name (case-insensitive)."""
         s = selector.strip().upper()
+        self.section_page = 0
         if s in ("0", "S", "SHORTCUT", "SHORTCUTS"):
             self.active_section = "shortcuts"
             return True
@@ -188,13 +114,25 @@ class OSFlyoutMenu:
             idx = 0
         items = self.SECTIONS[idx][2]
         if not is_remote and self.active_section_name == "System":
-            return [it for it in items if it[2] != "disconnect"]
-        return items
+            items = [it for it in items if it[2] != "disconnect"]
+        start = self.section_page*self.page_capacity
+        return items[start:start+self.page_capacity]
 
     def get_action_for_key(self, key: str, is_remote: bool = False):
         """Find the action string for a key in the active section."""
         k = key.strip().upper()
+        if self.active_section != 'shortcuts' and k in ('>','<'):
+            items=self.SECTIONS[self.active_section][2]
+            if not is_remote and self.active_section_name == 'System':
+                items=[item for item in items if item[2] != 'disconnect']
+            count = len(items)
+            self.section_page = (self.section_page+(1 if k == '>' else -1)) % max(1,(count+self.page_capacity-1)//self.page_capacity)
+            return 'shortcut_page'
         if self.active_section == "shortcuts":
+            if k in ('>','<'):
+                total = len(self.shortcuts_manager.list_shortcuts()) if self.shortcuts_manager else 0
+                self.shortcuts_page = (self.shortcuts_page + (1 if k == '>' else -1)) % max(1,(total+self.shortcut_capacity-1)//self.shortcut_capacity)
+                return 'shortcut_page'
             if k in ("+", "ADD", "NEW", "N"):
                 return "shortcut_add"
             if k in ("-", "DEL", "DELETE", "REMOVE", "R"):
@@ -206,83 +144,74 @@ class OSFlyoutMenu:
         return None
 
     def render(
-        self,
-        columns: int = 80,
-        translate_ansi: bool = False,
-        welcome_banner: str = "Retro Serial Hub",
-        version: str = VERSION,
-        is_remote: bool = False,
-        status: str = "",
-    ) -> str:
-        """Render the flyout menu where only the selected section is expanded."""
-        lines = []
-        if columns == 40:
-            lines.append(welcome_banner[:40])
-            lines.append(f"v{version}, copyright (c) 2025-2026")
-            lines.append("")
-        else:
-            lines.append("\r\n" + welcome_banner)
-            lines.append(f"v{version}, copyright (c) 2025-2026\r\n")
-
-        # Shortcuts section (Section 0)
-        indent = "    " if columns == 40 else "      "
-        if self.active_section == "shortcuts":
-            lines.append("[0] > SHORTCUTS <")
+        self, columns=80, translate_ansi=False, welcome_banner='Retro Serial Hub',
+        version=VERSION, is_remote=False, status='', rows=24,
+    ):
+        """Anchor the footer to the configured last row, without cursor addressing."""
+        if not isinstance(rows,int) or not 16 <= rows <= 100:
+            raise ValueError('Terminal height must be 16-100 rows.')
+        columns = 40 if columns == 40 else 80
+        width = columns-1  # Avoid auto-wrap in the rightmost terminal cell.
+        footer_height = 4
+        header = [welcome_banner[:width], f'v{version}, copyright (c) 2025-2026', '']
+        base_height = len(header)+len(self.SECTIONS)+1+footer_height
+        available_actions=rows-base_height
+        self.page_capacity = max(1,min(8,available_actions))
+        self.shortcut_capacity = max(1,min(8,rows-base_height-1))
+        if self.active_section != 'shortcuts':
+            items=self.SECTIONS[self.active_section][2]
+            if not is_remote and self.active_section_name == 'System':
+                items=[item for item in items if item[2] != 'disconnect']
+            self.section_page=min(self.section_page,max(0,(len(items)-1)//self.page_capacity))
+        indent = '    ' if columns == 40 else '      '
+        lines = list(header)
+        if self.active_section == 'shortcuts':
+            lines.append('[0] > SHORTCUTS <')
             if not self.shortcuts_manager or not self.shortcuts_manager.has_shortcuts():
-                lines.append(f"{indent}(No shortcuts configured yet)")
-                lines.append(f"{indent}+] Add Shortcut")
+                lines.extend([indent+'(No shortcuts configured yet)',indent+'+] Add Shortcut'] if available_actions >= 2 else [indent+'(empty) +] Add Shortcut'])
             else:
-                for item_key, label, action in self.get_active_items(is_remote=is_remote):
-                    display_label = label
-                    prefix_len = len(indent) + len(item_key) + 2
-                    if prefix_len + len(display_label) > columns - 1:
-                        max_label = (columns - 1) - prefix_len - 3
-                        if max_label > 5:
-                            display_label = display_label[:max_label] + "..."
-                    lines.append(f"{indent}{item_key}] {display_label}")
+                for key,label,action in self.get_shortcuts_items():
+                    if key not in ('+','-'):
+                        prefix=indent+key+'] '
+                        available=width-len(prefix)
+                        if len(label)>available:
+                            label=label[:max(0,available-3)]+'...'
+                        lines.append(prefix+label)
+                if available_actions >= 2:
+                    lines.append(indent+'+] Add Shortcut  -] Remove Shortcut')
         else:
-            lines.append("[0]   SHORTCUTS")
-
-        # Core sections (Sections 1-6)
-        for idx, (name, num, _) in enumerate(self.SECTIONS):
-            if self.active_section == idx:
-                lines.append(f"[{num}] > {name.upper()} <")
-                for item_key, label, action in self.get_active_items(is_remote=is_remote):
-                    display_label = label
-                    if action == "columns":
-                        target_cols = 40 if columns == 80 else 80
-                        display_label = (
-                            f"Switch to {target_cols} Cols"
-                            if columns == 40
-                            else f"Switch to {target_cols} Columns"
-                        )
-                    elif action == "translate_ansi":
-                        if columns == 40:
-                            display_label = (
-                                "ANSI: Turn Off"
-                                if translate_ansi
-                                else "ANSI: Turn On"
-                            )
-                        else:
-                            display_label = (
-                                "Turn ANSI Translation Off"
-                                if translate_ansi
-                                else "Turn ANSI Translation On"
-                            )
-                    lines.append(f"{indent}{item_key}] {display_label}")
+            lines.append('[0]   SHORTCUTS')
+        for index,(title,number,items) in enumerate(self.SECTIONS):
+            if self.active_section == index:
+                lines.append(f'[{number}] > {title.upper()} <')
+                for key,label,action in self.get_active_items(is_remote=is_remote):
+                    if action == 'columns':
+                        label=f'Switch to {40 if columns == 80 else 80} Columns'
+                    elif action == 'translate_ansi':
+                        label='ANSI: Turn Off' if translate_ansi else 'ANSI: Turn On'
+                    lines.append((indent+key+'] '+label)[:width])
             else:
-                lines.append(f"[{num}]   {name.upper()}")
-
-        if status:
-            lines.append("")
-            lines.append(status)
-
-        lines.append("Type ATM to return to this menu.")
-        num_sections = len(self.SECTIONS)
-        if columns == 80:
-            lines.append("")
-            prompt = f"Select [1-{num_sections}] for section, [A-H] for item, or command (CLI/ATM): "
+                lines.append(f'[{number}]   {title.upper()}')
+        if self.active_section == 'shortcuts':
+            paged=self.shortcuts_manager and len(self.shortcuts_manager.list_shortcuts())>self.shortcut_capacity
         else:
-            prompt = f"[0-{num_sections}] Sec, [A-H] Item, or CLI: "
-
-        return "\r\n".join(lines) + "\r\n" + prompt
+            items=self.SECTIONS[self.active_section][2]
+            if not is_remote and self.active_section_name == 'System':
+                items=[item for item in items if item[2] != 'disconnect']
+            paged=len(items)>self.page_capacity
+        prompt=(f'Select [1-{len(self.SECTIONS)}] for section, [A-H] for item, or command (CLI/ATM): '
+                if columns == 80 else f'[0-{len(self.SECTIONS)}] Sec, [A-H] Item, or CLI: ')
+        if self.active_section == 'shortcuts' and available_actions < 2:
+            prompt='A-H Item +/- Edit 0-7 Sec CLI/ATM: '
+        if paged:
+            prompt='A-H Item </> Page +/- Edit 0-7 Sec: ' if self.active_section == 'shortcuts' else 'A-H Item </> Page 0-7 Sec CLI/ATM: '
+        # All footer fields occupy exactly one row; incoming notices are queued by the session.
+        status_line=' '.join(status.splitlines())[:width]
+        footer=[status_line,'Type ATM to return to this menu.']
+        footer.append('')
+        footer.append(prompt[:width])
+        body_height=rows-len(footer)
+        if len(lines)>body_height:
+            raise ValueError('Menu body exceeds the configured height.')
+        lines.extend(['']*(body_height-len(lines)))
+        return '\r\n'.join(lines+footer)

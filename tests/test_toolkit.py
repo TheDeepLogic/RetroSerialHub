@@ -35,7 +35,7 @@ class ToolTests(unittest.TestCase):
         when = dt.datetime.now() - dt.timedelta(minutes=1)
         result = self.shell.execute(f'calendar add {when:%Y-%m-%d %H:%M} "Retro club meeting"')
         self.assertIn("saved", result)
-        other = CalendarTool(self.root / "hub_tools" / "appointments.json")
+        other = CalendarTool(self.root / "settings" / "local" / "appointments.json")
         self.assertIn("Retro club meeting", other.connection_reminders())
         self.assertIn("Retro club meeting", other.due())
         self.assertEqual(self.context.host_env.calendar_tool.due(), "")
@@ -63,7 +63,7 @@ class ToolTests(unittest.TestCase):
         identifier = response.split()[1]
         self.shell.execute(f"contacts set {identifier} email retro@example.org")
         self.shell.execute(f"contacts set {identifier} bbs bbs.example.org:6400")
-        other = ContactsTool(self.root / "hub_tools" / "contacts.json", self.context)
+        other = ContactsTool(self.root / "settings" / "local" / "contacts.json", self.context)
         self.assertIn("Retro Friend", other.command(["list", "friend"]))
         self.assertIn("6400", other.command(["show", identifier]))
         received = []
@@ -76,7 +76,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("No matching", other.command(["list"]))
 
     def test_simultaneous_record_updates_do_not_lose_contacts(self):
-        tools = [ContactsTool(self.root / "hub_tools" / "contacts.json", self.context) for _ in range(12)]
+        tools = [ContactsTool(self.root / "settings" / "local" / "contacts.json", self.context) for _ in range(12)]
         threads = [threading.Thread(target=tool.command, args=(["add", f"Friend {i}"],)) for i, tool in enumerate(tools)]
         for thread in threads:
             thread.start()
@@ -103,15 +103,29 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(calls, [("view", [str(source)]), ("ysend", [str(source)])])
         self.assertIn("Modified:", tools.command(["info", source.name]))
 
-    def test_file_paths_stay_inside_shared_root_and_cwd_is_session_scoped(self):
-        (self.files / "folder").mkdir()
+    def test_host_browsing_copy_and_session_scoped_directory(self):
+        outside = self.root / "Host Music"
+        outside.mkdir()
+        track = outside / "Large Track.mp3"
+        track.write_bytes(b"host audio" * 1024)
         first, second = FileTools(self.files, self.context), FileTools(self.files, self.context)
-        first.command(["cd", "folder"])
+        first.command(["cd", str(outside)])
         self.assertEqual(second.cwd, self.files.resolve())
+        self.assertIn("Large Track.mp3", first.command(["ls"]))
+        first.command(["copy", "1", str(self.files)])
+        self.assertEqual((self.files / track.name).read_bytes(), track.read_bytes())
+        self.assertIn(str(track), first.command(["info", "1"]))
+        first.command(["b"])
+        self.assertEqual(first.cwd, self.root.resolve())
+        first.command(["h"])
+        self.assertEqual(first.cwd, self.files.resolve())
+        with patch("rsh_files._root_directories", return_value=[outside]):
+            self.assertIn(str(outside), first.command(["d"]))
+            first.command(["cd", "1"])
+        self.assertEqual(first.cwd, outside.resolve())
+        restricted = FileTools(self.files, self.context, allow_host=False)
         with self.assertRaisesRegex(ValueError, "inside"):
-            first.command(["cd", "../.."])
-        with self.assertRaisesRegex(ValueError, "inside"):
-            first.path(str(self.root / "outside.txt"))
+            restricted.path(str(track))
 
     def test_zip_selected_extraction_and_no_replacement(self):
         path = self.files / "Software.zip"
@@ -154,12 +168,12 @@ class ToolTests(unittest.TestCase):
         for name in ("calendar", "cal", "convert", "units", "contacts", "addressbook", "fileman", "fm", "archive", "zip", "audio", "player"):
             self.assertIn(name, self.shell.command_names())
         self.assertIn("hex", self.shell.execute("units help"))
-        self.assertEqual(set(toolkit_module.TOOL_MENUS), {"calendar", "convert", "contacts", "fileman", "archive", "audio"})
+        self.assertTrue({"calendar", "convert", "contacts", "fileman", "archive", "audio", "capture", "diagnostics", "findfiles", "diskinfo"}.issubset(toolkit_module.TOOL_MENUS))
 
     def test_all_six_tools_are_reachable_in_40_and_80_column_menus(self):
         from rsh_console import MENU_SECTIONS
         labels = {
-            2: ["File Manager", "File Transfers", "Archive Browser", "Text Library", "Document Viewer", "ASCII Image Viewer", "Audio Player"],
+            2: ["File Manager", "File Transfers", "Archive Browser", "Text Library", "Document Viewer", "ASCII Image Viewer", "Audio Player", "Find Files"],
             4: ["Notepad", "Calendar", "Calculator", "Address Book", "Unit Converter", "Weather & News", "AI Assistant", "LOGO"],
         }
         for section, entries in [(2, {"A": "fileman", "B": "files", "C": "archive", "D": "textlib", "E": "view", "F": "ascii_viewer", "G": "audio"}),
@@ -240,8 +254,8 @@ class ToolTests(unittest.TestCase):
         done.set()
         reader.join(.5)
         self.assertEqual(errors, [])
-        for title, _, _ in toolkit_module.TOOL_MENUS.values():
-            self.assertIn(title.encode(), output)
+        for tool in ("calendar","convert","contacts","fileman","archive","audio"):
+            self.assertIn(toolkit_module.TOOL_MENUS[tool][0].encode(), output)
         self.assertIn(b"22.2222222222", output)
 
     def test_reminder_checks_do_not_rewrite_unchanged_data(self):
@@ -267,8 +281,28 @@ class ToolTests(unittest.TestCase):
         player.control.assert_called_with("pause")
         with self.assertRaises(ValueError):
             tools.command(["save", "../escape"])
-        with self.assertRaises(ValueError):
-            tools.target(str(self.root / "private.mp3"))
+        outside = self.root / "Host Music"
+        outside.mkdir()
+        external = outside / "Private Track.mp3"
+        external.write_bytes(b"audio fixture")
+        tools.command(["play", str(external)])
+        player.play.assert_called_with([str(external)])
+        self.assertIn(external.name, tools.command(["cd", str(outside)]))
+        tools.command(["play", "1"])
+        player.play.assert_called_with([str(external)])
+        tools.command(["queue", "1"])
+        tools.command(["save", "Host Mix"])
+        tools.command(["load", "Host Mix"])
+        self.assertIn(str(external), player.play.call_args.args[0])
+        tools.command(["h"])
+        self.assertEqual(tools.files.cwd, self.files.resolve())
+        with patch("rsh_files._root_directories", return_value=[self.root]):
+            tools.command(["d"])
+            self.assertIn("[DIR] Host Music", tools.command(["cd", "1"]))
+        folder_number = tools.entries.index(outside) + 1
+        tools.command(["cd", str(folder_number)])
+        tools.command(["play", "1"])
+        player.play.assert_called_with([str(external)])
 
     def test_audio_backend_pause_resume_volume_and_navigation(self):
         player = AudioPlayer()
@@ -295,3 +329,47 @@ class ToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AudioMenuTests(unittest.TestCase):
+    setUp = ToolTests.setUp
+    def test_browser_opens_drives_and_plays_file_without_main_navigation_clutter(self):
+        from retro_os.audio_menu import run_audio_menu
+        folder = self.root / 'Music'
+        folder.mkdir()
+        track = folder / 'Track.mp3'
+        track.write_bytes(b'fixture')
+        choices = iter(['1', 'D', '1', '1', 'Q'])
+        frames = []
+        current = []
+        def clear():
+            if current:
+                frames.append(''.join(current))
+            current.clear()
+        def render(result, page_lines=None):
+            current.append(str(result) + '\r\n')
+        with patch('rsh_files._root_directories', return_value=[folder]), patch('retro_os.audio_player._PLAYER.play', return_value='Audio: playing\nTrack: Track.mp3') as play:
+            run_audio_menu(self.shell.execute, lambda: next(choices), current.append, render, clear)
+        frames.append(''.join(current))
+        play.assert_called_once_with([str(track)])
+        self.assertIn('Audio: playing', frames[-1])
+        self.assertLess(frames[-1].index('[1] Browse'), frames[-1].index('Audio: playing'))
+        self.assertLess(frames[-1].index('Track: Track.mp3'), frames[-1].index('Choice (or command):'))
+        self.assertNotIn('D=Drives', frames[0])
+        self.assertIn('D=Drives', frames[1])
+        self.assertIn('Drives / filesystem roots', frames[2])
+        self.assertIn('Track.mp3', frames[3])
+        self.assertLessEqual(len(frames[-1].splitlines()), 24)
+
+    def test_queue_and_playlists_are_in_a_separate_submenu(self):
+        from retro_os.audio_menu import run_audio_menu
+        choices = iter(['8', '3', 'Q', 'Q'])
+        frames, current = [], []
+        def clear():
+            frames.append(''.join(current))
+            current.clear()
+        run_audio_menu(self.shell.execute, lambda: next(choices), current.append,
+                       lambda result, **kwargs: current.append(str(result)), clear)
+        self.assertNotIn('Save playlist', frames[1])
+        self.assertIn('Save playlist', frames[2])
+        self.assertIn('No saved playlists.', frames[3])

@@ -1,5 +1,6 @@
 """Electronic mail module: Integrated Hub Mailbox, Internet Email (IMAP/SMTP), and Host Mailto."""
 
+from rsh_storage import settings_dir, settings_path
 import email
 import email.policy
 import pathlib
@@ -13,7 +14,7 @@ _manager = None
 def get_mail_manager():
     global _manager
     if _manager is None and _context is not None:
-        mail_dir = _context.fs.get("mail", pathlib.Path.home() / "RetroSerialHub" / "mail")
+        mail_dir = _context.fs.get("mail") or settings_dir(_context.fs["files"].parent if "files" in _context.fs else None)
         _manager = MailManager(
             mail_dir=mail_dir,
             bus=_context.bus,
@@ -25,7 +26,7 @@ def get_mail_manager():
 def init(context):
     global _context, _manager
     _context = context
-    _context.fs.setdefault("mail", pathlib.Path.home() / "RetroSerialHub" / "mail")
+    _context.fs.setdefault("mail", settings_dir(_context.fs["files"].parent if "files" in _context.fs else None))
     _manager = MailManager(
         mail_dir=_context.fs["mail"],
         bus=_context.bus,

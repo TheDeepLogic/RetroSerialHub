@@ -1,6 +1,6 @@
 ![Retro Serial Hub](images/retroserialhub_banner.jpg)
 
-# Retro Serial Hub v2.4
+# Retro Serial Hub v2.5
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -22,6 +22,7 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Host Terminal / Command Prompt**: Quick launch the host OS shell (`cmd.exe` on Windows, or `$SHELL` on macOS/Linux) with bidirectional console streaming, local echo, and line translation
 - **Interactive Host Console & Live Activity**: Run hub commands, send messages, and open menus from the host dashboard, with scrollable output, command history, and live terminal activity
 - **Host-Approved Telnet Access**: New source IPs require host keyboard approval or a manual JSON allowlist entry before a session starts; serial connections are exempt
+- **Workshop**: Disk-image inspection, hex viewing, checksums, text conversion, BASIC listing preparation, file splitting/joining, hex/Base64 encoding, and file comparison
 - **Accessories & Media Tools**: Calendar with reminders, unit and number-base conversions, address book, shared file manager, ZIP archive browser, and host audio player with playlists
 - **Real-Time Host System Monitor**: Live CPU load measurement, RAM, disk, and uptime metrics with automatic screen clearing and interactive controls (`top` / `sysinfo live`)
 - **Multi-Format Document Viewer**: Text extraction and pagination pipeline for PDF, Word (.docx), Excel (.xlsx / .csv), Markdown, HTML, and web URLs with native Windows path handling
@@ -33,7 +34,7 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (`briefing`), and interactive article reader (`news <num>`)
 - **Background Task Scheduler**: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. `news : weather Austin : broadcast Morning briefing complete`)
 - **LOGO Programming**: A line-oriented terminal Logo interpreter with repeat loops, variables, procedures, detailed turtle status, and optional host-side turtle graphics
-- **Terminal Hardware Settings**: Screen width (40/80 cols), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
+- **Terminal Hardware Settings**: Saved screen width (40/80 cols) and height (24 rows by default), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
 - **In-Hub Help & User Guide**: 9 built-in guide topics accessible directly from the menu (`HELP` or `?`)
 - **Multi-Port Serial Support**: Connect multiple vintage computers simultaneously, each with independent configurations
 - **BBS Directory**: Browse, connect to, and manage saved BBS destinations
@@ -55,6 +56,7 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - USB-to-Serial adapters or RS-232 ports for connecting vintage computers
 - Optional: OpenAI API key for AI Assistant feature
 - Optional: FFmpeg (`ffplay` on PATH) for internet radio and additional audio formats/platforms
+- Optional: eSpeak NG installed on the host for WOPR speech
 
 ## Installation
 
@@ -83,18 +85,19 @@ transfer, browser, and other retro-computing services through the hub's menu.
 
 ## Main Menu Navigation and Command Shell (CLI)
 
-Retro Serial Hub features an accordion flyout main menu organized into 6 purposeful pillars optimized for 40- and 80-column retro terminals:
-- **Sections (0–6)**: Only the selected category is expanded, showing its available actions (`[A]–[H]`, `[+]`, `[-]`), while other categories remain collapsed as headers:
+Retro Serial Hub features an accordion flyout main menu organized into seven categories optimized for 40- and 80-column retro terminals:
+- **Sections (0–7)**: Only the selected category is expanded, showing its available actions (`[A]–[H]`, `[+]`, `[-]`), while other categories remain collapsed as headers:
   - `[0] Shortcuts`: User-defined quick shortcuts to commands and tools with custom arguments (e.g., weather feeds, favorite BBS connections, games, calculations). If any shortcuts are populated, this section automatically flies out upon opening the main menu.
-  - `[1] Communications`: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client, Electronic Mail, Connected Terminals (messages and file delivery)
-  - `[2] Host Connectivity`: Host Applications, Launch Host App, Keyboard Bridge, COM Port Bridge, Host Terminal / Prompt (cmd/powershell/bash), System Monitor & Media, Host Printing
-  - `[3] Files & Media`: File Manager, File Transfers (XMODEM/YMODEM/ASCII), Archive Browser, Text Library, Document Viewer, ASCII Image Viewer, Audio Player
+  - `[1] Communications`: Bulletin Boards, Telnet Terminal, Web Browser, FTP Client, Electronic Mail, Connected Terminals (messages and file delivery), Session Capture, WOPR
+  - `[2] Host Connectivity`: Host Applications, Launch Host App, Keyboard Bridge, COM Port Bridge, Host Terminal / Prompt (cmd/powershell/bash), System Monitor & Media, Host Printing, Serial Diagnostics
+  - `[3] Files & Media`: File Manager, File Transfers (XMODEM/YMODEM/ASCII), Archive Browser, Text Library, Document Viewer, ASCII Image Viewer, Audio Player, Find Files
   - `[4] Games`: Dedicated Retro Games (Minesweeper, Solitaire, Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek)
   - `[5] Accessories`: Notepad, Calendar, Calculator, Address Book, Unit Converter, Weather & News, AI Assistant, LOGO
-  - `[6] System`: Command Shell (CLI), Task Scheduler, Terminal Hardware Settings, Keyboard Profiles, Help & User Guide, Welcome Banner, Host Settings, Disconnect
-- **Navigation**: Enter `0`–`6` (or section names such as `GAMES`, `CONNECTIVITY`, `SYS`) to expand that section. Enter the item's letter (`A`–`H` where available), `+`, or `-` to run it within the currently active section.
-- **Shortcuts Management**: In the Shortcuts section, press `+` to add a shortcut with custom arguments (saved to `user_shortcuts.json`), or `-` to remove an existing shortcut. You can also manage shortcuts from the CLI via `shortcut add <name> <cmd>`, `shortcut list`, `shortcut run <id>`, or `shortcut del <id>`.
-- **Help & User Guide**: Comprehensive multi-topic documentation is accessible directly inside the hub by pressing `HELP`, `H`, or `?` at the main menu, selecting `[E]` under System, or typing `help <topic>` in the CLI.
+  - `[6] Workshop`: Disk Image Inspector, Hex Viewer, Checksums, Text Converter, BASIC Listing Tools, Split / Join Files, Binary / Text Encoding, Compare Files
+  - `[7] System`: Command Shell (CLI), Task Scheduler, Terminal Hardware Settings, Keyboard Profiles, Help & User Guide, Welcome Banner, Host Settings, Disconnect
+- **Navigation**: Enter `0`–`7` (or section names such as `GAMES`, `CONNECTIVITY`, `SYS`) to expand that section. Enter the item's letter (`A`–`H` where available), `+`, or `-` to run it within the currently active section.
+- **Shortcuts Management**: In the Shortcuts section, press `+` to add a shortcut with custom arguments (saved to `settings/local/user_shortcuts.json`), or `-` to remove an existing shortcut. You can also manage shortcuts from the CLI via `shortcut add <name> <cmd>`, `shortcut list`, `shortcut run <id>`, or `shortcut del <id>`.
+- **Help & User Guide**: Comprehensive multi-topic documentation is accessible directly inside the hub by pressing `HELP` or `?` at the main menu, selecting `[E]` under System, or typing `help <topic>` in the CLI.
 - **Direct Commands**: You can enter commands directly from the main menu prompt, such as `CLI` (or `OS`), `HELP` (or `?`), `SYSINFO`, `CLIP`, `VOL`, `MEDIA`, `WEATHER`, `NEWS`, `BRIEFING`, `SHORTCUT`, `APPS`, `VIEW`, `FETCH`, `LAUNCH`, `TERMINAL`, `CALC`, `LOGO`, `MAIL`, `MAILTO`, `MINES`, `SOLITAIRE`, `WUMPUS`, `WARGAMES`, `PRINT`, `KB`, `SCHEDULE`, `CAPS`, `PACE`, or `ATM` to return/refresh.
 
 ### Command Shell (CLI)
@@ -114,7 +117,12 @@ Use `terminals` to find exact destination names. Other terminals can reply with
 `msg to Host <text>`. `ATM` opens the normal numbered menus; use `CLI` to return
 to commands. Interactive tools use the same prompts as serial/Telnet sessions.
 Host output stays in the dashboard: PgUp/PgDn scroll it, Up/Down recall commands,
-and `clear` clears the output pane. Blank Enter answers prompts or continues a
+and `clear` clears the output pane and normally restores the expanded activity monitor.
+Use `monitor collapse` at the host console to keep the monitor collapsed even
+after `clear`. `monitor auto` (or `monitor expand`) expands it and restores normal
+automatic behavior. This choice lasts until changed or the hub restarts.
+Host interaction collapses activity to the selected item under each header,
+giving the host output pane more room. Blank Enter answers prompts or continues a
 pause; Ctrl+X is forwarded to the active host session. The host CLI also works
 when inbound Telnet listeners are disabled.
 
@@ -139,7 +147,7 @@ Enter `CLI` at the main menu to open the interactive command shell (`cli>`). Typ
 - `apps [refresh | <letter> | <filter>]`: Scans the host's applications. You can filter by initial letter (e.g., `apps c`) or search term (e.g., `apps note`). Interactive output supports pagination (`Enter`=Next, `Q`=Quit, `A-Z`=Skip to letter).
 - `launch <app> [args...]`: Starts a host application by name, stem, or path. On Windows hosts, forward slashes (`/`) typed on Apple II keyboards (which lack a backslash key) are automatically translated to backslashes (`\`). Use `-k` for keyboard bridge mode or `-b` for background execution.
 - `view <file/url>`: Extracts text and paginates supported document formats (TXT, PDF, DOC/DOCX, XLS/XLSX, CSV) or downloads and parses web pages.
-- `kb profile <name>` and `kb map <key> <action>`: Selects or configures shortcut mappings in `keyboard_profiles.json` (e.g., mapping `CTRL+W` to `WIN` or `CTRL+M` to `WIN+R`).
+- `kb profile <name>` and `kb map <key> <action>`: Selects or configures shortcut mappings in `settings/local/keyboard_profiles.json` (e.g., mapping `CTRL+W` to `WIN` or `CTRL+M` to `WIN+R`).
 - `calc <expr>`, `mail [inbox|hub|net|read|send|mode|popup|mailto]`, `mines [new|r|f]`, `solitaire [new|draw|auto]`, `wargames`, `print <file/text>`, `ascii <image>`: Access host and retro utilities directly from the CLI.
 - Modular feature commands (`notes`, `textlib`, `bbs`, `browser`, `telnet`, `ftp`, `files`, and `ai`) open their interactive module screens. Type `ATM` at any time to return to the main menu.
 
@@ -167,11 +175,11 @@ All games feature clean ASCII board rendering optimized for both 40- and 80-colu
 
 ### Built-in Help & User Guide
 
-An interactive multi-topic guide is accessible anywhere by typing `HELP`, `H`, or `?` at the main menu or selecting `[E]` under System. Topics cover hub capabilities, navigation, shell commands, hardware settings, games, and emergency hotkeys with built-in `--More--` paging.
+An interactive multi-topic guide is accessible anywhere by typing `HELP` or `?` at the main menu or selecting `[E]` under System. Topics cover hub capabilities, navigation, shell commands, hardware settings, games, and emergency hotkeys with built-in `--More--` paging.
 
 ### Accessories and Shared Files
 
-All six tools have numbered terminal menus and CLI commands. Quote names and paths containing spaces.
+These tools have terminal menus and CLI commands. Quote names and paths containing spaces.
 
 | Menu | Tool | CLI examples |
 |---|---|---|
@@ -182,15 +190,250 @@ All six tools have numbered terminal menus and CLI commands. Quote names and pat
 | Files & Media C | Archive Browser | `archive list`, `archive open software.zip`, `archive members`, `archive extract 2`, `archive extract all unpacked` |
 | Files & Media G | Audio Player | `audio list`, `audio play 1`, `audio queue 2`, `audio pause`, `audio next`, `audio volume 70`, `audio save "Retro Mix"`, `audio load "Retro Mix"`, `audio radio <stream URL>` |
 
-Appointments and contacts are shared by terminals and saved in `hub_tools/`. Appointment times follow the host's local clock. Due reminders broadcast to connected terminals, and today's appointments and overdue items appear when a terminal connects. Mark an appointment done to remove it from the open agenda.
+Appointments and contacts are shared by terminals and saved in `settings/local/`. Appointment times follow the host's local clock. Due reminders are queued for connected terminals, and today's appointments and overdue items appear when a terminal connects. Mark an appointment done to remove it from the open agenda.
 
-File operations and ZIP extraction stay inside `files/` and do not replace existing files. ZIP contents can be extracted individually or together. Numbered file selections come from the current listing; each terminal has its own browsing location.
+File tools can browse the full host filesystem accessible to the hub process, including drives and paths outside `files/`. Host-to-host copying does not pass the file through the vintage computer. ZIP contents can be extracted individually or together; existing output files are not replaced. Each session keeps its own browsing location.
 
-Audio plays through the host speakers with one shared playback queue. Put audio files in `files/`; saved M3U playlists go in `files/playlists/`. Windows provides native local playback. Installing FFmpeg with `ffplay` on PATH enables internet radio, additional formats, and playback on other platforms. Playback errors appear in `audio info`.
+Audio plays through the host speakers with one shared playback queue. Select audio from any accessible host folder; saved M3U playlists go in `files/playlists/`. Windows provides native local playback. Installing FFmpeg with `ffplay` on PATH enables internet radio, additional formats, and playback on other platforms. Playback errors appear in `audio info`.
+
+### Menu map
+
+The terminal menu, host activity monitor, and navigation help share one catalogue.
+Each category has at most eight entries, A-H. Workshop is section **6** and System
+is now section **7**. Existing command names remain available. Shortcuts show eight entries per page;
+use `<` and `>` to change pages.
+
+| Location | New entry |
+|---|---|
+| Communications G | Session Capture |
+| Host Connectivity H | Serial Diagnostics |
+| Files & Media H | Find Files |
+
+Workshop's initial tools:
+
+| Key | Tool | What it does |
+|---|---|---|
+| A | Disk Image Inspector | Image size, size hints, raw sector inspection and extraction |
+| B | Hex Viewer | Bounded byte-range view with hex offsets and printable ASCII |
+| C | Checksums | SHA-256, SHA-1, MD5, or CRC-32, streamed for large files |
+| D | Text Converter | Strict character-set conversion, LF/CRLF/CR, upper/lower case |
+| E | BASIC Listing Tools | Validate numbered ASCII listings and renumber common line references |
+| F | Split / Join Files | Chunk a file, then verify sizes and SHA-256 before reassembly |
+| G | Binary / Text Encoding | Hex or Base64 encoding and decoding |
+| H | Compare Files | Stream a comparison and report the first differing byte |
+
+Workshop creates new outputs and refuses to replace existing files. Conversion,
+encoding, and BASIC operations accept source files up to 8 MiB; raw sector
+extraction is limited to 16 MiB per operation. Hashes, comparisons, splitting, and
+joining stream data. Inspecting a disk image does not identify or modify its
+filesystem. Raw sector extraction is not ProDOS/CP/M/DOS filesystem extraction.
+BASIC preparation works on text listings; it does not tokenize programs or convert
+between dialects. Inspect dialect-specific constructs before loading a result.
+Split parts need a compatible reassembly tool on the destination machine.
+
+### Browsing and finding files
+
+File Manager, File Transfers, Archive Browser, Document Viewer, and Text Library
+use one browser. Audio uses the same directory/filter/favorites model with audio
+filtering and playback controls. The current directory and filename filter are
+shared within a session; folder favorites persist across sessions. Full host
+filesystem access remains available.
+
+- A number opens a directory or a file's action menu.
+- D lists drives/root, B opens the parent, H opens the shared folder, G accepts a path.
+- F changes the filename filter; `*` clears it. The current filter is displayed.
+- V manages folder favorites, M manages marked items, O opens other operations.
+- A selected file offers relevant view/play/image/ZIP actions, plus copy, move,
+  rename, transfer, and marking.
+- Copy/move accepts `=` to reuse the remembered destination. Mark multiple items
+  to copy/move a batch; conflicting destinations are rejected before starting.
+- Other operations include folder creation, upload, protocol selection, search,
+  opening a web URL, and reading notifications.
+
+Find Files accepts a filename wildcard and a host folder. Plain text searches are
+also supported (`manual` matches names containing that text). Searches stop after
+200 results or 5 seconds and report that limit, so narrow the folder if needed.
+Inaccessible directories are skipped and counted. Results use the same file actions.
+
+Tool screens separate action lists, navigation controls, usage syntax, information,
+and input prompts with blank rows. Page budgets reserve those rows so the added
+spacing does not push results off the configured screen.
+
+All generic tool menus show at most eight actions per page. N/B changes action
+pages when necessary. Q goes back, Enter refreshes ordinary menus, and empty
+prompted arguments cancel. ATM unwinds the standard nested tool menus to the
+main menu. Reader/game-specific controls are shown on their own screens.
+
+### Reading and notes
+
+The reader supports Enter=next, B=back, F=find, N=next match, M=bookmark,
+R=recall bookmark, G=page, and Q=back. Position and bookmark are saved by file
+and terminal width. The Text Library and note selections open this reader.
+Files selected for viewing use the host's existing extraction support.
+
+In Notepad, O opens edit, rename, export, and search operations. E<number> edits
+an existing note. The line editor accepts `replace <line> <text>`, `append <text>`,
+`delete <line>`, `save`, N/B for preview pages, and Q to cancel changes. Quotes in
+replacement text are retained. R<number> renames a note, X<number> exports to a new
+host path, `F text` searches names and content, and `ALL` resets the search.
+Large content searches inspect note text up to 1 MiB, while filenames are always searched.
+Clipboard creation/copy and the original read/create/delete operations remain.
+
+### Audio
+
+The player stays compact. Queue/playlists opens queue editing (remove/reorder),
+repeat, shuffle, and Radio / Music Folder. Save radio stations by name and save a
+preferred music folder. Browse Files opens the saved music folder when one exists.
+Stop playback before removing or reordering the current track;
+shuffle preserves that track and randomizes the upcoming queue.
+
+CLI examples:
+
+```text
+audio station add "Retro Radio" "https://example.org/stream"
+audio station play "Retro Radio"
+audio musicfolder "F:/Music"
+audio remove 3
+audio reorder 4 2
+audio repeat on
+audio shuffle
+```
+
+### Capture, diagnostics, notifications
+
+Session Capture records readable outgoing terminal text, including locally echoed
+conversation, to `hub_tools/captures/`. Control sequences are translated/removed;
+raw binary transfers and secret input/output are excluded. Captures can be stopped,
+listed, viewed, and exported. It does not replay captured keystrokes or commands.
+
+Serial Diagnostics lists connected sessions, byte counters, last-input age,
+settings and modem signals where supported, recent ASCII/hex traffic, and active
+transfer progress. The host can request cancellation using
+`diagnostics cancel <terminal-name-or-port>`. It never opens a second connection
+to a busy port or toggles modem control lines automatically.
+
+Messages, reminders, scheduled broadcasts, and text-file deliveries are queued.
+They are not injected into another terminal's prompts or binary transfer stream.
+The main menu shows a pending count; Connected Terminals N or `notifications`
+reads them. At a CLI command boundary, pending messages are shown unless quiet
+mode is enabled. `notifications quiet on/off` changes quiet mode for that session.
+`machine quiet on/off` also saves the default. Connected Terminals shows input age
+and queued counts. The host status panel shows transfer byte/retry progress.
+
+### Transfers
+
+XMODEM supports checksum and CRC send negotiation, fragmented reads, duplicate
+block acknowledgment, bounded waits/retries, and host-requested cancellation.
+YMODEM sends CRC headers/data and completes the end-of-batch handshake. Progress
+is host-side and is excluded from the protocol byte stream.
+
+XMODEM does not carry the original length. Received final-block padding is
+preserved by default; trailing 0x1A bytes are never blindly removed. For an exact
+binary length, use:
+
+```text
+xrecv "F:/Incoming/program.bin" 12345
+```
+
+A completed receive is published to its destination only after successful receipt.
+Failed receives keep a uniquely named `.part` file; inspect or remove it yourself.
+Existing destination files are not replaced. Hardware testing with your vintage
+terminal software is still necessary alongside the automated protocol tests.
+
+### Machine preferences and launch presets
+
+Terminal Settings includes transfer protocol, starting screen, reconnect behavior,
+and idle timeout. Host Settings > Machine Preferences exposes all saved settings.
+Width, uppercase mode, character pacing, and ANSI preferences remain available.
+
+```text
+machine list
+machine pace_ms 5
+machine caps on
+machine columns 40
+machine protocol YMODEM
+machine start menu
+machine reconnect menu
+machine idle_seconds 300
+machine clear_sequence 1b76
+```
+
+Clear sequences are hex bytes. `reconnect resume` retains the active screen;
+`reconnect menu` returns to a fresh menu on input after the serial idle timeout.
+An idle timeout is inferred inactivity, not proof that a cable was disconnected.
+Starting-screen changes apply on the next session. Preferences live in
+`settings/local/machine_preferences.json` and are separate from the existing width/ANSI
+preference files; setting width through the menus/CLI keeps them in agreement.
+
+Host Applications > Launch Presets saves a name, application, working directory,
+and background/terminal/keyboard launch mode. The CLI also accepts arguments:
+
+```text
+presets add "Build BASIC" terminal "F:/Retro/Project" python build.py
+presets run "Build BASIC"
+```
+
+New preparation/session tools use Python's standard library. Existing optional
+viewer, audio, keyboard, and speech dependencies remain unchanged.
+
+
+### Terminal height, stable menu footers, and console borders
+
+System (7) > Terminal Settings (C) > Screen Size (1) has width and height controls.
+Height defaults to **24 rows** and is saved per profile. Set it to the actual
+terminal height (16-100); the hub does not guess a vintage terminal's dimensions.
+The CLI equivalents are `machine rows 25` or `height 25`. `rows: 24` can also be
+supplied in a serial profile in config.py before a saved preference exists.
+
+At both 40 and 80 columns, the main menu retains a blank row between the version
+and Shortcuts. Its footer ends at the configured last row, with padding above the
+status line so selecting a short category does not move the prompt. At both widths
+there is a blank row between the ATM note and the input prompt. On a 24-row
+screen, the status/ATM/prompt rows are 21/22/24 at both widths (row 23 is blank). Shorter screens page active entries
+using `<` and `>` when needed. Submenu entry/redraw uses the configured clearing
+sequence before displaying new work.
+
+The modern host dashboard uses Unicode box borders when stdout's encoding can
+represent them. This is independent of the vintage terminal's character set;
+serial/Telnet menus retain their existing ASCII output. Windows, macOS, and Linux
+Unicode-capable terminals need a font with box-drawing glyphs. An incompatible
+output encoding automatically uses ASCII borders. Set `RSH_ASCII_BORDERS=1`
+before starting the hub to force the old borders if your font or terminal needs it.
 
 ## Configuration
 
 All configuration is centralized in `config.py`. This is the first file you should edit after installation.
+
+### JSON settings and personal data
+
+`config.py` remains the hardware and startup configuration file. JSON settings
+and application data live under **settings/**, avoiding a name collision with
+that Python module:
+
+- **settings/defaults/** contains version-controlled, public starter templates,
+  including the supplied web/FTP bookmarks and keyboard profiles. The AI template
+  contains a placeholder key and the Telnet allowlist starts empty. Built-in BBS
+  entries remain in `config.py` and seed the managed directory when needed.
+- **settings/local/** contains live JSON: credentials, mail, bookmarks, contacts,
+  appointments, shortcuts, scheduler tasks, terminal preferences, reading
+  positions, and other saved settings. Missing starter files are copied here;
+  other files are generated when their features need them. Editing live settings
+  never changes the public templates.
+- On first use, existing JSON files from the project root, `mail/`, `hub_tools/`,
+  and the former `retro_os/` storage location move into `settings/local/`.
+  Existing local files take priority; differing old copies are preserved under
+  `settings/local/legacy/`. Identical duplicate copies are removed. No existing
+  settings are replaced by templates. JSON migration leaves non-JSON content,
+  such as session captures in `hub_tools/captures/`, in place.
+
+Back up `settings/local/` privately. It may contain passwords, API keys, mail,
+addresses, and personal paths. Git ignores that directory and JSON outside the
+explicit public-defaults location, including legacy JSON locations. Only put
+reviewed, sanitized starter content in `settings/defaults/`; do not copy live
+files there wholesale or force-add ignored personal files. To publish a new
+bookmark default, add the intended public entry to its template separately.
+Template changes affect missing local files, never existing personal copies.
+Moving a previously tracked file does not erase it from older Git history.
 
 ### Serial Port Configuration
 
@@ -210,16 +453,17 @@ SERIAL_CONFIGS = {
         "translate_ansi": False,  # Optional: translate incoming ANSI/VT100 for a non-ANSI terminal
         "ansi_clear_sequence": b"\x0c",  # Replacement bytes for supported clear requests
         "ansi_home_clears_screen": False, # Optional: treat cursor-home as a screen clear
-        "columns": 80                    # 40- or 80-column terminal layout
+        "columns": 80,                   # 40- or 80-column terminal layout
+        "rows": 24                       # Terminal height, saved per profile
     },
     # Add more computers as needed...
 }
 ```
 
 Set `columns` independently for each machine profile to `40` or `80`. This is
-the profile's default width; the main-menu **System → Columns** option can
+the profile's default width; the main-menu **System → Terminal Settings → Screen Size** option can
 switch and save that profile's preference. The saved selection is stored in
-`terminal_columns.json` and takes precedence over `config.py`. At 40 columns,
+`settings/local/terminal_columns.json` and takes precedence over `config.py`. At 40 columns,
 menus use a compact layout, browser pages wrap to the configured width, long
 labels are shortened to fit, and ANSI translation uses the configured terminal
 width. The included defaults use 80 columns for APPLE2, IBM, and TRS80 profiles,
@@ -283,15 +527,15 @@ The initial BBS directory is seeded from three synchronized lists in `config.py`
 
 The first time the hub starts, it uses those lists as its directory. Changes
 made with **Bulletin Boards → M=Manage directory** are saved to
-`bbs_directory.json` and include the original entries. The saved directory then
+`settings/local/bbs_directory.json` and include the original entries. The saved directory then
 takes precedence over `config.py`, so entries can be added, edited, and deleted
-without keeping three lists synchronized. Delete `bbs_directory.json` while
+without keeping three lists synchronized. Delete `settings/local/bbs_directory.json` while
 the hub is stopped to restore the defaults from `config.py`.
 
 In the **Telnet** option, enter a hostname/IP and port for a direct TCP terminal
 connection. Choose whether to save that destination in Telnet bookmarks, add it
 to the Bulletin Boards directory, or connect without saving. Telnet bookmarks
-are stored separately in `telnet_bookmarks.json`; select a saved destination by
+are stored separately in `settings/local/telnet_bookmarks.json`; select a saved destination by
 number or use `D` to delete it. Both connection types support `ATH` to hang up
 and `ATM` to return to the main menu. Incoming data uses the same configured
 ANSI translation and screen-clear behavior.
@@ -318,7 +562,7 @@ the server works even if that profile's serial port is not connected.
 When a listener starts, the hub prints detected LAN IPv4 address(es) and ports
 to use for connecting.
 
-Incoming Telnet clients must be listed in `telnet_allowlist.json`. The hub
+Incoming Telnet clients must be listed in `settings/local/telnet_allowlist.json`. The hub
 creates this file with an empty `allowed_ips` array on its first network-enabled
 start; no address, including loopback, is automatically trusted. Serial
 connections do not use this approval process.
@@ -339,7 +583,7 @@ You can also edit the JSON manually, using individual IP addresses:
 }
 ```
 
-See `telnet_allowlist.example.json` for an empty template. Manual additions apply
+See `settings/defaults/telnet_allowlist.example.json` for an empty template. Manual additions apply
 to waiting clients and new connections without a restart. Removing an address
 blocks its next connection; it does not end an existing approved session.
 Missing files mean no addresses are approved. Invalid JSON, invalid entries,
@@ -362,7 +606,7 @@ To enable the AI Assistant feature:
 Install the optional client library with `python -m pip install openai`, then
 configure a key using either method below.
 
-1. Create `ai_config.json` in the project directory:
+1. Edit `settings/local/ai_config.json` (created from the starter template):
    ```json
    {
        "api_key": "your-openai-api-key-here",
@@ -373,7 +617,7 @@ configure a key using either method below.
 2. Or set the `OPENAI_API_KEY` environment variable
 
 The default model is `gpt-5.6-terra`, OpenAI's recommended replacement for the
-retired `gpt-3.5-turbo`. Set `model` in `ai_config.json` or `OPENAI_MODEL` to use
+retired `gpt-3.5-turbo`. Set `model` in `settings/local/ai_config.json` or `OPENAI_MODEL` to use
 another available Chat Completions model; `OPENAI_MODEL` takes precedence. The
 assistant header shows the selected model. Reopen the assistant after changing
 it; an existing conversation keeps its model settings.
@@ -413,14 +657,15 @@ errors are printed as ordinary text without ANSI color codes.
 The main menu features an interactive accordion flyout layout designed for vintage 40- and 80-column terminals:
 
 - **[0] Shortcuts**: User-defined command macros with custom arguments. Automatically flies out when populated. Press `+` to add a shortcut or `-` to remove one.
-- **[1] Communications**: `A` Bulletin Boards, `B` Telnet, `C` Web Browser, `D` FTP, `E` Electronic Mail (Hub & Internet), and `F` Connected Terminals (list, message, or send a text file).
-- **[2] Host Connectivity**: `A` Host Applications, `B` Launch with Keyboard Bridge, `C` Keyboard Bridge Profiles, `D` Serial COM Port Bridge, `E` Host Terminal / Prompt (`cmd.exe`/`powershell`/unix shell), `F` System Monitor & Media Controls, and `G` Host Printing.
-- **[3] Files & Media**: `A` File Manager, `B` File Transfers (XMODEM, YMODEM, ASCII), `C` Archive Browser, `D` Text Library, `E` Document Viewer (PDF, DOCX, XLSX, CSV, Markdown, Web), `F` ASCII Image Viewer, and `G` Audio Player.
-- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), `C` Lunar Lander, `D` Hunt the Wumpus, `E` Blackjack, `F` Mastermind, `G` Word Guess, and `H` Star Trek. WarGames remains available through the `WARGAMES` CLI command.
+- **[1] Communications**: `A` Bulletin Boards, `B` Telnet, `C` Web Browser, `D` FTP, `E` Electronic Mail (Hub & Internet), `F` Connected Terminals (list, message, or send a text file), `G` Session Capture, and `H` WOPR.
+- **[2] Host Connectivity**: `A` Host Applications, `B` Launch with Keyboard Bridge, `C` Keyboard Bridge Profiles, `D` Serial COM Port Bridge, `E` Host Terminal / Prompt (`cmd.exe`/`powershell`/unix shell), `F` System Monitor & Media Controls, `G` Host Printing, and `H` Serial Diagnostics.
+- **[3] Files & Media**: `A` File Manager, `B` File Transfers (XMODEM, YMODEM, ASCII), `C` Archive Browser, `D` Text Library, `E` Document Viewer (PDF, DOCX, XLSX, CSV, Markdown, Web), `F` ASCII Image Viewer, `G` Audio Player, and `H` Find Files.
+- **[4] Games**: Dedicated retro text games: `A` Minesweeper, `B` Solitaire (Klondike), `C` Lunar Lander, `D` Hunt the Wumpus, `E` Blackjack, `F` Mastermind, `G` Word Guess, and `H` Star Trek.
 - **[5] Accessories**: `A` Notepad, `B` Calendar, `C` Calculator, `D` Address Book, `E` Unit Converter, `F` Weather & News, `G` AI Assistant, and `H` LOGO. Logo accepts commands in the terminal and reports turtle position and heading after drawing; when Tkinter is available, it also opens a host-side turtle window.
-- **[6] System**: `A` Command Shell (`cli>` / `OS`), `B` Task Scheduler, `C` Terminal Settings (40/80 cols, Caps-Only, Serial Pacing, ANSI), `D` Keyboard Profiles, `E` Help & User Guide, `F` Welcome Banner, and `G` Host Settings. Remote TCP clients also see `H` Disconnect at the bottom.
+- **[6] Workshop**: `A` Disk Image Inspector, `B` Hex Viewer, `C` Checksums, `D` Text Converter, `E` BASIC Listing Tools, `F` Split / Join Files, `G` Binary / Text Encoding, and `H` Compare Files.
+- **[7] System**: `A` Command Shell (`cli>` / `OS`), `B` Task Scheduler, `C` Terminal Settings (40/80 cols, Caps-Only, Serial Pacing, ANSI), `D` Keyboard Profiles, `E` Help & User Guide, `F` Welcome Banner, and `G` Host Settings. Remote TCP clients also see `H` Disconnect at the bottom.
 
-Enter a section number (`0`-`6`) or name (`GAMES`, `SYS`, `HOST`, etc.) to expand it, then enter the letter (`A`-`G`) to activate an option. You can also switch between the accordion flyout and the legacy numbered menu layout.
+Enter a section number (`0`-`7`) or name (`GAMES`, `SYS`, `HOST`, etc.) to expand it, then enter the letter (`A`-`H`) to activate an option. You can also switch between the accordion flyout and the legacy numbered menu layout.
 
 ### LOGO
 
@@ -454,7 +699,7 @@ main menu. `A` saves the current page as a bookmark; `M` opens saved
 bookmarks, where you can enter a number to open it or `D` followed by a
 number to delete it. HTML search inputs appear as `I<number>`; choose one,
 enter the value, then use `S<number>` to submit its form. Press Backspace to
-edit the current input line. Bookmarks are stored in `browser_bookmarks.json`
+edit the current input line. Bookmarks are stored in `settings/local/browser_bookmarks.json`
 beside the hub. The browser includes starter bookmarks for retro-computing
 resources. It displays text and numbered links; JavaScript and images are not
 supported. HTML GET/POST forms are supported when their fields
@@ -470,7 +715,7 @@ refresh. Enter `A` to bookmark the current site; `M` opens saved FTP sites,
 where a number opens a site and `D<number>` deletes a bookmark. Bookmarks retain
 the hostname, port, FTP/FTPS selection, and username, but never the password;
 the password is prompted for when opening a saved site. They are stored in
-`ftp_bookmarks.json`.
+`settings/local/ftp_bookmarks.json`.
 The file includes starter FTP sites.
 
 Selecting a file prompts for **Host** or **Direct**:
@@ -494,30 +739,18 @@ credentials or data.
 
 The hub supports multiple file transfer protocols:
 
-- **XMODEM**: Classic 128-byte block protocol with checksum
+- **XMODEM**: Classic 128-byte blocks with checksum or CRC negotiation
 - **YMODEM**: 1024-byte block protocol for faster transfers
 - **ASCII**: Plain text streaming (no error correction)
 
-To send a file from the hub to your vintage computer:
-1. Select "File Transfers" from the main menu
-2. Browse into a directory by selecting its number, or type a directory path
-   to jump directly to it. `D` opens the available drives (or filesystem root),
-   `B` goes to the parent directory, and `H` returns to the hub's `files/`
-   home directory.
-3. Choose the transfer protocol (X/Y/A)
-4. Select the file number
-5. Start the receive function on your vintage computer
+Open Files & Media > File Transfers and browse to any accessible host folder.
+`D` opens drives/root, `B` the parent, `H` the shared folder, and `G` a typed
+path. Select a file and its Send action, choose XMODEM/YMODEM/ASCII, then start
+the matching receive function on the vintage computer. Other operations (`O`)
+contains upload and protocol controls; uploads use the current folder.
 
-To upload a file from your vintage computer:
-1. Select "File Transfers" from the main menu
-2. Press "U" for upload
-3. Enter the filename to save as
-4. Start the send function on your vintage computer
-Uploads are saved in the directory currently open in File Transfers.
-
-The File Transfers menu opens in the hub's `files/` directory by default, but
-you can browse or type a path to transfer files from anywhere the hub process
-can access. Uploads are saved in the currently open directory.
+For receive completion, exact XMODEM lengths, and partial files, see Transfers
+above. Host-to-host copies are available directly in File Manager.
 
 ### Directory Structure
 
@@ -525,16 +758,6 @@ can access. Uploads are saved in the currently open directory.
 Retro-Serial-Hub/
 ├── RETRO_SERIAL_HUB.py    # Main hub program
 ├── config.py               # Configuration file (edit this!)
-├── ai_config.json          # OpenAI API key (optional)
-├── bbs_directory.json     # Managed BBS directory (created when first changed)
-├── user_shortcuts.json    # User-configured shortcuts (created when first added)
-├── terminal_columns.json  # Saved per-profile 40/80-column choices
-├── telnet_bookmarks.json  # Telnet bookmarks (created when first saved)
-├── ftp_bookmarks.json     # FTP/FTPS bookmarks (created when first saved)
-├── keyboard_profiles.json # Retro keyboard mapping profiles (Apple II, C64, etc.)
-├── host_settings.json     # Saved host preferences (created when changed)
-├── telnet_allowlist.json  # Approved source IPs (created on network-enabled startup)
-├── telnet_allowlist.example.json # Empty allowlist template
 ├── requirements.txt       # Python dependencies
 ├── rsh_ai.py              # AI Assistant module
 ├── rsh_bbs.py             # BBS directory and management module
@@ -543,7 +766,11 @@ Retro-Serial-Hub/
 ├── rsh_ftp.py             # FTP/FTPS browser and downloads
 ├── rsh_browser.py         # Text-first web browser and bookmarks
 ├── rsh_bridge.py          # COM port bridge module
-├── rsh_files.py           # File transfer module
+├── rsh_files.py           # File transfer interface
+├── rsh_transfer.py        # XMODEM/YMODEM protocol engines
+├── rsh_storage.py         # Central JSON paths, defaults, and upgrade migration
+├── rsh_session.py         # Session capture, notifications, and diagnostics
+├── rsh_preferences.py     # Saved machine preferences
 ├── rsh_keyboard.py        # Host keyboard bridge
 ├── rsh_access.py          # Telnet admission and host approval queue
 ├── rsh_host.py            # Local host-console terminal session
@@ -560,6 +787,12 @@ Retro-Serial-Hub/
 │   ├── toolkit.py         # Calendar, conversion, contacts, files, and ZIP tools
 │   ├── audio_player.py    # Shared audio playback and playlists
 │   ├── menu.py            # Accordion flyout menu engine
+│   ├── menu_data.py       # Shared terminal/dashboard menu catalogue
+│   ├── menu_layout.py     # Screen-height-aware menu layout
+│   ├── file_browser.py    # Shared host file navigation and actions
+│   ├── reader.py          # Searchable reader with saved positions
+│   ├── workshop.py        # File preparation and inspection tools
+│   ├── session_tools.py   # Capture, diagnostics, presets, and preferences
 │   ├── shortcuts.py       # User-defined command shortcuts manager
 │   ├── scheduler.py       # Background periodic task scheduler
 │   ├── mail_service.py    # Hub mailbox and internet email backend
@@ -571,7 +804,10 @@ Retro-Serial-Hub/
 ├── files/                 # File transfer storage
 ├── text/                  # Text library files, README, and starter articles
 ├── notes/                 # Notes storage
-├── hub_tools/             # Local appointment and contact data (not committed)
+├── settings/              # Central JSON storage
+│   ├── defaults/          # Publishable starter templates
+│   └── local/             # Ignored personal settings and data
+├── hub_tools/             # Session captures (not committed)
 └── tests/                 # Unit tests
 ```
 
@@ -625,6 +861,21 @@ This design allows you to customize or extend features without modifying the cor
 - Try a different cable
 
 ## Release Notes
+
+### v2.5
+
+- Star Trek now shows a quick-start command guide on launch, with examples, course directions, combat, and resupply instructions; terminal output pages to the configured screen size.
+- Consolidated JSON settings and application data under `settings/`: publishable starter defaults are separate from ignored personal files, with automatic migration from earlier locations and preservation of existing bookmarks.
+- Added Workshop as category 6 with disk-image inspection, hex viewing, checksums, text conversion, BASIC listing preparation, split/join, hex/Base64 encoding, and file comparison. System moves to category 7; categories retain at most eight A–H entries.
+- Unified host-file browsing across file tools, with drives/root, parent folders, direct paths, favorites, filters, marking, and batch copy/move. Audio can select files anywhere the host can access. Added Find Files under Files & Media H.
+- Added searchable, resumable reading and bookmarks, plus note editing, renaming, exporting, and content search.
+- Simplified the audio player menu; added queue editing, repeat/shuffle, named radio stations, and a remembered music folder.
+- Added Session Capture under Communications G and Serial Diagnostics under Host Connectivity H, including transfer progress and host cancellation.
+- Improved XMODEM/YMODEM negotiation, retries, fragmented reads, and completion handling. Receives preserve binary padding, avoid overwriting files, and publish completed files only after success.
+- Added serial inactivity timeouts and cleared stale menu selections when a port becomes active again. Queued notifications keep messages out of prompts and transfer streams, with optional quiet mode.
+- Added saved machine preferences and host application launch presets. Terminal height defaults to 24 rows per profile; menus keep the footer stable, clear submenus, and reserve readable spacing in 40- and 80-column layouts.
+- Updated the host dashboard with Unicode borders and ASCII fallback, a single color-coded Connections list, and an activity monitor that collapses during host interaction to give output more room. `clear` restores the expanded layout unless `monitor collapse` pins it compact; `monitor auto` restores automatic behavior.
+- Enhanced the WOPR/Joshua interaction while retaining the IMSAI/CP/M dialer, with movie-style displays, gentler pacing, and optional synchronized host speech. Open it from Communications H or `wargames`.
 
 ### v2.4
 
@@ -850,3 +1101,5 @@ For questions or issues, please open a GitHub issue or contact the retro computi
 ---
 
 **Happy retro computing!** 🖥️📞
+
+Third-party component credits and license information: [Third-party notices](THIRD_PARTY_NOTICES.md).
