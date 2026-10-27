@@ -1,12 +1,15 @@
 """Speech subprocess isolation, replacement, and failure behavior."""
 import unittest
+from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 from rsh_speech import HostSpeech, find_espeak
 
 
 class SpeechTests(unittest.TestCase):
     def setUp(self):
-        self.engine = self.enterContext(patch("rsh_speech.find_espeak", return_value="espeak-ng"))
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        self.engine = stack.enter_context(patch("rsh_speech.find_espeak", return_value="espeak-ng"))
         self.speech = HostSpeech()
         self.addCleanup(self.speech.stop)
 

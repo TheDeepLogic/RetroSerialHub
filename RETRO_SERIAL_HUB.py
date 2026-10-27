@@ -446,7 +446,9 @@ def read_input_line(ser):
             elif ch[0] >= 32:
                 buf += ch
                 ser.write(ch)
-        time.sleep(0.02)
+        else:
+            # Buffered pastes and queued host commands need no pacing delay.
+            time.sleep(0.02)
     return buf.decode(errors="ignore").strip()
 
 def paginate_lines(ser, lines, page_lines=None, quit_msg=False):

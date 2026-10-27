@@ -387,6 +387,7 @@ class RetroOsMenuAndLauncherTests(unittest.TestCase):
             return FakeProc()
 
         with patch("subprocess.Popen", side_effect=fake_popen), \
+             patch("retro_os.host_env.platform.system", return_value="Windows"), \
              patch("pathlib.Path.is_file", return_value=True):
             # Pass forward slashes like from an Apple II
             proc = host.launch_app("C:/Windows/notepad.exe", args=["C:/test/file.txt"])
