@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from rsh_telnet import create_session, handle_input
 
@@ -96,6 +97,45 @@ class TelnetMenuTests(unittest.TestCase):
         self.assertIsNone(action)
         self.assertEqual(self.session["submode"], "HOST")
         self.assertIn(b"valid hostname", b"".join(self.serial.writes))
+
+    def prepare_save(self):
+        for text in ("A", "bbs.example.org", "23", "Saved"):
+            self.handle(text)
+
+    def test_failed_save_preserves_state_and_retry_does_not_duplicate(self):
+        self.prepare_save()
+        with patch("rsh_telnet.Path.replace", side_effect=OSError("disk full")):
+            self.assertEqual(self.handle("T"), (True, None))
+        self.assertEqual(self.session["bookmarks"], [])
+        self.assertEqual(self.session["submode"], "SAVE")
+        self.assertEqual(list(self.bookmarks_path.parent.iterdir()), [])
+        self.assertIn(b"disk full", b"".join(self.serial.writes))
+        self.assertEqual(self.handle("T")[1], ("CONNECT", "bbs.example.org", 23))
+        self.assertEqual(len(json.loads(self.bookmarks_path.read_text())), 1)
+
+    def test_failed_delete_preserves_disk_and_memory_and_can_cancel(self):
+        self.prepare_save()
+        self.handle("T")
+        original = self.bookmarks_path.read_bytes()
+        self.handle("D")
+        with patch("rsh_telnet.Path.replace", side_effect=PermissionError("locked")):
+            self.assertEqual(self.handle("1"), (True, None))
+        self.assertEqual(self.bookmarks_path.read_bytes(), original)
+        self.assertEqual(len(self.session["bookmarks"]), 1)
+        self.assertEqual(self.session["submode"], "DELETE")
+        self.assertEqual(list(self.bookmarks_path.parent.glob("*.tmp")), [])
+        self.handle("Q")
+        self.assertEqual(self.session["submode"], "MENU")
+
+    def test_bbs_save_failure_can_connect_without_saving(self):
+        self.prepare_save()
+        with patch("rsh_telnet._save_bookmarks") as save:
+            def fail(*args):
+                raise OSError("read only")
+            self.assertEqual(self.handle("B", add_bbs_entry=fail), (True, None))
+            self.assertEqual(self.session["submode"], "SAVE")
+            self.assertEqual(self.handle("N")[1], ("CONNECT", "bbs.example.org", 23))
+            save.assert_not_called()
 
 
 if __name__ == "__main__":

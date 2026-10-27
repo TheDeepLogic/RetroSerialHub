@@ -14,6 +14,16 @@ from rsh_host import HostTerminal
 
 
 class HostTerminalTests(unittest.TestCase):
+    def test_interactive_line_drains_buffered_input_without_sleeping(self):
+        import RETRO_SERIAL_HUB as hub
+        output = []
+        terminal = HostTerminal(output.append)
+        terminal.submit("C:/a long folder/with a pasted filename.bin")
+        with patch.object(hub.time, "sleep") as sleep:
+            self.assertEqual(hub.read_input_line(terminal),
+                             "C:/a long folder/with a pasted filename.bin")
+        sleep.assert_not_called()
+
     def test_input_queue_preserves_lines_and_output_never_uses_stdout(self):
         output = []
         terminal = HostTerminal(output.append)
