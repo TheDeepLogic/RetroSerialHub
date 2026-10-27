@@ -169,8 +169,14 @@ def handle_input(sess, line_str, ser, use_ansi=True):
             _write(ser,'Invalid note number.\r\nCommand: '); return True,None
         name = sess['notes'][number]
         if match[1] == 'E':
+            try:
+                original = (base / name).read_text(encoding='utf-8')
+            except (OSError, UnicodeError) as exc:
+                sess['notice'] = f'Cannot edit note: {exc}'
+                _render_menu(ser,sess)
+                return True,None
             sess['editing'] = name
-            sess['edit_original'] = (base / name).read_text(encoding='utf-8')
+            sess['edit_original'] = original
             sess['edit_lines'] = sess['edit_original'].splitlines()
             sess['edit_page'] = 0
             _render_editor(ser,sess)
