@@ -2,7 +2,6 @@
 
 from rsh_storage import settings_dir, settings_path
 import json
-import tempfile
 from pathlib import Path
 
 from rsh_terminal import clear_terminal_screen, terminal_columns
@@ -75,19 +74,16 @@ def _load_bookmarks(path):
 
 def _save_bookmarks(bookmarks, path):
     path = Path(path)
-    temporary_path = None
+    temporary_path = path.with_name(path.name + ".tmp")
     validated = _validate_bookmarks(bookmarks)
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                                         dir=path.parent, prefix=path.name + ".",
-                                         suffix=".tmp", delete=False) as bookmark_file:
-            temporary_path = Path(bookmark_file.name)
+        with temporary_path.open("w", encoding="utf-8") as bookmark_file:
             json.dump(validated, bookmark_file, indent=2)
             bookmark_file.write("\n")
         temporary_path.replace(path)
     except OSError as exc:
         try:
-            if temporary_path is not None and temporary_path.exists():
+            if temporary_path.exists():
                 temporary_path.unlink()
         except OSError:
             pass
@@ -205,23 +201,14 @@ def handle_input(
         port = session["new_port"]
         name = session["new_name"]
         if upper == "T":
-            bookmarks = session["bookmarks"] + [
+            session["bookmarks"].append(
                 {"name": name, "host": host, "port": port}
-            ]
-            try:
-                _save_bookmarks(bookmarks, session["bookmarks_path"])
-            except OSError as exc:
-                _write(ser, f"\r\n{exc}\r\nRetry T, save to B, or N to connect without saving: ")
-                return True, None
-            session["bookmarks"] = bookmarks
+            )
+            _save_bookmarks(session["bookmarks"], session["bookmarks_path"])
         elif upper == "B":
             if add_bbs_entry is None:
                 raise RuntimeError("BBS directory saving is unavailable.")
-            try:
-                add_bbs_entry(name, host, port)
-            except OSError as exc:
-                _write(ser, f"\r\n{exc}\r\nChoose T, B, or N: ")
-                return True, None
+            add_bbs_entry(name, host, port)
         elif upper != "N":
             _write(ser, "Choose T, B, or N: ")
             return True, None
@@ -232,10 +219,6 @@ def handle_input(
         return True, _connect_action(host, port)
 
     if state == "DELETE":
-        if text.upper() == "Q":
-            session["submode"] = "MENU"
-            _render_menu(ser, session, use_ansi)
-            return True, None
         if not text.isdigit():
             _write(ser, "Enter a bookmark number: ")
             return True, None
@@ -243,14 +226,8 @@ def handle_input(
         if not 0 <= index < len(session["bookmarks"]):
             _write(ser, "Invalid bookmark number. Enter a bookmark number: ")
             return True, None
-        bookmarks = session["bookmarks"][:]
-        del bookmarks[index]
-        try:
-            _save_bookmarks(bookmarks, session["bookmarks_path"])
-        except OSError as exc:
-            _write(ser, f"\r\n{exc}\r\nRetry bookmark number, or Q to cancel: ")
-            return True, None
-        session["bookmarks"] = bookmarks
+        del session["bookmarks"][index]
+        _save_bookmarks(session["bookmarks"], session["bookmarks_path"])
         session["submode"] = "MENU"
         _write(ser, "\r\nTelnet bookmark deleted.\r\n")
         _render_menu(ser, session, use_ansi)

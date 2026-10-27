@@ -1,7 +1,6 @@
 import io
 import os
 import unittest
-from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 from rsh_console import ConsoleDashboard
@@ -10,17 +9,15 @@ from tests.test_rsh_console import VirtualScreen
 
 class IncrementalRedrawTests(unittest.TestCase):
     def setUp(self):
-        stack = ExitStack()
-        self.addCleanup(stack.close)
         self.dashboard = ConsoleDashboard({})
         self.dashboard.set_host_terminal(MagicMock())
         self.dashboard.append_host_output('Menu heading\ncli> ')
         self.output = io.StringIO()
         self.size = os.terminal_size((150, 40))
         self.clock = '2026-10-26 12:00:00'
-        stack.enter_context(patch('rsh_console.sys.stdout', self.output))
-        stack.enter_context(patch('shutil.get_terminal_size', side_effect=lambda **kwargs: self.size))
-        stack.enter_context(patch('rsh_console.time.strftime', side_effect=lambda *args: self.clock))
+        self.enterContext(patch('rsh_console.sys.stdout', self.output))
+        self.enterContext(patch('shutil.get_terminal_size', side_effect=lambda **kwargs: self.size))
+        self.enterContext(patch('rsh_console.time.strftime', side_effect=lambda *args: self.clock))
 
     def draw(self, force=False):
         self.output.seek(0)

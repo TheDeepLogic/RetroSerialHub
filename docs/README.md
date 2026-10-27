@@ -7,7 +7,6 @@ is new in v2.7a.
 
 | Note | What it explains |
 |---|---|
-| [Telnet and input reliability](telnet-input-reliability.md) | Recoverable bookmark saves, bounded protocol polling, buffered input latency, and Python 3.9 test compatibility. |
 | [Transfer reliability](transfer-reliability.md) | Overall fragmented-read deadlines, disconnected cancellation recovery, and deterministic regression tests. |
 | [Console redraw measurements](console-redraw-measurements.md) | Why 100 unchanged refreshes went from 1,761,800 bytes to zero, and which changes still require a full paint. |
 | [Terminal layout and cursor budgets](terminal-layout-and-cursor-budgets.md) | Why an 80-column host pane needs a 124-column window for side-by-side status, and why the last cell matters. |

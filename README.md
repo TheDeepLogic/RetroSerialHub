@@ -1085,13 +1085,6 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
-- **Telnet and Input Reliability**: Failed Telnet bookmark saves/deletions now
-  preserve the current list and offer a retry; Q cancels deletion, and N connects
-  without saving after an add failure. Saves use unique temporary files. Inbound
-  Telnet polling yields during continuous protocol-only traffic. Interactive
-  prompts drain buffered input immediately instead of delaying every character.
-  Regression tests also run on the documented Python 3.9 minimum; see the
-  [Telnet and input reliability notes](docs/telnet-input-reliability.md).
 - **Transfer Failure Recovery**: XMODEM/YMODEM fragmented reads now enforce the
   overall read deadline even when a peer keeps sending small fragments. A failed
   cancellation write on a disconnected transport preserves the original transfer

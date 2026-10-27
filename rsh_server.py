@@ -25,10 +25,7 @@ class SocketTerminal:
 
     @property
     def in_waiting(self):
-        # Bound each poll even if the peer continuously sends negotiation only.
-        for _ in range(16):
-            if self._buffer or self._eof:
-                break
+        while not self._buffer and not self._eof:
             readable, _, _ = select.select([self._socket], [], [], 0)
             if not readable:
                 break

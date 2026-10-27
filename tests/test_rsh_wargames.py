@@ -1,6 +1,5 @@
 """WarGames terminal flows and deterministic, nonblocking screen playback."""
 import unittest
-from contextlib import ExitStack
 from unittest.mock import patch
 
 import rsh_joshua as joshua
@@ -23,9 +22,7 @@ class Terminal:
 
 class WarGamesTests(unittest.TestCase):
     def setUp(self):
-        stack = ExitStack()
-        self.addCleanup(stack.close)
-        self.speech = stack.enter_context(patch("rsh_joshua.SPEECH"))
+        self.speech = self.enterContext(patch("rsh_joshua.SPEECH"))
         self.speech.busy.return_value = False
         self.speech.error = ""
         self.ser = Terminal()
