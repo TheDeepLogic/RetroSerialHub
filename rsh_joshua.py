@@ -8,7 +8,9 @@ import re
 import textwrap
 import time
 
-import config
+from rsh_config import load_settings
+
+SPEECH_CONFIG = load_settings()["wopr_speech"]
 from rsh_speech import SPEECH
 
 from rsh_terminal import clear_terminal_screen, terminal_columns
@@ -29,10 +31,10 @@ def speak(ser, text):
     spoken = '\n'.join(line for line in text.splitlines()
                        if re.search(r'[A-Z0-9]', line.upper()) and '|' not in line)
     if state and state['speech'] and spoken.strip():
-        SPEECH.say(state['speech_owner'], spoken, config.WOPR_SPEECH_RATE,
-                   config.WOPR_SPEECH_VOLUME, config.WOPR_SPEECH_VOICE,
-                   config.WOPR_SPEECH_PITCH, config.WOPR_SPEECH_GAP,
-                   config.WOPR_SPEECH_EXECUTABLE)
+        SPEECH.say(state['speech_owner'], spoken, SPEECH_CONFIG["rate"],
+                   SPEECH_CONFIG["volume"], SPEECH_CONFIG["voice"],
+                   SPEECH_CONFIG["pitch"], SPEECH_CONFIG["gap"],
+                   SPEECH_CONFIG["executable"])
 
 
 def stop_speech(sess):
@@ -51,7 +53,7 @@ def emit(ser, text="", prompt=False):
 
 def new_state():
     return {"phase": "LOGON", "events": deque(), "due": 0.0, "speed": 1.0,
-            "speech": config.WOPR_SPEECH_ENABLED, "speech_owner": object(),
+            "speech": SPEECH_CONFIG["enabled"], "speech_owner": object(),
             "failures": 0, "war": None, "chess_offer": False,
             "goal_asked": False, "board": [" "] * 9, "ttt_turn": "X"}
 

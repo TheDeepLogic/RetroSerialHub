@@ -15,7 +15,7 @@ import unicodedata
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-VERSION = "2.7"
+VERSION = "2.7a"
 
 from retro_os.menu_data import console_sections
 
@@ -171,6 +171,10 @@ class ConsoleDashboard:
         self._host_command = ""
         self._telnet_access = None
         self._host_terminal = None
+        self._config_store = None
+        self._config_callback = None
+        self._config_wizard = None
+        self._config_on_close = None
         self._screen = HostScreen()
         self._host_output_offset = 0
         self._output_page_size = 8
@@ -379,6 +383,8 @@ class ConsoleDashboard:
 
     def _host_special_key(self, action):
         with self._lock:
+            if self._config_wizard is not None:
+                return
             if action == "end":
                 self._resume_live()
             elif action in ("page_up", "page_down"):
@@ -457,6 +463,17 @@ class ConsoleDashboard:
         with self._lock:
             return self._dispatch_host_command(command)
 
+    def set_configuration(self, store, on_profile=None):
+        self._config_store, self._config_callback = store, on_profile
+
+    def start_first_run_configuration(self, on_close=None):
+        if self._config_store is None or self._config_store.load().get('configuration_completed', True):
+            return False
+        from rsh_config_wizard import ConfigWizard
+        self._config_wizard = ConfigWizard(self._config_store, first_run=True)
+        self._config_on_close = on_close
+        return True
+
     def _dispatch_host_command(self, command, remote=False):
         if self._telnet_access is None and self._host_terminal is None:
             self._command_error = "Host console session is unavailable."
@@ -467,7 +484,25 @@ class ConsoleDashboard:
         try:
             if not self._can_input(remote):
                 raise ValueError("Host commands require an available host console.")
-            if getattr(self._host_terminal, "secret_input", False) is True:
+            if self._config_wizard is not None:
+                if remote:
+                    raise ValueError("Configuration must be entered at the local host console.")
+                self._config_wizard.feed(command)
+                if not self._config_wizard.active:
+                    self._config_wizard = None
+                    if self._config_on_close is not None:
+                        callback, self._config_on_close = self._config_on_close, None
+                        callback()
+            elif parts in (["config"], ["host", "config"]):
+                if remote:
+                    raise ValueError("Configuration must be entered at the local host console.")
+                if self._config_store is None:
+                    raise ValueError("Host configuration store is unavailable.")
+                if getattr(self._host_terminal, "secret_input", False) is True:
+                    raise ValueError("Finish the current password prompt before opening configuration.")
+                from rsh_config_wizard import ConfigWizard
+                self._config_wizard = ConfigWizard(self._config_store, self._config_callback)
+            elif getattr(self._host_terminal, "secret_input", False) is True:
                 self._host_terminal.submit(command)
             elif parts in (["host", "help"], ["console", "help"]):
                 self._console_message = [(line, None) for line in (
@@ -477,6 +512,7 @@ class ConsoleDashboard:
                     "theme [name or number]    List or select console schemes",
                     "theme background on/off  Toggle panel backgrounds",
                     "theme colors on/off      Toggle all console colors",
+                    "config                   Host-only JSON configuration wizard",
                     "allow <#> / deny <#>      Answer incoming Telnet requests",
                     "allow host <#> / deny host <#>  Approve first HOST use by IP/port",
                     "pending                  List requests waiting for approval",
@@ -518,6 +554,8 @@ class ConsoleDashboard:
             return True
         except (OSError, ValueError) as exc:
             self._command_error = str(exc)
+            if self._config_wizard is not None:
+                self._config_wizard.notice = str(exc)
             self.log(f"Host command failed: {exc}", level="red")
             return False
 
@@ -1104,6 +1142,8 @@ class ConsoleDashboard:
         return rows[:height]
 
     def _host_hints(self):
+        if self._config_wizard is not None:
+            return ["Configuration: Enter=default | Back=previous | Cancel=discard | Q=exit menu"]
         hints = ["Host: allow host <#> / deny host <#> / pending"]
         if self._telnet_access is not None:
             hints.append("Telnet: allow <#> / deny <#>")
@@ -1117,7 +1157,10 @@ class ConsoleDashboard:
         inner = max(1, width - border * 2)
         input_width = min(inner, self._screen.columns) if self._host_terminal is not None else inner
         inner_height = max(1, height - border * 2)
-        if self._host_terminal is not None:
+        if self._config_wizard is not None:
+            prompt = self._config_wizard.prompt
+            position = len(prompt)
+        elif self._host_terminal is not None:
             screen = self._screen
             prompt, position = screen.lines[screen.row], screen.column
         else:
@@ -1133,7 +1176,7 @@ class ConsoleDashboard:
         while len(prompt_lines) <= cursor_line:
             prompt_lines.append("")
         hints = []
-        for line in self._main_menu_footer():
+        for line in ([] if self._config_wizard is not None else self._main_menu_footer()):
             hints.extend((part, None) for part in (textwrap.wrap(line, inner) or [""]))
         if hints:
             hints.append(("", None))
@@ -1157,7 +1200,8 @@ class ConsoleDashboard:
         body_height = max(0, inner_height - len(hints) - len(visible_prompt))
         self._output_page_size = max(1, body_height)
         self._host_body_width = inner
-        body = self._scrollback if self._scrollback is not None else self._host_body()
+        body = ([(line, None) for line in self._config_wizard.lines()] if self._config_wizard is not None
+                else self._scrollback if self._scrollback is not None else self._host_body())
         wrapped, positions = self._wrap_host_body(body, inner)
         if self._scrollback is not None:
             top = self._scrollback_index(positions)
@@ -1174,7 +1218,8 @@ class ConsoleDashboard:
         input_rows = set(range(input_start, input_start + len(visible_prompt)))
         if bordered:
             count = self._scrollback_new_lines
-            title = f"Scrollback - {count} new {'line' if count == 1 else 'lines'}" if self._scrollback is not None else "Host Console / PgUp/PgDn"
+            title = ("Host Configuration" if self._config_wizard is not None else
+                     f"Scrollback - {count} new {'line' if count == 1 else 'lines'}" if self._scrollback is not None else "Host Console / PgUp/PgDn")
             rows = self._pane_rows(title, content, width)
         else:
             rows = [(self._paint(self._clip_screen_row(text, width), color) if color else
@@ -1194,7 +1239,7 @@ class ConsoleDashboard:
         top = [title]
         if split:
             full_status = self._status_panel_rows(width, force_color=self._color)
-            above = height >= len(full_status) + 31
+            above = self._config_wizard is None and height >= len(full_status) + 31
             if above:
                 top += full_status
             body_height = height - len(top)
@@ -1206,7 +1251,7 @@ class ConsoleDashboard:
             available = height - 1
             required_host = max(24, self._screen.height) + len(self._host_hints()) + 2
             host_height = required_host if available >= required_host + 6 else max(1, available * 2 // 3)
-            dashboard_height = available - host_height
+            dashboard_height = 0 if self._config_wizard is not None else available - host_height
             # On tiny screens keep the prompt and one urgent status row.
             dashboard = self._dashboard_rows(width, dashboard_height)
             top += dashboard

@@ -1,6 +1,6 @@
 Image: Retro Serial Hub
 
-Retro Serial Hub v2.7
+Retro Serial Hub v2.7a
 
 * Anchored host scrollback, a new-line counter, and End to return to live output.
 * Immediate message notices, safe deferral during transfers, and M=Messages at
@@ -306,7 +306,7 @@ System (7) > Terminal Settings (C) > Screen Size (1) has width and height contro
 Height defaults to 24 rows and is saved per profile. Set it to the actual
 terminal height (16-100); the hub does not guess a vintage terminal's dimensions.
 The CLI equivalents are machine rows 25 or height 25. rows: 24 can also be
-supplied in a serial profile in config.py before a saved preference exists.
+supplied in serial_profiles in settings/local/hub_config.json before a saved preference exists.
 
 At both 40 and 80 columns, the main menu retains a blank row between the version
 and Shortcuts. Its footer ends at the configured last row, with padding above the
@@ -323,132 +323,189 @@ Unicode-capable terminals need a font with box-drawing glyphs. An incompatible
 output encoding automatically uses ASCII borders. Set RSH_ASCII_BORDERS=1
 before starting the hub to force the old borders if your font or terminal needs it.
 
-JSON settings and personal data
-
-JSON files now live in settings/local/ (ignored by Git). Public starter
-templates live in settings/defaults/ and retain supplied bookmarks. Missing
-files are seeded from templates or generated as needed. Existing root, mail/,
-hub_tools/, and retro_os/ JSON migrates automatically; conflicting old copies
-are retained in settings/local/legacy/. Back up local/ privately and publish
-only deliberately sanitized templates. config.py remains startup configuration.
-
 Configuration
 
-All configuration is centralized in config.py. This is the first file you
-should edit after installation.
+Core settings are in settings/local/hub_config.json. There is no config.py.
+Use the host console's config menu to add a computer, or edit the JSON while
+the hub is stopped. New installations start with APPLE2 on COM1 and C64 on COM2;
+inbound Telnet is disabled until configured. These are starter assignments, so
+select the ports actually present on your computer.
+
+On the first interactive launch, the console opens the configuration menu
+automatically. Serial workers and inbound listeners wait until you leave setup,
+so starter assignments do not produce connection failures while you configure
+them. Use 5 Edit existing profile to adjust the starter computers, or add
+another. Q Return to hub finishes setup, reloads saved settings, and starts
+the configured profiles. This also acknowledges unchanged starter defaults.
+Completion is saved locally as configuration_completed: true; later launches
+open normally. Your existing local setup is already marked complete. Without an
+interactive console, the hub uses the JSON settings directly.
+
+Host configuration wizard
+
+At the physical host console, type config (or host config). Its separate menu
+offers Add Profile, Edit Profile, List Profiles, Hub Defaults, and WOPR Speech.
+
+Add Profile walks through a unique name, a scanned serial-port selection, baud,
+data bits, parity, stop bits, software/hardware flow control, ANSI menus and
+translation, screen-clear hex bytes, cursor-home clearing, width (40/80), height
+(16-100), inactivity timeout, and optional inbound Telnet bind address and port.
+The port step shows eight detected devices per page: use Next/Prev, R to rescan,
+or type a device name manually for an offline device or a Unix serial path.
+
+Enter accepts a displayed default; Back revisits a field. Cancel discards the
+draft and returns to the configuration menu, and Q exits that menu. A review
+screen requires yes before writing anything. Duplicate serial assignments,
+conflicting listener ports, invalid values, and settings changed by another
+writer are rejected without overwriting the saved configuration.
+
+Newly saved profiles start their serial worker and optional Telnet listener
+immediately, without restarting existing connections. Missing hardware is shown
+by the normal connection status; saving does not guarantee a port can be opened.
+If activation fails, the saved profile remains available for the next launch.
+Outside first setup, hub-default, speech, and existing-profile changes require a
+restart, as do manual JSON edits. Use 5 Edit existing profile for an existing
+computer; remove profiles in JSON while stopped. Remote HOST commands cannot
+open or operate this menu, even after host-control approval.
+
+JSON settings and personal data
+
+Configuration and application data live under settings/:
+
+- settings/defaults/ contains version-controlled, public starter templates,
+  including the supplied web/FTP bookmarks and keyboard profiles. The AI template
+  contains a placeholder key and the Telnet allowlist starts empty. hub_config.json
+  supplies two example computers; bbs_directory.json supplies structured BBS entries.
+- settings/local/ contains live JSON: credentials, mail, bookmarks, contacts,
+  appointments, shortcuts, scheduler tasks, terminal preferences, reading
+  positions, and other saved settings. Missing starter files are copied here;
+  other files are generated when their features need them. Editing live settings
+  never changes the public templates.
+- On first use, existing JSON files from the project root, mail/, hub_tools/,
+  and the former retro_os/ storage location move into settings/local/.
+  Existing local files take priority; differing old copies are preserved under
+  settings/local/legacy/. Identical duplicate copies are removed. No existing
+  settings are replaced by templates. JSON migration leaves non-JSON content,
+  such as session captures in hub_tools/captures/, in place.
+
+Back up settings/local/ privately. It may contain passwords, API keys, mail,
+addresses, and personal paths. Git ignores that directory and JSON outside the
+explicit public-defaults location, including legacy JSON locations. Only put
+reviewed, sanitized starter content in settings/defaults/; do not copy live
+files there wholesale or force-add ignored personal files. To publish a new
+bookmark default, add the intended public entry to its template separately.
+Template changes affect missing local files, never existing personal copies.
+Moving a previously tracked file does not erase it from older Git history.
+
+The hub JSON contains schema_version: 1, serial_profiles, telnet_listeners,
+welcome_banner, serial_idle_timeout_seconds, and wopr_speech. WOPR speech
+uses enabled, rate, volume, voice, pitch, gap, and executable (empty
+means auto-detect). The general timeout uses seconds, with 0 disabling it;
+profiles can override it using idle_timeout_seconds. JSON uses numeric serial
+settings (8 data bits, parity "N", 1 stop bit), not Python constants.
+
+Specialized stores remain separate: AI credentials, BBS directory, approvals,
+console appearance, terminal/machine preferences, and the welcome-banner override.
+Saved terminal width/translation/machine preferences and the saved welcome banner
+continue to override profile/global defaults. Changing those defaults does not
+erase an existing terminal preference or banner override.
 
 Serial Port Configuration
 
-Edit the SERIAL_CONFIGS dictionary in config.py to match your hardware
-setup. Each entry represents one vintage computer or device:
+Each entry in serial_profiles represents one vintage computer or device.
+For example, this is a fragment of hub_config.json:
 
-SERIAL_CONFIGS = {
-    "APPLE2": {
-        "port": "COM2",           # Change to your COM port
-        "baud": 115200,           # Adjust to match your hardware
-        "bytesize": EIGHTBITS,
-        "parity": PARITY_NONE,
-        "stopbits": STOPBITS_ONE,
-        "xonxoff": False,
-        "rtscts": True,
-        "ansi": False,            # Set to True when the local terminal supports ANSI
-        "translate_ansi": False,  # Optional: translate incoming ANSI/VT100 for a non-ANSI terminal
-        "ansi_clear_sequence": b"\x0c",  # Replacement bytes for supported clear requests
-        "ansi_home_clears_screen": False, # Optional: treat cursor-home as a screen clear
-        "columns": 80,                   # 40- or 80-column terminal layout
-        "rows": 24                       # Terminal height
-    },
-    # Add more computers as needed...
+{
+    "serial_profiles": {
+        "APPLE2": {
+            "port": "COM1",
+            "baud": 19200,
+            "bytesize": 8,
+            "parity": "N",
+            "stopbits": 1,
+            "xonxoff": false,
+            "rtscts": false,
+            "ansi": false,
+            "translate_ansi": true,
+            "clear_sequence_hex": "1b76",
+            "ansi_home_clears_screen": true,
+            "columns": 80,
+            "rows": 24
+        }
+    }
 }
 
 Set columns independently for each machine profile to 40 or 80. This is
-the profile's default width; the main-menu System -> Columns option can
+the profile's default width; the main-menu System → Terminal Settings → Screen Size option can
 switch and save that profile's preference. The saved selection is stored in
-terminal_columns.json and takes precedence over config.py. At 40 columns,
+settings/local/terminal_columns.json and takes precedence over the profile default. At 40 columns,
 menus use a compact layout, browser pages wrap to the configured width, long
-labels are shortened to fit, and ANSI translation uses the configured
-terminal
-width. The included defaults use 80 columns for APPLE2, IBM, and TRS80
-profiles,
-and 40 columns for C64; profiles without this setting default to 80.
+labels are shortened to fit, and ANSI translation uses the configured terminal
+width. The included defaults use 80 columns for APPLE2 and 40 for C64;
+profiles without this setting default to 80.
 
 Common baud rates for vintage systems:
-* Apple II with Super Serial Card: 300, 1200, 2400, 9600, 19200, or 115200
-* Commodore 64: 300, 1200, 2400
-* IBM PC/XT/AT: 300, 1200, 2400, 9600
-* TRS-80: 300, 1200, 2400, 9600
+- Apple II with Super Serial Card: 300, 1200, 2400, 9600, 19200, or 115200
+- Commodore 64: 300, 1200, 2400
+- IBM PC/XT/AT: 300, 1200, 2400, 9600
+- TRS-80: 300, 1200, 2400, 9600
 
 Optional translation for non-ANSI terminals
 
-ANSI translation is useful with any terminal or display that cannot
-interpret
-the control sequences sent by a remote system. It is configured
-independently
-in each SERIAL_CONFIGS entry and affects incoming BBS/Telnet data on that
+ANSI translation is useful with any terminal or display that cannot interpret
+the control sequences sent by a remote system. It is configured independently
+in each serial_profiles entry and affects incoming BBS/Telnet data on that
 serial profile. It does not affect the serial-to-serial COM Port Bridge or
 other configured ports. Hub menu screens use ansi for native ANSI
 clear/home controls; when ANSI translation is enabled, they use
-ansi_clear_sequence to clear the terminal.
+clear_sequence_hex to clear the terminal.
 
-"RETRO_TERMINAL": {
-    # Existing serial settings go here...
-    "ansi": False,
-    "translate_ansi": True,
-    "ansi_clear_sequence": b"\x0c",
-    "ansi_home_clears_screen": False,
+{
+    "ansi": false,
+    "translate_ansi": true,
+    "clear_sequence_hex": "0c",
+    "ansi_home_clears_screen": false
 }
 
-* translate_ansi enables the lossy ANSI/VT100-to-text translator. It strips
+- translate_ansi enables the lossy ANSI/VT100-to-text translator. It strips
   color and unsupported control sequences, approximates common CP437
-  line-drawing characters, and linearizes supported cursor positioning. It
-  is
+  line-drawing characters, and linearizes supported cursor positioning. It is
   not a complete terminal emulator; applications using complex screen
   addressing or terminal queries may not display correctly.
-* ansi_clear_sequence is the byte sequence sent to the terminal for a
+- clear_sequence_hex represents the bytes sent to the terminal for a
   supported erase-in-display/reset request, incoming form-feed (0x0C), or a
   Hub menu screen clear when translate_ansi is enabled.
   Set this to the clear-screen control sequence expected by the receiving
   terminal or its software. The default when omitted is form feed
-  (b"\x0c").
-* ansi_home_clears_screen defaults to False. Set it to True when an
-  application redraws a screen by returning the cursor home and the
-  configured
+  (hex "0c"). For ESC-v, use "1b76"; no Python byte literal is needed.
+- ansi_home_clears_screen defaults to False. Set it to True when an
+  application redraws a screen by returning the cursor home and the configured
   clear sequence is suitable. This can be useful for refreshed or animated
   interfaces; cursor-home is then treated as a clear rather than merely
   repositioning the cursor.
 
-The clear sequence can be any byte sequence understood by the terminal or
-its
-software. Some terminal emulators can map a custom sequence to a screen
-action.
+The clear sequence can be any byte sequence understood by the terminal or its
+software. Some terminal emulators can map a custom sequence to a screen action.
 Leave translation disabled for terminals that already interpret the remote
 system's control sequences.
 
 BBS Directory
 
-The initial BBS directory is seeded from three synchronized lists in
-config.py:
+Both the numbered menu and CLI load settings/local/bbs_directory.json, a list
+of objects containing name, host, and numeric port. There are no parallel
+name/host/port lists to edit. On first use the supplied 64-entry directory is
+copied from settings/defaults/bbs_directory.json; existing local entries win.
+Changes made with Bulletin Boards → M=Manage directory update the local file.
+Delete it while stopped to restore the public template on the next launch.
 
-* BBSS: Display names for each BBS
-* IPS: Hostnames or IP addresses
-* PORTS: TCP port numbers
-
-The first time the hub starts, it uses those lists as its directory. Changes
-made with Bulletin Boards -> M=Manage directory are saved to
-bbs_directory.json and include the original entries. The saved directory
-then
-takes precedence over config.py, so entries can be added, edited, and
-deleted
-without keeping three lists synchronized. Delete bbs_directory.json while
-the hub is stopped to restore the defaults from config.py.
+[
+    {"name": "Example BBS", "host": "bbs.example.org", "port": 23}
+]
 
 In the Telnet option, enter a hostname/IP and port for a direct TCP terminal
-connection. Choose whether to save that destination in Telnet bookmarks, add
-it
-to the Bulletin Boards directory, or connect without saving. Telnet
-bookmarks
-are stored separately in telnet_bookmarks.json; select a saved destination
-by
+connection. Choose whether to save that destination in Telnet bookmarks, add it
+to the Bulletin Boards directory, or connect without saving. Telnet bookmarks
+are stored separately in settings/local/telnet_bookmarks.json; select a saved destination by
 number or use D to delete it. Both connection types support ATH to hang up
 and ATM to return to the main menu. Incoming data uses the same configured
 ANSI translation and screen-clear behavior.
@@ -456,48 +513,59 @@ ANSI translation and screen-clear behavior.
 Inbound Telnet-Compatible Server (Optional)
 
 Retro Serial Hub can also accept incoming TCP terminal connections. Add a
-TELNET_SERVER_CONFIGS entry in config.py for each machine profile you want
+telnet_listeners entry in settings/local/hub_config.json for each profile you want
 to expose, using a distinct port for each profile:
 
-TELNET_SERVER_CONFIGS = {
-    "APPLE2": {"host": "0.0.0.0", "port": 6400},
-    "IBM": {"host": "0.0.0.0", "port": 6401},
+{
+    "telnet_listeners": {
+        "APPLE2": {"host": "0.0.0.0", "port": 6400},
+        "C64": {"host": "0.0.0.0", "port": 6401}
+    }
 }
 
-The keys must match entries in SERIAL_CONFIGS. Set host to 0.0.0.0 to
+The keys must match entries in serial_profiles. Set host to 0.0.0.0 to
 accept connections from other devices on the LAN, or 127.0.0.1 for local
-connections only. Start the hub, then connect a TCP terminal or Wi-Fi modem
-to
+connections only. Start the hub, then connect a TCP terminal or Wi-Fi modem to
 the hub computer's IP address and the configured port (for example,
 192.168.1.20:6400). The selected profile controls the menu's ANSI behavior;
 the server works even if that profile's serial port is not connected.
-When a listener starts, the hub prints detected LAN IPv4 address(es) and
-ports
+When a listener starts, the hub prints detected LAN IPv4 address(es) and ports
 to use for connecting.
 
-Telnet connections require a source IP entry in telnet_allowlist.json. The hub
-creates an empty allowlist on its first network-enabled start. Serial connections
-are exempt. No IP, including loopback, is automatically trusted.
+Incoming Telnet clients must be listed in settings/local/telnet_allowlist.json. The hub
+creates this file with an empty allowed_ips array on its first network-enabled
+start; no address, including loopback, is automatically trusted. Serial
+connections do not use this approval process.
 
-Unknown clients wait up to 120 seconds for approval. At the HOST COMPUTER'S
-console, type allow <request number> or deny <request number>, then Enter.
-The dashboard shows the source IP and requested profile. The pending command
-lists requests. Approval saves the IP before opening a session; future connections
-from that address enter any profile normally. Remote input cannot approve itself.
+An unknown address waits for up to 120 seconds while the host dashboard shows
+its request number, source IP, and requested machine profile. At the host
+computer's console, type allow 1 or deny 1 (using the displayed request
+number), then press Enter. pending lists pending requests. Approval is saved
+before the waiting client receives a hub session. Future connections from that
+IP can enter any machine profile without another prompt. Input sent by an
+unapproved client is discarded and cannot approve its own connection.
 
-Alternatively, edit the JSON manually:
-{"allowed_ips": ["192.168.1.13", "192.168.1.14"]}
+You can also edit the JSON manually, using individual IP addresses:
 
-Manual additions apply without restarting, including to waiting clients. Removing
-an IP blocks its next connection; existing approved sessions continue. Missing
-files mean an empty allowlist. Invalid files or failed saves never grant access.
-Without an interactive host console, unknown clients are refused; manually add
-their IPs and reconnect. The queue holds at most 16 requests, one per source IP.
+{
+  "allowed_ips": ["192.168.1.13", "192.168.1.14"]
+}
 
-IP approval trusts an address, not a hardware identity. Use DHCP reservations
-where possible; clients behind the same NAT/proxy may share an approved address.
-Telnet remains unencrypted. Restrict access with your firewall and do not forward
-these ports from the Internet. An empty TELNET_SERVER_CONFIGS disables listeners.
+See settings/defaults/telnet_allowlist.example.json for an empty template. Manual additions apply
+to waiting clients and new connections without a restart. Removing an address
+blocks its next connection; it does not end an existing approved session.
+Missing files mean no addresses are approved. Invalid JSON, invalid entries,
+or a failed approval save never grant access. Without an interactive host console
+(for example, a background service), unknown connections are refused; add their
+addresses manually and reconnect. Pending approvals are limited to 16, with one
+per source IP, and unanswered requests expire.
+
+This trusts source IPs, not hardware identities. DHCP reservations help keep
+entries assigned to the intended devices; devices behind the same NAT or proxy
+can share an approved address. Approved clients still have the hub's full host
+capabilities. Telnet remains unencrypted: restrict access with your firewall and
+do not forward these ports from the Internet. The listener is disabled when
+telnet_listeners is empty, as in the public starter configuration.
 
 AI Assistant Configuration (Optional)
 
@@ -543,8 +611,8 @@ is your intent. Free-tier content may be used to improve Google's products.
 Check current pricing and terms (https://ai.google.dev/gemini-api/docs/pricing).
 Gemini uses the model's default thinking settings unless reasoning_effort is
 explicitly configured. Available levels depend on the model; the hub accepts
-minimal, low, medium, or high as explicit overrides. Use default or remove the
-setting if Gemini rejects a thinking level. See
+minimal, low, medium, or high as explicit overrides. Use default or
+remove the setting if Gemini rejects a thinking level. See
 Gemini compatibility (https://ai.google.dev/gemini-api/docs/openai).
 
 OpenAI: existing configuration remains supported
@@ -606,7 +674,7 @@ Connecting Your Vintage Computer
 
 1. Connect your vintage computer to the USB-to-Serial adapter
 2. Start your terminal software on the vintage computer
-3. Configure the terminal to match the settings in config.py (baud rate, data bits, parity, stop bits)
+3. Configure the terminal to match the settings in its JSON profile (baud rate, data bits, parity, stop bits)
 4. Press Enter to see the main menu. Type ATM at any time to return to it.
 
 Main Menu
@@ -739,8 +807,8 @@ for the connected machine. Its setting is saved per machine profile and
 applies
 to later connections as well.
 
-Welcome Banner sets a persistent main-menu banner. The WELCOME_BANNER value
-in config.py is the default; a banner set here is saved separately and takes
+Welcome Banner sets a persistent main-menu banner. The welcome_banner value
+in hub_config.json is the default; a banner set here is saved separately and takes
 precedence until an empty entry resets it to the configured default.
 
 The main menu status line shows the current local time, the number of open
@@ -833,7 +901,8 @@ Directory Structure
 
 Retro-Serial-Hub/
 +-- RETRO_SERIAL_HUB.py    # Main hub program
-+-- config.py               # Configuration file (edit this!)
++-- rsh_config.py           # Validated core JSON configuration store
++-- rsh_config_wizard.py    # Host-only configuration menu and profile wizard
 +-- requirements.txt       # Python dependencies
 +-- docs/                  # Engineering notes and reproducible measurements
 +-- rsh_ai.py              # AI Assistant module
@@ -914,7 +983,7 @@ Troubleshooting
 
 Port Won't Open
 
-* Check that the COM port name in config.py matches your system
+* Check that the COM port name in settings/local/hub_config.json matches your system
 * On Windows, use Device Manager to verify COM port numbers
 * On Linux/Mac, ports are typically /dev/ttyUSB0, /dev/ttyACM0, etc.
 * Ensure no other program is using the port
@@ -951,8 +1020,24 @@ the index includes reproduction commands and recorded measurements.
 
 Release Notes
 
-v2.7 (in development)
+v2.7a (alpha)
 
+* JSON Hub Configuration: Removed config.py and moved serial/Telnet profiles,
+  welcome text, serial inactivity defaults, and WOPR speech to validated
+  settings/local/hub_config.json. Preserved the current local hardware settings;
+  public defaults now contain only APPLE2 on COM1 and C64 on COM2, with no inbound
+  listeners. BBS defaults are 64 structured JSON entries shared by menu and CLI.
+* Host Configuration Wizard: Type config at the physical console for a
+  separate menu and guided profile setup with scanned serial ports, serial framing,
+  flow control, ANSI/clear behavior, width/height, timeouts, and optional Telnet.
+  Review/confirm before atomic save, cancel/back navigation, conflict validation,
+  and remote-input blocking protect the draft. New profiles start immediately;
+  global and speech changes are saved for restart.
+* First-Launch Setup: Fresh installations open configuration automatically and
+  defer serial/Telnet workers until setup finishes. Edit the two starter profiles
+  or add a computer, then Q starts the saved configuration. Completion is remembered
+  locally; existing setups keep their normal startup. Existing-profile edits use
+  the same wizard and take effect at first-setup completion or after a restart.
 * Gemini Thinking Compatibility: Removed the automatic minimal reasoning
   setting that caused HTTP 400 errors on models rejecting that thinking level.
   Gemini now chooses its own thinking defaults unless explicitly configured.
@@ -987,7 +1072,7 @@ v2.7 (in development)
   Includes a repeatable assertion-based measurement harness and recorded results.
   See docs/README.md for the technical documentation index.
 * Development Version: Updated the displayed application version, bundled guide,
-  and web-viewer user agent to 2.7. The v2.6 notes remain the release record.
+  and web-viewer user agent to 2.7a (alpha). The v2.6 notes remain the release record.
 
 v2.6
 

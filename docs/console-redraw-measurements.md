@@ -1,7 +1,7 @@
 # Console redraw measurements
 
 This historical before/after comparison was recorded during v2.6 development.
-See the [engineering index](README.md) for the v2.7 measurement suite.
+See the [engineering index](README.md) for the v2.7a measurement suite.
 
 Measured before and after row caching in the same development session. Fixture:
 150 columns by 40 rows, Ocean colors, four listening profiles with open serial
@@ -27,9 +27,9 @@ times are also printed but vary by machine and are not regression thresholds.
 Resizes, theme/background changes, output-stream changes, and explicit forced
 redraws still repaint the viewport. Failed writes invalidate the cache.
 
-## v2.7 development verification
+## v2.7a alpha verification
 
-Rerun on 2026-10-27, Windows, Python 3.14.2, working tree based on `e86a96e`:
+Rerun on 2026-10-27, Windows, Python 3.14.2, working tree based on `bae0ea4`:
 
 | Workload | Current bytes | Rows repainted |
 |---|---:|---:|

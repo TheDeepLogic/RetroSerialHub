@@ -2,8 +2,8 @@
 
 These are measured behaviors and implementation lessons from building Retro Serial
 Hub, especially the console work that took several iterations in v2.6. The notes
-were added during v2.7 development; they do not imply that every described behavior
-is new in v2.7.
+were added during v2.7a alpha development; they do not imply that every described behavior
+is new in v2.7a.
 
 | Note | What it explains |
 |---|---|
@@ -31,7 +31,7 @@ extension keeps this public fixture report separate from the repository's ignore
 personal JSON settings; its contents are still JSON.
 
 Recorded on **2026-10-27**, Windows, Python **3.14.2**, with application version
-**2.7** in a working tree based on `e86a96e`. Fixtures use memory terminals,
+**2.7a** in a working tree based on `bae0ea4`. Fixtures use memory terminals,
 synthetic addresses, temporary files, a simulated clock for approval expiry, and
 injected filesystem errors. They open no serial ports or network connections and
 do not inspect personal notes, settings, or allowlists.

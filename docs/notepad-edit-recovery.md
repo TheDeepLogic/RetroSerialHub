@@ -1,7 +1,7 @@
 # Notepad edit recovery: read before committing state
 
 [PR #1, Fix Notepad editing errors for unreadable notes](https://github.com/TheDeepLogic/RetroSerialHub/pull/1),
-merged from `experiment`, is the first tracked fix for v2.7 development.
+merged from `experiment`, is the first tracked fix for v2.7a alpha development.
 Its implementation commit is `145de76`; the merge is `e86a96e`.
 
 The interesting part is not just catching an exception. It is choosing when an

@@ -7,19 +7,13 @@ from rsh_directory import load_directory, save_directory
 
 
 class BbsDirectoryStorageTests(unittest.TestCase):
-    def test_load_seeds_defaults_when_no_saved_directory_exists(self):
+    def test_missing_directory_reports_json_recovery(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bbs.json"
-            entries = load_directory(
-                ["Default BBS"], ["bbs.example.org"], [23], path
-            )
+            with self.assertRaisesRegex(ValueError, 'settings/defaults/bbs_directory.json'):
+                load_directory(path)
 
-        self.assertEqual(
-            entries,
-            [{"name": "Default BBS", "host": "bbs.example.org", "port": 23}],
-        )
-
-    def test_saved_directory_overrides_config_defaults(self):
+    def test_saved_directory_round_trips_structured_entries(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bbs.json"
             saved = [
@@ -27,9 +21,7 @@ class BbsDirectoryStorageTests(unittest.TestCase):
             ]
             save_directory(saved, path)
 
-            entries = load_directory(
-                ["Default BBS"], ["bbs.example.org"], [23], path
-            )
+            entries = load_directory(path)
 
         self.assertEqual(entries, saved)
 
@@ -42,13 +34,14 @@ class BbsDirectoryStorageTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "invalid port"):
-                load_directory([], [], [], path)
+                load_directory(path)
 
-    def test_default_lists_must_remain_synchronized(self):
+    def test_parallel_lists_are_not_a_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bbs.json"
-            with self.assertRaisesRegex(ValueError, "same number"):
-                load_directory(["Name"], ["host"], [], path)
+            path.write_text(json.dumps({'names': ['Name'], 'hosts': ['host'], 'ports': [23]}), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'list of entries'):
+                load_directory(path)
 
 
 if __name__ == "__main__":

@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from rsh_storage import settings_path
-
-import json
 import pathlib
 import socket
 import time
@@ -13,19 +10,8 @@ _context = None
 
 
 def _get_entries():
-    candidates = [settings_path("bbs_directory.json")]
-    for p in candidates:
-        if p.exists():
-            try:
-                with p.open("r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-    try:
-        import config
-        return [{"name": n, "host": h, "port": p} for n, h, p in zip(config.BBSS, config.IPS, config.PORTS)]
-    except Exception:
-        return []
+    from rsh_directory import load_directory
+    return load_directory()
 
 
 def init(context):

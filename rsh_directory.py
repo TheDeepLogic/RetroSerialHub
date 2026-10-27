@@ -31,8 +31,8 @@ def validate_entries(entries):
     return validated
 
 
-def load_directory(names, hosts, ports, path=BBS_DIRECTORY_FILE):
-    """Load the saved directory, or seed it from the synchronized config lists."""
+def load_directory(path=BBS_DIRECTORY_FILE):
+    """Load the structured JSON directory, seeded by the shared settings store."""
     path = Path(path)
     if path.exists():
         try:
@@ -42,14 +42,7 @@ def load_directory(names, hosts, ports, path=BBS_DIRECTORY_FILE):
             raise OSError(f"Could not load BBS directory {path}: {exc}") from exc
         return validate_entries(entries)
 
-    if not (len(names) == len(hosts) == len(ports)):
-        raise ValueError("BBSS, IPS, and PORTS must contain the same number of entries.")
-    return validate_entries(
-        [
-            {"name": name, "host": host, "port": port}
-            for name, host, port in zip(names, hosts, ports)
-        ]
-    )
+    raise ValueError('BBS directory is missing; restore settings/defaults/bbs_directory.json.')
 
 
 def save_directory(entries, path=BBS_DIRECTORY_FILE):

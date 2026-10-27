@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "welcome_banner": "Welcome to the Retro Serial Hub",
+  "serial_idle_timeout_seconds": 300,
+  "serial_profiles": {
+    "APPLE2": {
+      "port": "COM1",
+      "baud": 19200,
+      "bytesize": 8,
+      "parity": "N",
+      "stopbits": 1,
+      "xonxoff": false,
+      "rtscts": false,
+      "ansi": false,
+      "translate_ansi": true,
+      "ansi_home_clears_screen": true,
+      "columns": 80,
+      "clear_sequence_hex": "1b76"
+    },
+    "C64": {
+      "port": "COM2",
+      "baud": 2400,
+      "bytesize": 8,
+      "parity": "N",
+      "stopbits": 1,
+      "xonxoff": false,
+      "rtscts": false,
+      "ansi": true,
+      "columns": 40
+    }
+  },
+  "telnet_listeners": {},
+  "wopr_speech": {
+    "enabled": true,
+    "rate": 145,
+    "volume": 85,
+    "voice": "en-us",
+    "pitch": 25,
+    "gap": 3,
+    "executable": ""
+  },
+  "configuration_completed": false
+}

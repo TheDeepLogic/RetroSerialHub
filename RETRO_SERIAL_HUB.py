@@ -36,36 +36,25 @@ from rsh_console import ConsoleDashboard, VERSION
 from rsh_access import TelnetAccess
 from rsh_host import HostTerminal
 
-# Import configuration from config.py
-try:
-    import config as _config
-    from config import (
-        SERIAL_CONFIGS,
-        BBSS,
-        IPS,
-        PORTS,
-        EIGHTBITS,
-        SEVENBITS,
-        PARITY_NONE,
-        STOPBITS_ONE,
-        WELCOME_BANNER as CONFIG_WELCOME_BANNER,
-    )
-    from rsh_directory import load_directory, save_directory
-    from rsh_server import SocketTerminal
-except ImportError:
-    print("ERROR: config.py not found. Please ensure config.py exists in the same directory.")
-    print("See config.py for configuration examples.")
-    sys.exit(1)
-TELNET_SERVER_CONFIGS = getattr(_config, "TELNET_SERVER_CONFIGS", {})
+# Core settings are JSON; specialized stores retain their own schemas.
+from rsh_config import HubConfigStore, load_settings, serial_profiles
+from rsh_directory import load_directory, save_directory
+from rsh_server import SocketTerminal
 
 try:
-    _bbs_entries = load_directory(BBSS, IPS, PORTS)
+    HUB_CONFIG = load_settings()
+    SERIAL_CONFIGS = serial_profiles(HUB_CONFIG)
+    TELNET_SERVER_CONFIGS = HUB_CONFIG["telnet_listeners"]
+    CONFIG_WELCOME_BANNER = HUB_CONFIG["welcome_banner"]
+    SERIAL_IDLE_TIMEOUT_SECONDS = HUB_CONFIG["serial_idle_timeout_seconds"]
+    _bbs_entries = load_directory()
 except (OSError, ValueError) as exc:
-    print(f"ERROR: Could not load BBS directory: {exc}")
+    print(f"ERROR: Could not load hub JSON settings: {exc}")
     sys.exit(1)
-BBSS[:] = [entry["name"] for entry in _bbs_entries]
-IPS[:] = [entry["host"] for entry in _bbs_entries]
-PORTS[:] = [entry["port"] for entry in _bbs_entries]
+EIGHTBITS, SEVENBITS, PARITY_NONE, STOPBITS_ONE = 8, 7, 'N', 1
+BBSS = [entry["name"] for entry in _bbs_entries]
+IPS = [entry["host"] for entry in _bbs_entries]
+PORTS = [entry["port"] for entry in _bbs_entries]
 
 # Global registry: map port name -> {'thread': thread_name, 'serial': Serial()}
 ACTIVE_PORTS = {}
@@ -325,7 +314,7 @@ def save_host_settings(path, settings):
 try:
     COLUMN_PREFERENCES = load_column_preferences(COLUMN_SETTINGS_FILE)
 except (OSError, ValueError) as exc:
-    print(f"Terminal column settings error: {exc}. Using config.py values.")
+    print(f"Terminal column settings error: {exc}. Using hub JSON values.")
     COLUMN_PREFERENCES = {}
 COLUMN_PREFERENCES_LOCK = threading.Lock()
 for _profile_name, _columns in COLUMN_PREFERENCES.items():
@@ -337,7 +326,7 @@ try:
         ANSI_TRANSLATION_SETTINGS_FILE
     )
 except (OSError, ValueError) as exc:
-    print(f"ANSI translation settings error: {exc}. Using config.py values.")
+    print(f"ANSI translation settings error: {exc}. Using hub JSON values.")
     ANSI_TRANSLATION_PREFERENCES = {}
 ANSI_TRANSLATION_PREFERENCES_LOCK = threading.Lock()
 for _profile_name, _enabled in ANSI_TRANSLATION_PREFERENCES.items():
@@ -347,7 +336,7 @@ for _profile_name, _enabled in ANSI_TRANSLATION_PREFERENCES.items():
 try:
     WELCOME_BANNER = load_banner(CONFIG_WELCOME_BANNER, WELCOME_BANNER_FILE)
 except (OSError, ValueError) as exc:
-    print(f"Welcome banner override error: {exc}. Using config.py value.")
+    print(f"Welcome banner override error: {exc}. Using hub JSON value.")
     WELCOME_BANNER = CONFIG_WELCOME_BANNER
 
 try:
@@ -870,7 +859,7 @@ def port_worker(name, cfg):
                     CONSOLE.update_profile(name, terminal="WAITING")
 
             tracker = SerialActivityTracker(
-                ser, cfg.get("idle_timeout_seconds", getattr(_config, "SERIAL_IDLE_TIMEOUT_SECONDS", 300)),
+                ser, cfg.get("idle_timeout_seconds", SERIAL_IDLE_TIMEOUT_SECONDS),
                 became_active, became_idle,
             )
             ser._rsh_activity_tracker = tracker
@@ -3594,7 +3583,7 @@ def bridge_loop(
                             write(ser, f"\r\n*** Could not reset banner: {exc} ***\r\n")
                         else:
                             WELCOME_BANNER = CONFIG_WELCOME_BANNER
-                            write(ser, "\r\nWelcome banner reset to config.py value.\r\n")
+                            write(ser, "\r\nWelcome banner reset to hub JSON value.\r\n")
                     else:
                         try:
                             new_banner = validate_banner(line_str)
@@ -3945,7 +3934,7 @@ def bridge_loop(
                             ser,
                             "Enter a banner (1-80 printable ASCII characters).\r\n",
                         )
-                        write(ser, "Press Enter with an empty line to use config.py default.\r\n")
+                        write(ser, "Press Enter with an empty line to use profile JSON default.\r\n")
                         write(ser, "New banner: ")
                         mode = "WELCOME_BANNER"
                     elif menu_action == "com_bridge":
@@ -5114,14 +5103,12 @@ def bridge_loop(
             except Exception:
                 pass
 
-def main():
-    global CONSOLE, TELNET_ACCESS
-    threads = []
-    addresses = local_ipv4_addresses() if TELNET_SERVER_CONFIGS else []
+def console_profiles(serial_configs, telnet_configs):
+    addresses = local_ipv4_addresses() if telnet_configs else []
     profiles = {}
-    for name in dict.fromkeys((*SERIAL_CONFIGS, *TELNET_SERVER_CONFIGS)):
-        cfg = SERIAL_CONFIGS.get(name, {})
-        server_cfg = TELNET_SERVER_CONFIGS.get(name)
+    for name in dict.fromkeys((*serial_configs, *telnet_configs)):
+        cfg = serial_configs.get(name, {})
+        server_cfg = telnet_configs.get(name)
         if isinstance(server_cfg, dict):
             host = server_cfg.get("host", "0.0.0.0")
             port = server_cfg.get("port")
@@ -5144,8 +5131,39 @@ def main():
             "endpoint": endpoint,
         }
 
+    return profiles
+
+
+def activate_configured_profile(name, settings):
+    """Start a newly saved profile without interrupting existing sessions."""
+    global TELNET_ACCESS
+    if name in SERIAL_CONFIGS:
+        raise ValueError('That profile is already running; restart the hub to change it.')
+    cfg = serial_profiles(settings)[name]
+    server_cfg = settings['telnet_listeners'].get(name)
+    SERIAL_CONFIGS[name] = cfg
+    if server_cfg:
+        TELNET_SERVER_CONFIGS[name] = dict(server_cfg)
+    CONSOLE.profiles.update(console_profiles({name: cfg}, {name: server_cfg} if server_cfg else {}))
+    if server_cfg:
+        if TELNET_ACCESS is None:
+            TELNET_ACCESS = TelnetAccess(TELNET_ALLOWLIST_FILE, start_remote_client, console_log,
+                                         interactive=CONSOLE.host_input_available())
+            CONSOLE.set_telnet_access(TELNET_ACCESS)
+            TELNET_ACCESS.start()
+        threading.Thread(target=telnet_server_worker, args=(name, cfg, dict(server_cfg)),
+                         name=f'{name}-tcp-server', daemon=True).start()
+    threading.Thread(target=port_worker, args=(name, cfg), name=f'{name}-serial', daemon=True).start()
+
+
+def main():
+    global CONSOLE, TELNET_ACCESS, SERIAL_IDLE_TIMEOUT_SECONDS, CONFIG_WELCOME_BANNER, WELCOME_BANNER
+    threads = []
+    profiles = console_profiles(SERIAL_CONFIGS, TELNET_SERVER_CONFIGS)
+
     CONSOLE = ConsoleDashboard(profiles, theme_path=settings_path("console_theme.json", BASE_DIR),
                                host_access_path=settings_path("host_command_allowlist.json", BASE_DIR))
+    CONSOLE.set_configuration(HubConfigStore(), activate_configured_profile)
     host_terminal = None
     if CONSOLE.host_input_available():
         host_terminal = HostTerminal(CONSOLE.append_host_output)
@@ -5157,13 +5175,44 @@ def main():
             interactive=CONSOLE.host_input_available(),
         )
         CONSOLE.set_telnet_access(TELNET_ACCESS)
+    setup_done = threading.Event()
+    first_setup = host_terminal is not None and CONSOLE.start_first_run_configuration(setup_done.set)
     CONSOLE.start()
     if host_terminal is not None:
         host_terminal.start(host_console_worker)
+    if first_setup:
+        try:
+            setup_done.wait()
+        except KeyboardInterrupt:
+            host_terminal.stop()
+            CONSOLE.stop()
+            return
+        saved = load_settings()
+        SERIAL_CONFIGS.clear()
+        SERIAL_CONFIGS.update(serial_profiles(saved))
+        TELNET_SERVER_CONFIGS.clear()
+        TELNET_SERVER_CONFIGS.update(saved['telnet_listeners'])
+        SERIAL_IDLE_TIMEOUT_SECONDS = saved['serial_idle_timeout_seconds']
+        CONFIG_WELCOME_BANNER = saved['welcome_banner']
+        try:
+            WELCOME_BANNER = load_banner(CONFIG_WELCOME_BANNER, WELCOME_BANNER_FILE)
+        except (OSError, ValueError) as exc:
+            console_log(f'Welcome banner override error: {exc}. Using hub JSON value.', level='yellow')
+            WELCOME_BANNER = CONFIG_WELCOME_BANNER
+        # The host session may already have imported Joshua while preparing its menu.
+        if 'rsh_joshua' in sys.modules:
+            sys.modules['rsh_joshua'].SPEECH_CONFIG.update(saved['wopr_speech'])
+        with CONSOLE._lock:
+            CONSOLE.profiles.clear()
+            CONSOLE.profiles.update(console_profiles(SERIAL_CONFIGS, TELNET_SERVER_CONFIGS))
+        if TELNET_SERVER_CONFIGS and TELNET_ACCESS is None:
+            TELNET_ACCESS = TelnetAccess(TELNET_ALLOWLIST_FILE, start_remote_client, console_log,
+                                         interactive=CONSOLE.host_input_available())
+            CONSOLE.set_telnet_access(TELNET_ACCESS)
     if TELNET_ACCESS is not None:
         TELNET_ACCESS.start()
 
-    for name, server_cfg in TELNET_SERVER_CONFIGS.items():
+    for name, server_cfg in list(TELNET_SERVER_CONFIGS.items()):
         cfg = SERIAL_CONFIGS.get(name)
         if cfg is None:
             CONSOLE.update_profile(name, tcp="ERROR")
@@ -5188,7 +5237,7 @@ def main():
         t.start()
         threads.append(t)
 
-    for name, cfg in SERIAL_CONFIGS.items():
+    for name, cfg in list(SERIAL_CONFIGS.items()):
         t = threading.Thread(
             target=port_worker,
             args=(name, cfg),

@@ -1,0 +1,322 @@
+[
+  {
+    "name": "Arrakis",
+    "host": "atl.ddns.net",
+    "port": 6403
+  },
+  {
+    "name": "Beebs",
+    "host": "beebs.ddns.net",
+    "port": 6502
+  },
+  {
+    "name": "Citadel",
+    "host": "citadel64.thejlab.com",
+    "port": 6400
+  },
+  {
+    "name": "Dead Zone",
+    "host": "dzbbs.hopto.org",
+    "port": 64128
+  },
+  {
+    "name": "Deep Skies",
+    "host": "bbs.deepskies.com",
+    "port": 6400
+  },
+  {
+    "name": "DJ's Place",
+    "host": "bbs.impakt.net",
+    "port": 6502
+  },
+  {
+    "name": "Enterprise",
+    "host": "enterprisebbs.ddns.net",
+    "port": 6400
+  },
+  {
+    "name": "High Desert",
+    "host": "highdesertbbs.ddns.net",
+    "port": 6400
+  },
+  {
+    "name": "Hoyvision",
+    "host": "13th.hoyvision.com",
+    "port": 6400
+  },
+  {
+    "name": "Lost Caverns",
+    "host": "lostcavernsbbs.example.net",
+    "port": 6400
+  },
+  {
+    "name": "Lower Planes",
+    "host": "lowerplanesbbs.example.net",
+    "port": 6400
+  },
+  {
+    "name": "LV-426",
+    "host": "lv426bbs.hopto.org",
+    "port": 6464
+  },
+  {
+    "name": "Mad World",
+    "host": "madworldbbs.com",
+    "port": 6400
+  },
+  {
+    "name": "Night Owl",
+    "host": "nightowlbbs.ddns.net",
+    "port": 6400
+  },
+  {
+    "name": "Particles",
+    "host": "particlesbbs.dyndns.org",
+    "port": 6400
+  },
+  {
+    "name": "RapidFire",
+    "host": "rapidfire.hopto.org",
+    "port": 64128
+  },
+  {
+    "name": "Retro Campus",
+    "host": "bbs.retrocampus.com",
+    "port": 6400
+  },
+  {
+    "name": "Satellite 4",
+    "host": "satellite4.dynu.net",
+    "port": 6400
+  },
+  {
+    "name": "Surf Shop",
+    "host": "surfshopbbs.example.net",
+    "port": 6400
+  },
+  {
+    "name": "Telehack",
+    "host": "telehack.com",
+    "port": 23
+  },
+  {
+    "name": "The Keep II",
+    "host": "thekeep2.ddns.net",
+    "port": 6400
+  },
+  {
+    "name": "Willow Creek",
+    "host": "willowcreekbbs.dynu.net",
+    "port": 23
+  },
+  {
+    "name": "Zelch",
+    "host": "zelchbbs.example.net",
+    "port": 6502
+  },
+  {
+    "name": "Amberstar",
+    "host": "amberstarbbs.example.net",
+    "port": 23
+  },
+  {
+    "name": "Blue Nebula",
+    "host": "bluenebula.example.net",
+    "port": 23
+  },
+  {
+    "name": "Chaos Realm",
+    "host": "chaosrealm.example.net",
+    "port": 23
+  },
+  {
+    "name": "Dragon's Den",
+    "host": "dragonsden.example.net",
+    "port": 23
+  },
+  {
+    "name": "Elysium Fields",
+    "host": "elysiumfields.example.net",
+    "port": 23
+  },
+  {
+    "name": "Frostbyte",
+    "host": "frostbytebbs.example.net",
+    "port": 23
+  },
+  {
+    "name": "Galaxy Express",
+    "host": "galaxyexpress.example.net",
+    "port": 23
+  },
+  {
+    "name": "Hack Shack",
+    "host": "hackshack.example.net",
+    "port": 23
+  },
+  {
+    "name": "Infinity Point",
+    "host": "infinitypoint.example.net",
+    "port": 23
+  },
+  {
+    "name": "Jupiter Station",
+    "host": "jupiterstation.example.net",
+    "port": 23
+  },
+  {
+    "name": "Karma BBS",
+    "host": "karmabbs.example.net",
+    "port": 23
+  },
+  {
+    "name": "Lunar Outpost",
+    "host": "lunaroutpost.example.net",
+    "port": 23
+  },
+  {
+    "name": "Matrix Node",
+    "host": "matrixnode.example.net",
+    "port": 23
+  },
+  {
+    "name": "Neon Nights",
+    "host": "neonnights.example.net",
+    "port": 23
+  },
+  {
+    "name": "Oblivion",
+    "host": "oblivionbbs.example.net",
+    "port": 23
+  },
+  {
+    "name": "Phantom Zone",
+    "host": "phantomzone.example.net",
+    "port": 23
+  },
+  {
+    "name": "Quantum Link",
+    "host": "quantumlink.example.net",
+    "port": 23
+  },
+  {
+    "name": "Rogue's Gallery",
+    "host": "roguesgallery.example.net",
+    "port": 23
+  },
+  {
+    "name": "Starforge",
+    "host": "starforge.example.net",
+    "port": 23
+  },
+  {
+    "name": "Twilight Zone",
+    "host": "twilightzone.example.net",
+    "port": 23
+  },
+  {
+    "name": "Underground",
+    "host": "undergroundbbs.example.net",
+    "port": 23
+  },
+  {
+    "name": "Vector Base",
+    "host": "vectorbase.example.net",
+    "port": 23
+  },
+  {
+    "name": "Warp Gate",
+    "host": "warpgate.example.net",
+    "port": 23
+  },
+  {
+    "name": "Xanadu",
+    "host": "xanadu.example.net",
+    "port": 23
+  },
+  {
+    "name": "Yellow Subnet",
+    "host": "yellowsubnet.example.net",
+    "port": 23
+  },
+  {
+    "name": "Zenith",
+    "host": "zenithbbs.example.net",
+    "port": 23
+  },
+  {
+    "name": "AII: An 80s Apple II BBS",
+    "host": "a80sappleiibbs.ddns.net",
+    "port": 6502
+  },
+  {
+    "name": "AII: Captain's Quarters",
+    "host": "cqbbs.ddns.net",
+    "port": 6800
+  },
+  {
+    "name": "AII: CQ II BBS",
+    "host": "gbbspro.ddns.net",
+    "port": 6502
+  },
+  {
+    "name": "AII: GBBS Pro! BBS",
+    "host": "prolin.ksherlock.com",
+    "port": 6523
+  },
+  {
+    "name": "AII: Pro-Kegs",
+    "host": "prokegs.example.net",
+    "port": 23
+  },
+  {
+    "name": "AII: The Lost Dungeon",
+    "host": "lostdungeonbbs.com",
+    "port": 6502
+  },
+  {
+    "name": "AII: Willamette Apple Connection",
+    "host": "wacbbs.ddns.net",
+    "port": 6502
+  },
+  {
+    "name": "C64: Cottonwood",
+    "host": "cottonwoodbbs.dyndns.org",
+    "port": 6502
+  },
+  {
+    "name": "C64: League of Commodore",
+    "host": "tlocbbs.dyndns.net",
+    "port": 6400
+  },
+  {
+    "name": "C64: Particles! BBS",
+    "host": "particlesbbs.dyndns.org",
+    "port": 6400
+  },
+  {
+    "name": "IBM: Black Flag BBS",
+    "host": "blackflag.acid.org",
+    "port": 23
+  },
+  {
+    "name": "IBM: Dura-Europos BBS",
+    "host": "dura-bbs.net",
+    "port": 6359
+  },
+  {
+    "name": "IBM: The Cave BBS",
+    "host": "cavebbs.homeip.net",
+    "port": 23
+  },
+  {
+    "name": "TRS: Level 29 BBS",
+    "host": "level29bbs.ddns.net",
+    "port": 23
+  },
+  {
+    "name": "TRS: The Keep BBS",
+    "host": "thekeep.net",
+    "port": 23
+  }
+]

@@ -54,6 +54,8 @@ The main menu uses an accordion flyout layout designed for vintage 40- and
   - In Accessories > LOGO, enter commands such as REPEAT 4 (FD 80 RT 90). Parentheses or square brackets group commands.
   - In Shortcuts: press '+' to add a shortcut, or '-' to remove one.
   - At any prompt: type 'ATM' to return to the Main Menu immediately.
+  - At the physical host console, CONFIG opens computer profiles and hub settings.
+    First launch opens setup automatically; Q finishes setup and starts the links.
   - While connected to a BBS or Telnet host: type 'ATH' to hang up.
   - Paged text (--More--): press Space or Enter to advance, or 'Q' to quit.
 """,
