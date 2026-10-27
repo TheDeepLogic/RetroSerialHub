@@ -74,7 +74,7 @@ Features
 * Lunar Lander, Hunt the Wumpus, Blackjack, Mastermind, Word Guess, and Star Trek: Terminal-first games in the Games menu
 * WOPR: IMSAI/CP-M and Joshua simulation in Communications H or via WARGAMES
 * Notepad clipboard actions: Save host clipboard text as a note, or copy a note to the host clipboard
-* AI Assistant: Optional ChatGPT-powered assistant accessible from vintage terminals
+* AI Assistant: Optional OpenAI, Gemini, or local Ollama chat accessible from vintage terminals
 * Hot-Reload Modules: Edit feature modules without restarting the hub
 * ANSI Support: Automatic detection and handling of ANSI escape codes for compatible terminals
 
@@ -83,7 +83,7 @@ Requirements
 * Python 3.9 or higher
 * Dependencies listed in requirements.txt
 * USB-to-Serial adapters or RS-232 ports for connecting vintage computers
-* Optional: OpenAI API key for AI Assistant feature
+* Optional: AI Assistant uses local Ollama without a key, or an OpenAI/Gemini API key
 
 Installation
 
@@ -501,23 +501,87 @@ these ports from the Internet. An empty TELNET_SERVER_CONFIGS disables listeners
 
 AI Assistant Configuration (Optional)
 
-To enable the AI Assistant feature:
+The assistant supports OpenAI, Google Gemini, and local Ollama from
+Accessories G. All three use the same terminal chat interface and the optional
+client library: python -m pip install openai. Using that library with another
+provider does not send requests to OpenAI.
 
-1. Edit settings/local/ai_config.json:
-   {
-       "api_key": "your-openai-api-key-here",
-       "model": "gpt-5.6-terra"
-   }
+Choose one provider in settings/local/ai_config.json. Configuration is managed
+on the host; the terminal displays the selected provider and model.
 
-2. Or set the OPENAI_API_KEY environment variable
+Local Ollama: no API key or token charges
 
-The default model is gpt-5.6-terra, replacing retired gpt-3.5-turbo. Set model
-in ai_config.json or OPENAI_MODEL to select another Chat Completions model;
-the environment variable takes precedence. Reopen AI after changing the model.
-The selected model is shown in the assistant header and fixed per conversation.
-The default uses reasoning_effort none and a 500-token completion budget.
-For other models, reasoning is omitted unless configured through reasoning_effort
-or OPENAI_REASONING_EFFORT. The value default omits the field for any model.
+Install Ollama (https://ollama.com/download) on the hub computer, start it, and
+run ollama pull llama3.2:3b once to download the example model. Use:
+
+{
+    "provider": "ollama",
+    "model": "llama3.2:3b"
+}
+
+The hub connects to http://localhost:11434/v1/. No API key, paid account, or
+cloud service is needed for a downloaded local model. Model speed and capacity
+depend on the host's hardware. Use ollama list to see installed model names.
+For an Ollama server on another host, set base_url to its full HTTP(S) address
+ending in /v1/, or set OLLAMA_BASE_URL. See
+Ollama compatibility (https://docs.ollama.com/api/openai-compatibility).
+
+Google Gemini: hosted free-tier option
+
+Get a key from Google AI Studio (https://aistudio.google.com/apikey), then use:
+
+{
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
+    "api_key": "your-gemini-api-key"
+}
+
+You can omit api_key and set GEMINI_API_KEY instead. Gemini offers a free tier
+for eligible models, accounts, and regions, with quotas and rate limits. A key
+alone does not guarantee free usage: keep the project on the free tier if that
+is your intent. Free-tier content may be used to improve Google's products.
+Check current pricing and terms (https://ai.google.dev/gemini-api/docs/pricing).
+The default Gemini model uses reasoning_effort: "minimal"; custom models use
+provider defaults unless an effort is configured. Gemini accepts minimal,
+low, medium, high, or default to omit the field. See
+Gemini compatibility (https://ai.google.dev/gemini-api/docs/openai).
+
+OpenAI: existing configuration remains supported
+
+{
+    "provider": "openai",
+    "model": "gpt-5.6-terra",
+    "api_key": "your-openai-api-key"
+}
+
+Omitting provider keeps the existing OpenAI behavior. OPENAI_API_KEY can
+supply the key instead. OpenAI API usage is billed separately from a ChatGPT
+subscription; this option does not provide free ChatGPT access.
+The existing default model and OpenAI reasoning settings are preserved.
+
+Overrides, conversation settings, and troubleshooting
+
+- AI_PROVIDER overrides provider: openai, gemini, or ollama.
+- AI_MODEL overrides the model for the selected provider. Next in precedence
+  are OPENAI_MODEL, GEMINI_MODEL, or OLLAMA_MODEL, respectively, then JSON
+  model, then that provider's default.
+- Provider-specific key environment variables override JSON api_key. Switching
+  providers through AI_PROVIDER does not reuse another provider's JSON key,
+  model, token budget, or reasoning settings.
+- max_tokens in JSON sets the response budget (1-8192; default 500). Reasoning
+  models can consume part of that budget before producing visible text; increase
+  it or choose another model if replies are empty or cut short.
+- For OpenAI, reasoning_effort in JSON or OPENAI_REASONING_EFFORT controls
+  reasoning. The default OpenAI model uses none; custom models omit the field
+  unless configured. default omits it for any OpenAI model. Ollama omits the
+  reasoning field; choose a suitable local model.
+- Reopen the assistant after changing configuration. An active conversation keeps
+  its provider, model, credentials, and options. N clears its history while keeping
+  those settings; Q exits. Configuration is never written by terminal chat.
+- Requests have a 60-second timeout and no automatic retries. A quota, connection,
+  or model error stays with the selected provider; there is no automatic fallback
+  to a potentially paid service. Failed requests leave conversation history ready
+  to retry. For Ollama connection/model errors, check the service and ollama list.
 
 Usage
 
@@ -888,6 +952,13 @@ Release Notes
 
 v2.7 (in development)
 
+* AI Provider Choice: Added Google Gemini and local Ollama alongside OpenAI.
+  Local models need no API key or token billing; Gemini supports a hosted
+  free-tier setup subject to provider limits. Existing OpenAI settings work.
+  Added provider/model headers, host configuration and environment overrides,
+  isolated per-conversation clients, configurable response budgets, and
+  provider-specific request options. Includes setup instructions, error guidance,
+  and SDK-level tests. Errors never switch to a paid service automatically.
 * Resilient Note Search: An unreadable or disappearing note no longer aborts
   content search. Continue searching other notes and report the skipped count.
   Filename matches require no content read, and the 1 MiB content-search limit
