@@ -347,6 +347,8 @@ an existing note. The line editor accepts `replace <line> <text>`, `append <text
 `delete <line>`, `save`, N/B for preview pages, and Q to cancel changes. Quotes in
 replacement text are retained. R<number> renames a note, X<number> exports to a new
 host path, `F text` searches names and content, and `ALL` resets the search.
+If a note was deleted, cannot be read, or is not valid UTF-8, Edit displays an
+error and returns to the Notes menu so you can choose another note or quit.
 Large content searches inspect note text up to 1 MiB, while filenames are always searched.
 Clipboard creation/copy and the original read/create/delete operations remain.
 
