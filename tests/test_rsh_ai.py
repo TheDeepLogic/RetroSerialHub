@@ -145,6 +145,10 @@ class AiAssistantTests(unittest.TestCase):
 
                 def respond(request):
                     requests.append(request)
+                    if provider == 'gemini' and 'reasoning_effort' in json.loads(request.content):
+                        return httpx.Response(400, json={'error': {
+                            'code': 400, 'status': 'INVALID_ARGUMENT',
+                            'message': 'Thinking level MINIMAL is not supported for this model.'}})
                     return httpx.Response(200, json={
                         'id': 'test', 'object': 'chat.completion', 'created': 0,
                         'model': rsh_ai.PROVIDERS[provider][1],
@@ -174,10 +178,7 @@ class AiAssistantTests(unittest.TestCase):
                     else:
                         self.assertEqual(body['max_tokens'], 500)
                         self.assertNotIn('max_completion_tokens', body)
-                        if provider == 'gemini':
-                            self.assertEqual(body['reasoning_effort'], 'minimal')
-                        else:
-                            self.assertNotIn('reasoning_effort', body)
+                        self.assertNotIn('reasoning_effort', body)
                     self.assertIn('Provider: '+rsh_ai.PROVIDERS[provider][0], serial.output)
                     self.assertEqual(session['messages'][-1]['content'], 'Reply')
 
@@ -247,6 +248,20 @@ class AiAssistantTests(unittest.TestCase):
         with patch.dict(rsh_ai.os.environ, {'OPENAI_MODEL': 'openai-only', 'OPENAI_REASONING_EFFORT': 'none'}):
             options = rsh_ai._load_chat_options()
         self.assertEqual(options, {'model': 'gemini-3.8-flash', 'max_tokens': 1024, 'reasoning_effort': 'low'})
+
+    def test_gemini_reasoning_is_omitted_unless_explicitly_selected(self):
+        for model in ('gemini-3.8-flash', 'custom-gemini-model'):
+            for effort in (None, 'default', 'low'):
+                with self.subTest(model=model, effort=effort):
+                    config = {'provider': 'gemini', 'model': model}
+                    if effort is not None:
+                        config['reasoning_effort'] = effort
+                    with patch.dict(rsh_ai.os.environ, {'OPENAI_REASONING_EFFORT': 'minimal'}):
+                        options = rsh_ai._load_chat_options(config)
+                    if effort == 'low':
+                        self.assertEqual(options['reasoning_effort'], 'low')
+                    else:
+                        self.assertNotIn('reasoning_effort', options)
 
     def test_empty_reply_or_local_connection_failure_can_be_retried(self):
         for failure in ('empty', 'connection'):

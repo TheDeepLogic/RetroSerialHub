@@ -541,9 +541,10 @@ for eligible models, accounts, and regions, with quotas and rate limits. A key
 alone does not guarantee free usage: keep the project on the free tier if that
 is your intent. Free-tier content may be used to improve Google's products.
 Check current pricing and terms (https://ai.google.dev/gemini-api/docs/pricing).
-The default Gemini model uses reasoning_effort: "minimal"; custom models use
-provider defaults unless an effort is configured. Gemini accepts minimal,
-low, medium, high, or default to omit the field. See
+Gemini uses the model's default thinking settings unless reasoning_effort is
+explicitly configured. Available levels depend on the model; the hub accepts
+minimal, low, medium, or high as explicit overrides. Use default or remove the
+setting if Gemini rejects a thinking level. See
 Gemini compatibility (https://ai.google.dev/gemini-api/docs/openai).
 
 OpenAI: existing configuration remains supported
@@ -952,6 +953,11 @@ Release Notes
 
 v2.7 (in development)
 
+* Gemini Thinking Compatibility: Removed the automatic minimal reasoning
+  setting that caused HTTP 400 errors on models rejecting that thinking level.
+  Gemini now chooses its own thinking defaults unless explicitly configured.
+  Added a simulated provider rejection to the SDK request test and coverage for
+  omitted, explicit, and default reasoning settings.
 * AI Provider Choice: Added Google Gemini and local Ollama alongside OpenAI.
   Local models need no API key or token billing; Gemini supports a hosted
   free-tier setup subject to provider limits. Existing OpenAI settings work.

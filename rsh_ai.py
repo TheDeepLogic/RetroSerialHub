@@ -86,8 +86,6 @@ def _load_chat_options(config=None, provider=None):
     options = {"model": model, "max_completion_tokens" if provider == "openai" else "max_tokens": budget}
     if provider == "gemini":
         effort = selected.get("reasoning_effort")
-        if effort is None and model == PROVIDERS['gemini'][1]:
-            effort = 'minimal'
         if effort not in (None, '', 'default'):
             if effort not in ('minimal', 'low', 'medium', 'high'):
                 raise ValueError("Gemini reasoning_effort must be minimal, low, medium, high, or default.")
