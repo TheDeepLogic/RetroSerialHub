@@ -15,7 +15,7 @@ import unicodedata
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-VERSION = "2.6"
+VERSION = "2.7"
 
 from retro_os.menu_data import console_sections
 

@@ -92,10 +92,19 @@ def handle_input(sess, line_str, ser, use_ansi=True):
                 path = base / sess['editing']
                 if path.read_text(encoding='utf-8') != sess['edit_original']:
                     raise ValueError('Note changed in another session. Cancel and reopen before saving.')
-                with NamedTemporaryFile(mode='w',encoding='utf-8',dir=base,suffix='.tmp',delete=False) as output:
-                    output.write('\n'.join(lines) + '\n')
-                    temporary = pathlib.Path(output.name)
-                temporary.replace(path)
+                temporary = None
+                try:
+                    with NamedTemporaryFile(mode='w',encoding='utf-8',dir=base,suffix='.tmp',delete=False) as output:
+                        temporary = pathlib.Path(output.name)
+                        output.write('\n'.join(lines) + '\n')
+                    temporary.replace(path)
+                finally:
+                    if temporary is not None:
+                        try:
+                            temporary.unlink(missing_ok=True)
+                        except OSError:
+                            # Preserve the original save error if cleanup also fails.
+                            pass
                 sess.pop('editing'); sess.pop('edit_lines'); sess['notice'] = 'Note saved.'
                 _render_menu(ser,sess); return True,None
             if operation in ('n','b'):
@@ -156,8 +165,19 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         _render_menu(ser,sess); return True,None
     if upper.startswith('F '):
         query = txt[2:].casefold()
-        sess['notes'] = [p.name for p in sorted(base.glob('*.txt'))
-                         if query in p.name.casefold() or (p.stat().st_size <= 1024*1024 and query in p.read_text(encoding='utf-8',errors='replace').casefold())]
+        matches = []
+        skipped = 0
+        for path in sorted(base.glob('*.txt')):
+            if query in path.name.casefold():
+                matches.append(path.name)
+                continue
+            try:
+                if path.stat().st_size <= 1024*1024 and query in path.read_text(encoding='utf-8',errors='replace').casefold():
+                    matches.append(path.name)
+            except OSError:
+                skipped += 1
+        sess['notes'] = matches
+        sess['notice'] = f'Search skipped {skipped} unreadable note(s).' if skipped else None
         _render_menu(ser,sess); return True,None
     if upper == 'ALL':
         sess['notes'] = sorted(p.name for p in base.glob('*.txt'))

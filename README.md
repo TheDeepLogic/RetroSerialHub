@@ -1,6 +1,6 @@
 ![Retro Serial Hub](images/retroserialhub_banner.jpg)
 
-# Retro Serial Hub v2.6
+# Retro Serial Hub v2.7
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -349,7 +349,12 @@ replacement text are retained. R<number> renames a note, X<number> exports to a 
 host path, `F text` searches names and content, and `ALL` resets the search.
 If a note was deleted, cannot be read, or is not valid UTF-8, Edit displays an
 error and returns to the Notes menu so you can choose another note or quit.
+If saving fails while writing or replacing the temporary file, the original note
+and your in-memory edits remain intact so you can retry `save`. Failed saves also
+clean up their temporary file when filesystem permissions allow it.
 Large content searches inspect note text up to 1 MiB, while filenames are always searched.
+Content search skips notes that cannot be read or disappear during the search,
+reports the skipped count, and continues returning the other matches.
 Clipboard creation/copy and the original read/create/delete operations remain.
 
 ### Audio
@@ -843,6 +848,7 @@ Retro-Serial-Hub/
 ├── RETRO_SERIAL_HUB.py    # Main hub program
 ├── config.py               # Configuration file (edit this!)
 ├── requirements.txt       # Python dependencies
+├── docs/                  # Engineering notes and reproducible measurements
 ├── rsh_ai.py              # AI Assistant module
 ├── rsh_bbs.py             # BBS directory and management module
 ├── rsh_directory.py       # Persistent BBS directory storage
@@ -948,7 +954,41 @@ This design allows you to customize or extend features without modifying the cor
 - Disable ANSI support for terminals that don't support it
 - Try a different cable
 
+## Technical Notes
+
+The [engineering field notes](docs/README.md) explain measured behavior and the
+implementation lessons behind the console, terminal layout, screen controls,
+scrollback, messaging, host approvals, file transfers, and Notepad recovery.
+Each note links to the relevant code and tests. The index includes reproduction
+commands and recorded measurements, distinguishing simulated cases and calculated
+serial timing from hardware measurements.
+
 ## Release Notes
+
+### v2.7 (in development)
+
+- **Resilient Note Search**: An unreadable or disappearing note no longer aborts
+  content search. Continue searching other notes and report the skipped count.
+  Filename matches require no content read, and the 1 MiB content-search limit
+  remains in place. Regression coverage exercises metadata and read failures,
+  successful retries, filename-only matches, and oversized files.
+- **Notepad Save Recovery**: Clean up temporary files after failed writes or file
+  replacements, including partially written saves. Keep the original note and
+  unsaved editor contents intact so `save` can be retried without reopening the
+  note. Regression coverage injects both a disk-write failure and a replacement
+  permission error, verifies cleanup and unchanged source bytes, then retries
+  successfully.
+- **Notepad Edit Recovery**: Fixed editing notes that were deleted, cannot be read,
+  or contain invalid UTF-8. Failed reads leave the menu usable without entering a
+  partially initialized editor or changing the source file. Merged from the
+  experiment branch in [PR #1](https://github.com/TheDeepLogic/RetroSerialHub/pull/1).
+- **Engineering Field Notes**: Added six technical writeups covering terminal layout
+  budgets, screen controls and frozen scrollback, transfer-safe message delivery,
+  host-control approval boundaries, XMODEM wire costs, and Notepad recovery. Includes
+  a repeatable assertion-based measurement harness and recorded results. See the
+  [technical documentation index](docs/README.md).
+- **Development Version**: Updated the displayed application version, bundled guide,
+  and web-viewer user agent to 2.7. The v2.6 release notes remain the release record.
 
 ### v2.6
 

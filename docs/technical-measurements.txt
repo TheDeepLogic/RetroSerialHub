@@ -1,0 +1,196 @@
+{
+  "version": "2.7",
+  "python": "3.14.2",
+  "os": "Windows",
+  "layout": {
+    "native_menu_cases": 1536,
+    "native_scrolls": 0,
+    "menu_action_capacity_by_height": {
+      "16": 1,
+      "20": 5,
+      "24": 8,
+      "25": 8,
+      "30": 8,
+      "43": 8
+    },
+    "host_cases": 168,
+    "host_scrolls": 0,
+    "host_layouts": {
+      "stacked": 114,
+      "side_by_side": 36,
+      "status_above": 18
+    }
+  },
+  "screen_controls": {
+    "control_fixtures": 4,
+    "two_chunk_partitions": 140,
+    "byte_at_a_time_runs": 4,
+    "fragmentation_mismatches": 0,
+    "exact_80_columns_plus_crlf_line_events": 1
+  },
+  "scrollback": {
+    "original_rows": 100,
+    "new_lines_after_clear": 700,
+    "frozen_logical_rows": 100,
+    "live_rows_retained": 500,
+    "visible_original_rows_preserved": 30,
+    "end_resets_counter": true
+  },
+  "messages": {
+    "file_message_characters": 7536,
+    "idle_notice_bytes": 116,
+    "file_body_in_notice": false,
+    "prompt_restored": true,
+    "protected_wire_bytes": 15,
+    "notices_inside_transfer": 0,
+    "notices_after_transfer": 1,
+    "read_message_retained": true
+  },
+  "approvals": {
+    "sources_initially_denied": 2,
+    "duplicate_request_rows": 1,
+    "bounded_queue_test_limit": 2,
+    "production_queue_limit": 16,
+    "failed_save_grants": 0,
+    "restored_sources_allowed": 2,
+    "different_ip_allowed": false,
+    "expired_approval_accepted": false
+  },
+  "notepad": [
+    {
+      "failure": "deleted",
+      "partial_editor_state": false,
+      "source_changed_on_failure": false,
+      "retry_succeeded": true
+    },
+    {
+      "failure": "permission",
+      "partial_editor_state": false,
+      "source_changed_on_failure": false,
+      "retry_succeeded": true
+    },
+    {
+      "failure": "invalid_utf8",
+      "partial_editor_state": false,
+      "source_changed_on_failure": false,
+      "retry_succeeded": true
+    }
+  ],
+  "xmodem": {
+    "cases": [
+      {
+        "payload_bytes": 0,
+        "check": "checksum",
+        "blocks": 0,
+        "sender_bytes": 1,
+        "receiver_bytes": 2,
+        "combined_wire_bytes": 3
+      },
+      {
+        "payload_bytes": 0,
+        "check": "CRC16",
+        "blocks": 0,
+        "sender_bytes": 1,
+        "receiver_bytes": 2,
+        "combined_wire_bytes": 3
+      },
+      {
+        "payload_bytes": 1,
+        "check": "checksum",
+        "blocks": 1,
+        "sender_bytes": 133,
+        "receiver_bytes": 3,
+        "combined_wire_bytes": 136
+      },
+      {
+        "payload_bytes": 1,
+        "check": "CRC16",
+        "blocks": 1,
+        "sender_bytes": 134,
+        "receiver_bytes": 3,
+        "combined_wire_bytes": 137
+      },
+      {
+        "payload_bytes": 127,
+        "check": "checksum",
+        "blocks": 1,
+        "sender_bytes": 133,
+        "receiver_bytes": 3,
+        "combined_wire_bytes": 136
+      },
+      {
+        "payload_bytes": 127,
+        "check": "CRC16",
+        "blocks": 1,
+        "sender_bytes": 134,
+        "receiver_bytes": 3,
+        "combined_wire_bytes": 137
+      },
+      {
+        "payload_bytes": 128,
+        "check": "checksum",
+        "blocks": 1,
+        "sender_bytes": 133,
+        "receiver_bytes": 3,
+        "combined_wire_bytes": 136
+      },
+      {
+        "payload_bytes": 128,
+        "check": "CRC16",
+        "blocks": 1,
+        "sender_bytes": 134,
+        "receiver_bytes": 3,
+        "combined_wire_bytes": 137
+      },
+      {
+        "payload_bytes": 129,
+        "check": "checksum",
+        "blocks": 2,
+        "sender_bytes": 265,
+        "receiver_bytes": 4,
+        "combined_wire_bytes": 269
+      },
+      {
+        "payload_bytes": 129,
+        "check": "CRC16",
+        "blocks": 2,
+        "sender_bytes": 267,
+        "receiver_bytes": 4,
+        "combined_wire_bytes": 271
+      },
+      {
+        "payload_bytes": 1024,
+        "check": "checksum",
+        "blocks": 8,
+        "sender_bytes": 1057,
+        "receiver_bytes": 10,
+        "combined_wire_bytes": 1067
+      },
+      {
+        "payload_bytes": 1024,
+        "check": "CRC16",
+        "blocks": 8,
+        "sender_bytes": 1065,
+        "receiver_bytes": 10,
+        "combined_wire_bytes": 1075
+      },
+      {
+        "payload_bytes": 4096,
+        "check": "checksum",
+        "blocks": 32,
+        "sender_bytes": 4225,
+        "receiver_bytes": 34,
+        "combined_wire_bytes": 4259
+      },
+      {
+        "payload_bytes": 4096,
+        "check": "CRC16",
+        "blocks": 32,
+        "sender_bytes": 4257,
+        "receiver_bytes": 34,
+        "combined_wire_bytes": 4291
+      }
+    ],
+    "one_nak_1024_payload_wire_bytes": 1209
+  }
+}

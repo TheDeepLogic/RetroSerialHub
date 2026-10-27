@@ -63,7 +63,7 @@ def fetch_url(url, dest_dir=None, dest_name=None, timeout=15):
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "RetroSerialHub/2.6 (Vintage Terminal Host)"},
+        headers={"User-Agent": "RetroSerialHub/2.7 (Vintage Terminal Host)"},
     )
     ctx = ssl.create_default_context()
     with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
@@ -105,7 +105,7 @@ def extract_text_from_url(url, timeout=15):
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "RetroSerialHub/2.6 (Vintage Terminal Host)"},
+        headers={"User-Agent": "RetroSerialHub/2.7 (Vintage Terminal Host)"},
     )
     ctx = ssl.create_default_context()
     with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
