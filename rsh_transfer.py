@@ -22,6 +22,8 @@ def read_exact(ser, count, timeout=10):
     data = bytearray()
     while len(data) < count:
         _check(ser)
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Timed out waiting for transfer data.')
         block = ser.read(count - len(data))
         if block:
             data.extend(block)
@@ -65,8 +67,12 @@ def protected(function):
             try:
                 ser._rsh_transfer_started = time.monotonic()
                 return function(ser, *args, **kwargs)
-            except (TimeoutError, InterruptedError, OSError, ValueError) as exc:
-                ser.write(bytes([CAN, CAN]))
+            except (TimeoutError, InterruptedError, OSError, ValueError):
+                try:
+                    ser.write(bytes([CAN, CAN]))
+                except OSError:
+                    # A disconnected transport must not hide the original error.
+                    pass
                 raise
             finally:
                 ser._rsh_transfer_progress = None

@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Transfer Failure Recovery**: XMODEM/YMODEM fragmented reads now enforce the
+  overall read deadline even when a peer keeps sending small fragments. A failed
+  cancellation write on a disconnected transport preserves the original transfer
+  error. Added deterministic regression tests; see
+  [transfer reliability notes](docs/transfer-reliability.md) for timeout limits
+  and validation details.
 - **JSON Hub Configuration**: Removed `config.py` and moved serial/Telnet profiles,
   welcome text, serial inactivity defaults, and WOPR speech to validated
   `settings/local/hub_config.json`. Preserved the current local hardware settings;
