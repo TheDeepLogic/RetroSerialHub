@@ -26,7 +26,7 @@ class VirtualScreen:
     def feed(self, output):
         position = 0
         while position < len(output):
-            escape = re.match(r"\x1b\[([0-9;]*)([A-Za-z])", output[position:])
+            escape = re.match(r"\x1b\[\??([0-9;]*)([A-Za-z])", output[position:])
             if escape:
                 arguments = [int(value or 0) for value in escape[1].split(";")]
                 action = escape[2]
@@ -62,6 +62,151 @@ class VirtualScreen:
 
 
 class ConsoleDashboardTests(unittest.TestCase):
+    def test_approvals_errors_and_activity_overflow_remain_visible(self):
+        dashboard = ConsoleDashboard({f"P{i}": {
+            "serial_port": f"COM{i}", "serial_status": "OPEN",
+            "endpoint": "192.168.7.33:6400", "tcp_status": "LISTENING"}
+            for i in range(8)})
+        dashboard.set_host_terminal(MagicMock())
+        access = MagicMock()
+        access.pending.return_value = [{"id": i, "ip": f"192.168.1.{i}",
+                                       "profile": "APPLE2", "seconds_left": 60}
+                                      for i in range(1, 21)]
+        dashboard.set_telnet_access(access)
+        for i in range(40):
+            dashboard.set_user_activity(str(i), "calc", user_label=f"Client{i}")
+        dashboard._events.append(("Connection failed", "red"))
+        dashboard.append_host_output("cli> ")
+        for columns in (80, 150):
+            frame = dashboard._frame(height=24, terminal_size=os.terminal_size((columns, 24)))
+            text = "\n".join(dashboard._strip_ansi(row) for row in frame)
+            self.assertIn("APPROVAL #1", text)
+            self.assertIn("ERROR: Connection failed", text)
+            self.assertGreater(text.index("ERROR: Connection failed"), text.index("Activity Monitor"))
+            self.assertIn("more active sessions", text)
+            self.assertIn("approvals;", text)
+            self.assertIn("cli>", text)
+            self.assertLessEqual(len(frame), 24)
+
+    def test_actual_prompt_and_draft_are_single_input_at_resize_boundaries(self):
+        dashboard = ConsoleDashboard({})
+        terminal = MagicMock()
+        dashboard.set_host_terminal(terminal)
+        dashboard.append_host_output("Menu heading\nFilename: ")
+        dashboard._host_command = "report.txt"
+        for columns in (20, 40, 80, 123, 124, 150):
+            for height in (5, 12, 24, 40):
+                output = io.StringIO()
+                with patch("rsh_console.sys.stdout", output), patch("shutil.get_terminal_size",
+                           return_value=os.terminal_size((columns, height))):
+                    dashboard._draw_frame()
+                screen = VirtualScreen(columns, height)
+                screen.feed(output.getvalue())
+                self.assertEqual(screen.scrolls, 0)
+                self.assertNotIn("Host>", screen.text())
+                self.assertIn("txt", screen.text())
+                if columns >= 40:
+                    self.assertIn("report.txt", screen.text())
+                    self.assertEqual(screen.text().count("Filename:"), 1)
+                    prefix = "".join(screen.lines[screen.row])[:screen.column]
+                    self.assertTrue(prefix.endswith("Filename: report.txt"))
+                frame = dashboard._frame(height=height, terminal_size=os.terminal_size((columns, height)))
+                self.assertTrue(all(len(dashboard._strip_ansi(row)) <= columns - 1 for row in frame))
+        terminal.submit.assert_not_called()
+        dashboard.host_input_available = lambda: True
+        dashboard._host_key("\r")
+        terminal.submit.assert_called_once_with("report.txt")
+
+    def test_masked_input_and_local_theme_list_preserve_real_prompt(self):
+        dashboard = ConsoleDashboard({})
+        terminal = MagicMock(secret_input=True)
+        dashboard.set_host_terminal(terminal)
+        dashboard.host_input_available = lambda: True
+        dashboard.append_host_output("Password: ")
+        dashboard._host_command = "secret"
+        text = "\n".join(dashboard._frame(height=30, terminal_size=os.terminal_size((100, 30))))
+        self.assertIn("Password: ******", text)
+        self.assertNotIn("secret", text)
+        terminal.secret_input = False
+        dashboard._host_command = ""
+        dashboard.handle_host_command("theme")
+        self.assertEqual(dashboard._host_output_line, "Password: ")
+        text = "\n".join(dashboard._frame(height=40, terminal_size=os.terminal_size((100, 40))))
+        self.assertIn("Console color schemes", text)
+        self.assertEqual(text.count("Password:"), 1)
+
+    def test_redraw_restores_cursor_after_host_command_in_all_layouts(self):
+        dashboard = ConsoleDashboard({})
+        dashboard.set_host_terminal(MagicMock())
+        dashboard.host_input_available = lambda: True
+        dashboard.append_host_output("cli> ")
+        dashboard._host_command = "atm "
+        for columns, height in ((150, 40), (100, 40), (40, 12)):
+            output = io.StringIO()
+            with patch("rsh_console.sys.stdout", output), patch("shutil.get_terminal_size",
+                       return_value=os.terminal_size((columns, height))):
+                dashboard._draw_frame()
+            screen = VirtualScreen(columns, height)
+            screen.feed(output.getvalue())
+            line = "".join(screen.lines[screen.row])
+            self.assertEqual(line[:screen.column].strip("|\u2502"), "cli> atm ")
+            self.assertTrue(output.getvalue().startswith("\x1b[?25l"))
+            self.assertTrue(output.getvalue().endswith("\x1b[?25h"))
+            self.assertEqual(screen.scrolls, 0)
+
+    def test_contracted_host_pane_has_complete_border_and_uses_available_height(self):
+        dashboard = ConsoleDashboard({})
+        dashboard.host_input_available = lambda: True
+        dashboard.set_host_terminal(MagicMock())
+        dashboard.append_host_output("Menu heading\n" + "X" * 80 + "\nSelect an option")
+        for ascii_borders in ("0", "1"):
+            with patch.dict(os.environ, {"RSH_ASCII_BORDERS": ascii_borders}):
+                frame = [dashboard._strip_ansi(row) for row in dashboard._frame(
+                    height=40, terminal_size=os.terminal_size((100, 40)))]
+            start = next(i for i, row in enumerate(frame) if "Host Console /" in row)
+            self.assertEqual(len(frame), 40)
+            self.assertTrue(all(len(row) == 99 for row in frame[start:]))
+            self.assertIn(frame[-1][0], "+\u2514")
+            self.assertIn(frame[-1][-1], "+\u2518")
+            self.assertTrue(all(row[0] in "|\u2502" and row[-1] in "|\u2502"
+                                for row in frame[start + 1:-1]))
+            self.assertIn("Menu heading", "\n".join(frame))
+            self.assertIn("X" * 80, "\n".join(frame))
+            self.assertIn("Select an option", frame[-2])
+
+    def test_split_panes_preserve_80_columns_and_adapt_to_spare_height(self):
+        dashboard = ConsoleDashboard({"APPLE2": {
+            "serial_port": "COM2", "serial_status": "OPEN", "baud": 19200,
+            "tcp_port": 6400, "tcp_status": "LISTENING",
+            "endpoint": "192.168.7.33:6400"}})
+        dashboard.set_host_terminal(MagicMock())
+        dashboard.set_user_activity("a", "calc", user_label="Alice")
+        dashboard.set_user_activity("b", "wargames", user_label="Bob")
+        dashboard.append_host_output("X" * 80 + "\ncli> ")
+        for height in (30, 50):
+            size = os.terminal_size((150, height))
+            frame = dashboard._frame(height=height, terminal_size=size)
+            plain = [dashboard._strip_ansi(row) for row in frame]
+            self.assertEqual(len(frame), height)
+            self.assertTrue(all(len(row) <= 149 for row in plain))
+            menu_row = next(row for row in plain if "X" * 80 in row)
+            self.assertIn(menu_row[0], "|\u2502")
+            self.assertEqual(menu_row[1:81], "X" * 80)
+            self.assertIn(menu_row[81], "|\u2502")
+            text = "\n".join(plain)
+            self.assertIn("Alice: Calc", text)
+            self.assertIn("Bob: WOPR", text)
+            self.assertNotIn("Bulletin Boards", text)
+            host_top = next(i for i, row in enumerate(plain) if "Host Console /" in row)
+            self.assertEqual(host_top == 1, height == 30)
+            output = io.StringIO()
+            with patch("rsh_console.sys.stdout", output), patch("shutil.get_terminal_size", return_value=size):
+                dashboard._draw_frame()
+            screen = VirtualScreen(150, height)
+            screen.feed(output.getvalue())
+            self.assertEqual(screen.scrolls, 0)
+            self.assertIn("cli>", screen.text())
+
     def test_host_typing_and_approval_footer_growth_do_not_scroll_or_shift_header(self):
         dashboard = ConsoleDashboard({})
         dashboard._tty = True
@@ -95,7 +240,7 @@ class ConsoleDashboardTests(unittest.TestCase):
             access.pending.return_value = []
             dashboard._draw_frame()
             verify_redraw()
-        self.assertNotIn("TELNET APPROVAL REQUIRED", screen.text())
+        self.assertNotIn("APPROVAL #", screen.text())
 
     def test_resizing_keeps_redraw_inside_viewport_and_preserves_host_prompt(self):
         dashboard = ConsoleDashboard({})
@@ -106,6 +251,7 @@ class ConsoleDashboardTests(unittest.TestCase):
         dashboard.set_host_terminal(MagicMock())
         for index in range(20):
             dashboard.append_host_output(f"Command response {index}\r\n".encode())
+        dashboard.append_host_output("cli> ")
         for columns, height in ((120, 50), (80, 24), (40, 12), (20, 5)):
             output = io.StringIO()
             screen = VirtualScreen(columns, height)
@@ -114,7 +260,7 @@ class ConsoleDashboardTests(unittest.TestCase):
             screen.feed(output.getvalue())
             self.assertEqual(screen.scrolls, 0)
             self.assertLessEqual(dashboard._frame_lines, height)
-            self.assertIn("Host>", screen.text())
+            self.assertIn("cli>", screen.text())
             self.assertTrue(screen.text().startswith("Retro Serial Hub"))
 
     def test_row_clipping_preserves_colors_and_prevents_wrap_or_embedded_newlines(self):
@@ -261,9 +407,9 @@ class ConsoleDashboardTests(unittest.TestCase):
         with patch("shutil.get_terminal_size", return_value=type("TermSize", (), {"columns": 80, "lines": 24})()):
             frame = dashboard._frame()
         frame_text = "\n".join(frame)
-        self.assertIn("Connected Terminal Activity Monitor", frame_text)
-        self.assertIn("*[A] Shell (CLI", frame_text)
-        self.assertIn("[Hacker]", frame_text)
+        self.assertIn("Activity Monitor", frame_text)
+        self.assertIn("Hacker: Shell (CLI)", frame_text)
+        self.assertNotIn("Bulletin Boards", frame_text)
 
     def test_retro_serial_hub_activity_helpers(self):
         import RETRO_SERIAL_HUB as rsh
@@ -326,83 +472,37 @@ class ConsoleDashboardTests(unittest.TestCase):
         self.assertEqual(set(dashboard.get_user_activities()), {'serial:APPLE2'})
 
 
-    def test_host_interaction_collapses_monitor_until_explicit_clear(self):
-        from rsh_host import HostTerminal
+    def test_activity_monitor_always_lists_only_active_selections(self):
         dashboard = ConsoleDashboard({})
-        terminal = HostTerminal(dashboard.append_host_output)
+        dashboard.set_host_terminal(MagicMock())
+        dashboard.host_input_available = lambda: True
+        dashboard.log = MagicMock()
+        dashboard.set_user_activity("remote", "wargames", user_label="APPLE2")
+        for command in ("monitor collapse", "monitor auto", "monitor expand"):
+            dashboard.handle_host_command(command)
+            text = "\n".join(row for row, _ in dashboard._active_monitor_rows(80))
+            self.assertIn("APPLE2: WOPR", text)
+            self.assertNotIn("Bulletin Boards", text)
+        self.assertFalse(hasattr(dashboard, "_activity_collapsed"))
+        self.assertFalse(hasattr(dashboard, "_activity_pinned"))
+        self.assertIn("always shows active selections", dashboard.log.call_args[0][0])
+
+    def test_console_help_preserves_hub_prompt_and_is_not_forwarded(self):
+        dashboard = ConsoleDashboard({})
+        terminal = MagicMock()
         dashboard.set_host_terminal(terminal)
-        size = os.terminal_size((120, 50))
-        for index in range(60):
-            dashboard.append_host_output(f'Output {index}\n')
-        dashboard._frame(height=50, terminal_size=size)
-        small_page = dashboard._output_page_size
-        self.assertFalse(dashboard._activity_collapsed)
-        dashboard._host_key('h')
-        dashboard._frame(height=50, terminal_size=size)
-        self.assertTrue(dashboard._activity_collapsed)
-        self.assertGreater(dashboard._output_page_size, small_page)
-        with patch.object(dashboard, 'host_input_available', return_value=True):
-            dashboard.handle_host_command('ATM')
-            dashboard.append_host_output('Menu response\n')
-            self.assertTrue(dashboard._activity_collapsed)
-            dashboard.handle_host_command('clear')
-        self.assertFalse(dashboard._activity_collapsed)
-        self.assertEqual(list(dashboard._host_output), [])
-        dashboard._frame(height=50, terminal_size=size)
-        self.assertEqual(dashboard._output_page_size, small_page)
-        # Further asynchronous host output must not collapse the restored monitor.
-        dashboard.append_host_output('Delayed response\n')
-        self.assertFalse(dashboard._activity_collapsed)
+        dashboard.host_input_available = lambda: True
+        dashboard.append_host_output("File path: ")
+        dashboard.handle_host_command("host help")
+        frame = "\n".join(dashboard._frame(height=40, terminal_size=os.terminal_size((100, 40))))
+        self.assertIn("HOST CONSOLE CONTROLS", frame)
+        self.assertIn("File path:", frame)
+        self.assertNotIn("Host>", frame)
+        terminal.submit.assert_not_called()
+        dashboard.handle_host_command("help")
+        terminal.submit.assert_called_once_with("help")
 
-    def test_monitor_collapse_survives_clear_and_auto_restores_normal_layout(self):
-        from rsh_host import HostTerminal
-        dashboard = ConsoleDashboard({})
-        terminal = HostTerminal(dashboard.append_host_output)
-        dashboard.set_host_terminal(terminal)
-        dashboard.handle_host_command('monitor collapse')
-        self.assertTrue(dashboard._activity_collapsed)
-        dashboard.append_host_output('Output to clear\n')
-        dashboard.handle_host_command('clear')
-        self.assertTrue(dashboard._activity_collapsed)
-        self.assertEqual(list(dashboard._host_output), [])
-        dashboard.append_host_output('Delayed output\n')
-        self.assertTrue(dashboard._activity_collapsed)
-        dashboard.handle_host_command('monitor auto')
-        self.assertFalse(dashboard._activity_collapsed)
-        dashboard._host_key('h')
-        self.assertTrue(dashboard._activity_collapsed)
-        dashboard.handle_host_command('clear')
-        self.assertFalse(dashboard._activity_collapsed)
-        dashboard.handle_host_command('monitor collapse')
-        dashboard.handle_host_command('monitor expand')
-        dashboard.handle_host_command('clear')
-        self.assertFalse(dashboard._activity_collapsed)
-
-    def test_invalid_monitor_command_preserves_pinned_layout(self):
-        from rsh_host import HostTerminal
-        dashboard = ConsoleDashboard({})
-        dashboard.set_host_terminal(HostTerminal(dashboard.append_host_output))
-        dashboard.handle_host_command('monitor collapse')
-        dashboard.handle_host_command('monitor invalid')
-        dashboard.handle_host_command('clear')
-        self.assertTrue(dashboard._activity_collapsed)
-
-    def test_collapsed_monitor_has_one_selection_row_and_blank_inactive_cells(self):
-        dashboard = ConsoleDashboard({})
-        dashboard._activity_collapsed = True
-        dashboard.set_user_activity('serial:APPLE2', 'wargames', user_label='APPLE2')
-        rows = dashboard.render_interface(inner_width=118, use_color=False)
-        self.assertEqual(len(rows), 6)
-        self.assertTrue(all(len(row) == 118 for row in rows), rows)
-        self.assertIn('*[H] WOPR', rows[2])
-        self.assertIn('APPLE2', rows[2])
-        self.assertNotIn('Bulletin Boards', '\n'.join(rows))
-        self.assertEqual(rows[4].strip('|\u2502 '), '')
-        for width in (40, 50, 80):
-            rendered = dashboard.render_interface(inner_width=width, use_color=False)
-            self.assertTrue(all(len(row) == width for row in rendered), rendered)
-
-    def test_collapsed_layout_redraw_resize_and_scrollback_stay_inside_screen(self):
+    def test_host_layout_redraw_resize_and_scrollback_stay_inside_screen(self):
         from rsh_host import HostTerminal
         dashboard = ConsoleDashboard({})
         dashboard._tty = True
@@ -411,6 +511,7 @@ class ConsoleDashboardTests(unittest.TestCase):
         dashboard._running = True
         for index in range(80):
             dashboard.append_host_output(f'Host response {index}\n')
+        dashboard.append_host_output('cli> ')
         for columns, height in ((120, 50), (80, 24), (40, 24), (20, 5)):
             output = io.StringIO()
             screen = VirtualScreen(columns, height)
@@ -418,7 +519,7 @@ class ConsoleDashboardTests(unittest.TestCase):
                 dashboard._draw_frame()
             screen.feed(output.getvalue())
             self.assertEqual(screen.scrolls, 0)
-            self.assertIn('Host>', screen.text())
+            self.assertIn('cli>', screen.text())
             self.assertLessEqual(dashboard._frame_lines, height)
         dashboard._frame(height=50, terminal_size=os.terminal_size((120, 50)))
         dashboard._running = False

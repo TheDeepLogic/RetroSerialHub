@@ -1,6 +1,6 @@
 ![Retro Serial Hub](images/retroserialhub_banner.jpg)
 
-# Retro Serial Hub v2.5
+# Retro Serial Hub v2.6
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -29,7 +29,7 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Direct File Transfers**: XMODEM, YMODEM, and ASCII transfers callable directly from the shell or menu (`xsend`, `ysend`, `asend`, `xrecv`)
 - **Electronic Mail (Hub & Internet)**: Central inter-terminal hub mailbox with auto-detected sender identity, plus IMAP/SMTP internet email and desktop configuration GUI
 - **Connected Terminal Messaging**: List active serial/Telnet terminals, send a direct message, or deliver a text file from the Communications menu
-- **Terminal Messages**: List connected terminals and send a message to one machine or broadcast to all connected screens
+- **Terminal Messages**: Immediate message notices, M=Messages session inboxes for messages and received text files, and broadcasts to connected screens
 - **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek, and the WarGames (W.O.P.R.) CLI simulation
 - **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (`briefing`), and interactive article reader (`news <num>`)
 - **Background Task Scheduler**: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. `news : weather Austin : broadcast Morning briefing complete`)
@@ -102,8 +102,13 @@ Retro Serial Hub features an accordion flyout main menu organized into seven cat
 
 ### Command Shell (CLI)
 
-The host dashboard also accepts hub commands directly at `Host>`. It starts in
-the same CLI as a connected terminal, with its own session and output history.
+The host dashboard accepts input directly at the active hub prompt, with console
+control hints immediately above it. It opens the standard numbered menu on
+startup, with its own session and output history.
+On the host main menu, status and the ATM/messages hint sit above a blank line,
+the console controls, another blank line, and the active prompt. Other tools keep
+their output in place; a blank line separates console controls from input.
+Enter `CLI` for the command shell.
 For example:
 
 ```text
@@ -116,20 +121,76 @@ calc 6 * 7
 Use `terminals` to find exact destination names. Other terminals can reply with
 `msg to Host <text>`. `ATM` opens the normal numbered menus; use `CLI` to return
 to commands. Interactive tools use the same prompts as serial/Telnet sessions.
-Host output stays in the dashboard: PgUp/PgDn scroll it, Up/Down recall commands,
-and `clear` clears the output pane and normally restores the expanded activity monitor.
-Use `monitor collapse` at the host console to keep the monitor collapsed even
-after `clear`. `monitor auto` (or `monitor expand`) expands it and restores normal
-automatic behavior. This choice lasts until changed or the hub restarts.
-Host interaction collapses activity to the selected item under each header,
-giving the host output pane more room. Blank Enter answers prompts or continues a
-pause; Ctrl+X is forwarded to the active host session. The host CLI also works
+Host output stays in the dashboard: PgUp/PgDn browse it, Up/Down recall commands,
+and `clear` clears the output pane. PgUp holds the history you are reading while
+incoming output continues; the pane title shows `Scrollback - N new lines`.
+**End** returns to live output and clears the counter. PgDn also returns live at
+the bottom. Resizing reflows the same source text; incoming screen clears do not
+discard the held view. Submitting input or explicitly clearing the console returns
+to live output. In windows at least 124 columns wide,
+the bordered host pane provides exactly 80 output columns on the left. Serial
+and network status, connections, active menu selections, approvals, and events
+appear on the right. Each active client gets its own activity entry; unused menu
+options stay hidden. Taller windows move status and connections across the top
+when at least 24 host output rows still fit below, with activity on the right.
+Narrower windows stack status above host output.
+Blank Enter answers prompts or continues a pause; Ctrl+X is forwarded to the
+active host session. The host CLI also works
 when inbound Telnet listeners are disabled.
 
-`allow <request #>`, `deny <request #>`, and `pending` remain local console
-controls for incoming Telnet approval. They are not exposed through the remote
-hub CLI. The host session appears as `Host`, without adding a serial port or
+At the console, `host help` (or `console help`) lists dashboard controls; `HELP`
+continues to reach the hub. `clear` removes output while retaining the active
+prompt. The activity monitor always shows active selections. Approvals and errors
+have priority over normal status/activity rows, with overflow counts when space
+is limited. The host session appears as `Host`, without adding a serial port or
 Telnet connection to the live counts.
+
+Any serial or Telnet terminal can submit a line to the host session by prefixing
+it with `HOST`, for example `HOST theme Commodore`, `HOST ATM`, or
+`HOST calc 6 * 7`. Bare `HOST` submits a blank Enter. This works at hub command
+prompts and nested tool prompts; raw bridges, binary transfers, and remote BBS
+streams retain their normal byte handling. The originating terminal stays in its
+current tool; the command runs in the host session's current context.
+
+The first `HOST` attempt from each source IP or physical serial port requires
+separate host-control approval, even if the Telnet connection was already allowed.
+The attempted command is not executed or queued. At the physical host keyboard,
+type `allow host <request #>` or `deny host <request #>`. After approval, retry the
+`HOST` command. Forwarded commands cannot approve host-control requests.
+`pending` lists both Telnet and host-control requests; requests expire after two
+minutes. Host-control permissions persist in
+`settings/local/host_command_allowlist.json` (`allowed_ips` and
+`allowed_serial_ports`); removing an entry revokes it without restarting.
+Incoming Telnet connections continue to use `allow <request #>` / `deny <request #>`
+and their own `telnet_allowlist.json`. If someone is editing a local host input
+line, forwarded input is refused until that line is sent, preserving the draft.
+
+Console appearance commands work at the active host prompt, including while a
+submenu is open. Approved terminals can use the same commands with `HOST`:
+
+```text
+theme                         List schemes and current settings
+theme Windows 3.1             Select a scheme by name (or its list number)
+theme background off          Use the terminal background, including transparency
+theme background on           Restore the scheme's backgrounds
+theme colors off              Use terminal-default foreground and background
+theme colors on               Restore scheme colors
+```
+
+Schemes are **Ocean** (the default), **Turquoise**, **Emerald City**, **Hot Pink**,
+**Light**, **Dark**, **QBasic**, **Commodore**, **Apple IIGS**, **TI-99/4A**, **Windows 95**,
+**Windows 3.1**, **Amber Monochrome**, and **Green Monochrome**.
+Basic Blue and Windows 3.1 share one scheme; either name selects it. Windows 95
+uses a teal desktop, silver-gray panels, and navy title/selection bars.
+Light uses the DOS Shell Monochrome-4 Colors
+palette (mostly white with black text); Dark uses mostly black with white text.
+Background-off makes panel interiors, borders, and unused space transparent while
+retaining scheme backgrounds for the title bar, input/status bands, and selection
+highlights. The selected scheme and both switches
+are saved in `settings/local/console_theme.json`. Selecting a scheme keeps the
+background and color switches as chosen. `NO_COLOR` continues to disable colors.
+These are dashboard controls; a remote terminal uses the separately approved
+`HOST` prefix to access them.
 
 Enter `CLI` at the main menu to open the interactive command shell (`cli>`). Type `help` for commands or `exit` to return to the menu:
 - `sysinfo` (aliases `sys`, `top`): Displays host CPU cores, memory load, disk capacity, uptime, and OS platform information formatted cleanly for 40- or 80-column screens.
@@ -166,6 +227,16 @@ All games feature clean ASCII board rendering optimized for both 40- and 80-colu
 - **Minesweeper** (`mines`): Text-mode minefield with first-click safety, reveal (`r row col`), flag toggle (`f row col`), and customizable board dimensions.
 - **Klondike Solitaire** (`solitaire`): Full card tableau with stock/waste piles, card movement, and automatic foundation moves (`f`).
 - **WarGames (W.O.P.R.)** (`wargames`): Interactive NORAD defense computer simulation inspired by the 1983 film.
+
+WOPR opens at an IMSAI-style CP/M prompt with two simulated disks. Explore with
+`DIR`, `DIR *.COM`, `TYPE README.TXT`, and `TYPE MODEM.DOC` to discover the software.
+`HELP` lists the shell commands. `A:` and `B:` switch disks; `STAT`, `PIP`, `DUMP`,
+`REN`, `ERA`, `SAVE`, and `CLS` provide a small working command environment.
+For example, `PIP B:=NOTES.TXT` copies notes to the scratch disk, and
+`REN B:WORK.TXT=B:NOTES.TXT` renames that copy. `SAVE` creates a simulated memory
+image; binary dumps show placeholder bytes. Disk changes last only for the current
+WOPR session. `EXIT` or `ATM` returns to the hub.
+
 - **Lunar Lander** (`games lander`): Turn-based descent challenge controlled with numeric engine burns.
 - **Hunt the Wumpus** (`games wumpus` in the CLI, or Games section `[D]`): Cave exploration with numbered rooms, danger clues, bats, pits, and three-room arrow shots, designed for line-oriented terminals.
 - **Blackjack** (`games blackjack`): Play hit or stand against a dealer with standard ace scoring.
@@ -299,7 +370,7 @@ audio repeat on
 audio shuffle
 ```
 
-### Capture, diagnostics, notifications
+### Capture, diagnostics, messages
 
 Session Capture records readable outgoing terminal text, including locally echoed
 conversation, to `hub_tools/captures/`. Control sequences are translated/removed;
@@ -312,12 +383,23 @@ transfer progress. The host can request cancellation using
 `diagnostics cancel <terminal-name-or-port>`. It never opens a second connection
 to a busy port or toggles modem control lines automatically.
 
-Messages, reminders, scheduled broadcasts, and text-file deliveries are queued.
-They are not injected into another terminal's prompts or binary transfer stream.
-The main menu shows a pending count; Connected Terminals N or `notifications`
-reads them. At a CLI command boundary, pending messages are shown unless quiet
-mode is enabled. `notifications quiet on/off` changes quiet mode for that session.
-`machine quiet on/off` also saves the default. Connected Terminals shows input age
+Terminal messages, reminders, scheduled broadcasts, and received text files now
+announce themselves immediately, even while the terminal is idle or at a prompt.
+Only active file transfers automatically defer notices; deferred notices appear
+when the transfer finishes. A short banner identifies the message and restores
+the current input line. Long files stay in Messages instead of flooding the screen.
+
+Press **M** at the main menu when **M=Messages** appears, or type `MESSAGES` / `MSGS`
+at the main menu or CLI. This opens the session inbox with unread markers, paging,
+individual messages, and read-all-unread. Received files are here, separate from
+Electronic Mail. Read messages remain available for the session; the inbox keeps
+up to 100 items and resets on disconnect. Connected Terminals also has M=Messages
+(the old N shortcut remains accepted).
+
+Explicit quiet mode remains an opt-out: `messages quiet on/off` (or the older
+`notifications quiet on/off`) changes it for this session. `machine quiet on/off`
+saves the default. Turning quiet off announces any waiting messages.
+Connected Terminals shows input age
 and queued counts. The host status panel shows transfer byte/retry progress.
 
 ### Transfers
@@ -774,7 +856,11 @@ Retro-Serial-Hub/
 ├── rsh_keyboard.py        # Host keyboard bridge
 ├── rsh_access.py          # Telnet admission and host approval queue
 ├── rsh_host.py            # Local host-console terminal session
-├── rsh_console.py         # Live dashboard, keyboard input, and output history
+├── rsh_console.py         # Adaptive dashboard, host input, and scrollback
+├── rsh_console_theme.py   # Console schemes and saved appearance settings
+├── rsh_host_screen.py     # Isolated host text screen and cursor controls
+├── rsh_host_access.py     # First-use HOST command approval by IP/serial port
+├── rsh_cpm.py             # WOPR session-local CP/M disks and commands
 ├── rsh_notes.py           # Notes module
 ├── rsh_terminal.py        # ANSI translation and screen clearing
 ├── rsh_text.py            # Text library module
@@ -862,54 +948,119 @@ This design allows you to customize or extend features without modifying the cor
 
 ## Release Notes
 
+### v2.6
+
+- **Adaptive Console Layout**: Reworked the dashboard around a bordered 80-column host
+  pane, serial/network status, and an active-only activity monitor. Narrow windows stack
+  the panels; taller windows move status and connections across the top. Approvals
+  remain visible, errors sit below activity, and overflow counts identify hidden items.
+- **Direct Host Input**: The host opens the standard numbered menu on startup and edits
+  directly at the active hub prompt. Main-menu status and ATM/messages hints sit above
+  separated console controls near the bottom. Screen clears, cursor movement, and erase
+  commands update the host pane correctly.
+- **Console Themes**: Added fourteen saved DOS Shell and vintage-system schemes,
+  including Ocean, Apple IIGS, Commodore, TI-99/4A, Windows 95, and Windows 3.1.
+  Background-off supports terminal transparency while retaining title and highlight
+  colors; colors-off uses terminal defaults. Colored bands extend across the pane,
+  including the input separator.
+- **Stable Scrollback**: PgUp holds the text being read while output continues, with a
+  new-line counter and End to resume live output. Resizing, incoming screen clears, and
+  live-history eviction preserve the held view.
+- **Efficient Redrawing**: Only changed rows are repainted; unchanged refreshes emit
+  nothing. Resizes and appearance changes still trigger a full repaint. See [redraw
+  measurements](docs/console-redraw-measurements.md) for measured terminal-traffic
+  reductions.
+- **Terminal Messages**: Messages and received text files announce themselves
+  immediately, including at idle prompts, with notices deferred during file transfers.
+  M=Messages opens a session inbox with unread counts, paging, and read history,
+  separate from email. MESSAGES and MSGS also work at the menu or CLI.
+- **Approved Host Control**: Serial and Telnet terminals can submit `HOST <text>` to the
+  host session. First use requires approval typed at the physical console, remembered
+  per source IP or physical serial port in a separate allowlist. Forwarded commands
+  cannot approve host-control requests.
+- **CP/M Exploration**: Expanded WOPR's IMSAI shell with session-local A/B disks,
+  discoverable documentation, directory filters, text viewing, copy/rename/erase
+  commands, disk statistics, simulated memory images, and native screen clearing.
+  Communications programs are discovered by exploring the disk.
+- **Console Help**: Added host help for dashboard controls while HELP continues to reach
+  the hub. Retired monitor-collapse behavior and refreshed the README, in-menu guide,
+  hotkeys, and regression coverage.
+
 ### v2.5
 
-- Star Trek now shows a quick-start command guide on launch, with examples, course directions, combat, and resupply instructions; terminal output pages to the configured screen size.
-- Consolidated JSON settings and application data under `settings/`: publishable starter defaults are separate from ignored personal files, with automatic migration from earlier locations and preservation of existing bookmarks.
-- Added Workshop as category 6 with disk-image inspection, hex viewing, checksums, text conversion, BASIC listing preparation, split/join, hex/Base64 encoding, and file comparison. System moves to category 7; categories retain at most eight A–H entries.
-- Unified host-file browsing across file tools, with drives/root, parent folders, direct paths, favorites, filters, marking, and batch copy/move. Audio can select files anywhere the host can access. Added Find Files under Files & Media H.
-- Added searchable, resumable reading and bookmarks, plus note editing, renaming, exporting, and content search.
-- Simplified the audio player menu; added queue editing, repeat/shuffle, named radio stations, and a remembered music folder.
-- Added Session Capture under Communications G and Serial Diagnostics under Host Connectivity H, including transfer progress and host cancellation.
-- Improved XMODEM/YMODEM negotiation, retries, fragmented reads, and completion handling. Receives preserve binary padding, avoid overwriting files, and publish completed files only after success.
-- Added serial inactivity timeouts and cleared stale menu selections when a port becomes active again. Queued notifications keep messages out of prompts and transfer streams, with optional quiet mode.
-- Added saved machine preferences and host application launch presets. Terminal height defaults to 24 rows per profile; menus keep the footer stable, clear submenus, and reserve readable spacing in 40- and 80-column layouts.
-- Updated the host dashboard with Unicode borders and ASCII fallback, a single color-coded Connections list, and an activity monitor that collapses during host interaction to give output more room. `clear` restores the expanded layout unless `monitor collapse` pins it compact; `monitor auto` restores automatic behavior.
-- Enhanced the WOPR/Joshua interaction while retaining the IMSAI/CP/M dialer, with movie-style displays, gentler pacing, and optional synchronized host speech. Open it from Communications H or `wargames`.
+- **Star Trek Guide**: Star Trek now shows a quick-start command guide on launch, with
+  examples, course directions, combat, and resupply instructions; terminal output pages
+  to the configured screen size.
+- **Settings Storage**: Consolidated JSON settings and application data under
+  `settings/`: publishable starter defaults are separate from ignored personal files,
+  with automatic migration from earlier locations and preservation of existing
+  bookmarks.
+- **Workshop Tools**: Added Workshop as category 6 with disk-image inspection, hex
+  viewing, checksums, text conversion, BASIC listing preparation, split/join, hex/Base64
+  encoding, and file comparison. System moves to category 7; categories retain at most
+  eight A–H entries.
+- **Host File Browsing**: Unified host-file browsing across file tools, with
+  drives/root, parent folders, direct paths, favorites, filters, marking, and batch
+  copy/move. Audio can select files anywhere the host can access. Added Find Files under
+  Files & Media H.
+- **Reading and Notes**: Added searchable, resumable reading and bookmarks, plus note
+  editing, renaming, exporting, and content search.
+- **Audio Player**: Simplified the audio player menu; added queue editing,
+  repeat/shuffle, named radio stations, and a remembered music folder.
+- **Capture and Diagnostics**: Added Session Capture under Communications G and Serial
+  Diagnostics under Host Connectivity H, including transfer progress and host
+  cancellation.
+- **Transfer Reliability**: Improved XMODEM/YMODEM negotiation, retries, fragmented
+  reads, and completion handling. Receives preserve binary padding, avoid overwriting
+  files, and publish completed files only after success.
+- **Session Activity**: Added serial inactivity timeouts and cleared stale menu
+  selections when a port becomes active again. Queued notifications keep messages out of
+  prompts and transfer streams, with optional quiet mode.
+- **Machine Preferences**: Added saved machine preferences and host application launch
+  presets. Terminal height defaults to 24 rows per profile; menus keep the footer
+  stable, clear submenus, and reserve readable spacing in 40- and 80-column layouts.
+- **Host Dashboard**: Updated the host dashboard with Unicode borders and ASCII
+  fallback, a single color-coded Connections list, and an activity monitor that
+  collapses during host interaction to give output more room. `clear` restores the
+  expanded layout unless `monitor collapse` pins it compact; `monitor auto` restores
+  automatic behavior.
+- **WOPR Interaction**: Enhanced the WOPR/Joshua interaction while retaining the
+  IMSAI/CP/M dialer, with movie-style displays, gentler pacing, and optional
+  synchronized host speech. Open it from Communications H or `wargames`.
 
 ### v2.4
 
-- **AI Model Compatibility**: Replaced the retired GPT-3.5 Turbo default with
-  GPT-5.6 Terra, updated completion parameters, and added configurable model and
-  reasoning settings with actionable errors when a model is unavailable.
-- **Interactive Host Console**: The host keyboard now runs the hub's CLI and
-  interactive menus. Added host-to-terminal messaging and replies to `Host`,
-  scrollable command output, command history, and masked FTP password input.
-- **Telnet Source Approval**: Unknown source IPs wait for `allow <request #>` or
-  `deny <request #>` at the host keyboard. Approvals persist in a manually editable
-  JSON allowlist. Missing/invalid policies and failed saves never grant access;
-  pending requests expire and the queue is bounded. Serial connections are exempt.
-- **Six New Tools**: Added Calendar with persistent reminders, Unit Converter,
-  Address Book with mail/BBS shortcuts, File Manager, ZIP Archive Browser, and
-  Audio Player with host playback controls, M3U playlists, and optional internet
-  radio through FFmpeg.
-- **More Terminal Games**: Added Word Guess and a Star Trek adaptation inspired
-  by the supplied Apple II BASIC listing, with quadrant exploration, scans,
-  phasers, photon torpedoes, shields, starbase resupply, and a mission deadline.
-- **Host Settings**: Added a host preferences menu with a saved keyboard bridge
-  exit binding, defaulting to Ctrl+X. Escape is forwarded to the host application.
-- **Menus and Status Formatting**: Reordered Files & Media and Accessories,
-  shortened Calendar and Weather & News labels, and placed Disconnect last in
-  System. Active and waiting profile rows share field order and indentation;
-  active rows stay green under a gray divider without redundant terminal text.
+- **AI Model Compatibility**: Replaced the retired GPT-3.5 Turbo default with GPT-5.6
+  Terra, updated completion parameters, and added configurable model and reasoning
+  settings with actionable errors when a model is unavailable.
+- **Interactive Host Console**: The host keyboard now runs the hub's CLI and interactive
+  menus. Added host-to-terminal messaging and replies to `Host`, scrollable command
+  output, command history, and masked FTP password input.
+- **Telnet Source Approval**: Unknown source IPs wait for `allow <request #>` or `deny
+  <request #>` at the host keyboard. Approvals persist in a manually editable JSON
+  allowlist. Missing/invalid policies and failed saves never grant access; pending
+  requests expire and the queue is bounded. Serial connections are exempt.
+- **Six New Tools**: Added Calendar with persistent reminders, Unit Converter, Address
+  Book with mail/BBS shortcuts, File Manager, ZIP Archive Browser, and Audio Player with
+  host playback controls, M3U playlists, and optional internet radio through FFmpeg.
+- **More Terminal Games**: Added Word Guess and a Star Trek adaptation inspired by the
+  supplied Apple II BASIC listing, with quadrant exploration, scans, phasers, photon
+  torpedoes, shields, starbase resupply, and a mission deadline.
+- **Host Settings**: Added a host preferences menu with a saved keyboard bridge exit
+  binding, defaulting to Ctrl+X. Escape is forwarded to the host application.
+- **Menus and Status Formatting**: Reordered Files & Media and Accessories, shortened
+  Calendar and Weather & News labels, and placed Disconnect last in System. Active and
+  waiting profile rows share field order and indentation; active rows stay green under a
+  gray divider without redundant terminal text.
 - **Stable Console Redrawing**: Fixed cursor drift after host input and approval
-  changes. Redraws use fixed screen positions, fit the viewport, and retain the
-  host prompt when the full dashboard will not fit.
+  changes. Redraws use fixed screen positions, fit the viewport, and retain the host
+  prompt when the full dashboard will not fit.
 - **Session Reliability**: Kept game, Logo, and mail context tied to the correct
-  terminal, serialized module initialization, and shared one scheduler per task
-  file so adding a host session does not duplicate scheduled jobs.
-- Updated the README, in-hub help, text-library guide, and regression coverage.
-  Private allowlists and saved tool data remain local to the installation.
+  terminal, serialized module initialization, and shared one scheduler per task file so
+  adding a host session does not duplicate scheduled jobs.
+- **Documentation and Tests**: Updated the README, in-hub help, text-library guide, and
+  regression coverage. Private allowlists and saved tool data remain local to the
+  installation.
 
 ### v2.3
 
@@ -917,91 +1068,91 @@ This design allows you to customize or extend features without modifying the cor
   movement, pen controls, repeat groups using brackets or parentheses, variables,
   arithmetic, user procedures, terminal turtle status, and optional host graphics.
 - **Connected Terminal Tools**: Added a Communications menu for listing active
-  terminals, messaging a selected terminal, and delivering a text file over ASCII;
-  the CLI also supports `terminals` and `msg to <terminal> <text>`.
-- **Expanded Terminal Games**: Added Lunar Lander, Hunt the Wumpus, Blackjack,
-  and Mastermind to Games. WarGames remains available through the CLI. Game prompts
-  now show the single-letter keys that activate each action.
-- **Menu and Notes Updates**: Moved Host Printing to Host Connectivity, renamed
-  the Notes menu item to Notepad, added host clipboard capture/copy workflows,
-  corrected dashboard section activity numbering, and normalized menu spacing.
-- Updated both user guides and incremented the application version to v2.3.
+  terminals, messaging a selected terminal, and delivering a text file over ASCII; the
+  CLI also supports `terminals` and `msg to <terminal> <text>`.
+- **Expanded Terminal Games**: Added Lunar Lander, Hunt the Wumpus, Blackjack, and
+  Mastermind to Games. WarGames remains available through the CLI. Game prompts now show
+  the single-letter keys that activate each action.
+- **Menu and Notes Updates**: Moved Host Printing to Host Connectivity, renamed the
+  Notes menu item to Notepad, added host clipboard capture/copy workflows, corrected
+  dashboard section activity numbering, and normalized menu spacing.
+- **Documentation**: Updated both user guides and incremented the application version to
+  v2.3.
 
 ### v2.2
 
-- **Task Scheduler Command Chaining**: Scheduled tasks can now chain multiple
-  commands in a single scheduled event using ` : ` (or `;`), executing them
-  sequentially and compiling the outputs cleanly (for example:
-  `news : weather Austin : broadcast Morning briefing complete`).
-- **Resilient Chained Task Execution**: If an individual command in a chain
-  encounters an error or is unrecognized, subsequent chained commands continue
-  to run and report output without halting the sequence.
+- **Task Scheduler Command Chaining**: Scheduled tasks can now chain multiple commands
+  in a single scheduled event using ` : ` (or `;`), executing them sequentially and
+  compiling the outputs cleanly (for example: `news : weather Austin : broadcast Morning
+  briefing complete`).
+- **Resilient Chained Task Execution**: If an individual command in a chain encounters
+  an error or is unrecognized, subsequent chained commands continue to run and report
+  output without halting the sequence.
 - **Dynamic Scheduler CLI Command Discovery**: `schedule modules` now dynamically
-  enumerates all shell commands available in the active runtime rather than a
-  static list, and `schedule info <cmd>` provides detailed syntax and chaining
-  guidance for any registered command.
-- **Scheduler Alert & Broadcast Integration**: Added explicit scheduler
-  documentation and module usage info for real-time messaging commands
-  (`broadcast`, `notify`, `msg`, `alert`), enabling scheduled tasks to push
-  instant notifications to all connected terminals.
-- **Enhanced Scheduler Menu & URL Handling**: Updated the interactive menu
-  (`[2] Add New Scheduled Task`) with command chaining support, helpful chaining
-  prompts, and automatic URL detection and wrapping for web endpoints.
-- Incremented application version to v2.2.
+  enumerates all shell commands available in the active runtime rather than a static
+  list, and `schedule info <cmd>` provides detailed syntax and chaining guidance for any
+  registered command.
+- **Scheduler Alert & Broadcast Integration**: Added explicit scheduler documentation
+  and module usage info for real-time messaging commands (`broadcast`, `notify`, `msg`,
+  `alert`), enabling scheduled tasks to push instant notifications to all connected
+  terminals.
+- **Enhanced Scheduler Menu & URL Handling**: Updated the interactive menu (`[2] Add New
+  Scheduled Task`) with command chaining support, helpful chaining prompts, and
+  automatic URL detection and wrapping for web endpoints.
+- **Release Version**: Incremented application version to v2.2.
 
 ### v2.1
 
-- **Document Viewer Windows Path Resolution**: Fixed an issue where Windows
-  backslashes were stripped during shell argument parsing (causing duplicated or
-  corrupted paths such as `OneDriveSoftware...`), allowing documents, images,
-  and local files to load seamlessly from local drives.
-- **Interactive News Article Reader**: Added interactive headline article selection
-  to Weather & News, allowing vintage terminals to type an article number directly
-  to read the complete summary and download full web article contents (`F` /
-  `news <num> full`).
-- **Dedicated News Task Scheduler Option**: Added news and weather command
-  scheduling to the background task scheduler (`schedule add <interval> news ...`),
-  listing them under `schedule modules`.
-- **Console Pseudo Interface & Connected User Highlighting**: Enhanced the live
-  host console dashboard with an interactive pseudo interface layout displaying
-  connected client activity and highlighting active menu items in real time.
-- **Updated Copyright Notices**: Updated all system banners, headers, and
-  documentation to 2025-2026.
-- Incremented application version to v2.1.
+- **Document Viewer Windows Path Resolution**: Fixed an issue where Windows backslashes
+  were stripped during shell argument parsing (causing duplicated or corrupted paths
+  such as `OneDriveSoftware...`), allowing documents, images, and local files to load
+  seamlessly from local drives.
+- **Interactive News Article Reader**: Added interactive headline article selection to
+  Weather & News, allowing vintage terminals to type an article number directly to read
+  the complete summary and download full web article contents (`F` / `news <num> full`).
+- **Dedicated News Task Scheduler Option**: Added news and weather command scheduling to
+  the background task scheduler (`schedule add <interval> news ...`), listing them under
+  `schedule modules`.
+- **Console Pseudo Interface & Connected User Highlighting**: Enhanced the live host
+  console dashboard with an interactive pseudo interface layout displaying connected
+  client activity and highlighting active menu items in real time.
+- **Updated Copyright Notices**: Updated all system banners, headers, and documentation
+  to 2025-2026.
+- **Release Version**: Incremented application version to v2.1.
 
 ### v2.0
 
-- **Retro Serial OS Runtime**: Full host-side operating system extension with
-  an interactive command prompt (`cli>` / `OS`), hot-reloadable module system,
-  event bus publish/subscribe architecture, multi-client session tracking, and
-  programmable keyboard bridge shortcut profiles.
-- **Accordion Main Menu & Custom Shortcuts**: Fast categorized accordion flyout
-  menu layout optimized for 40- and 80-column terminals, complete with a
-  user-defined command shortcut macro system with automatic flyout.
-- **Host Terminal & Quick Shell**: Bidirectional streaming console session to
-  the host OS (`cmd.exe`, `powershell`, or unix shells) with configurable local
-  echo, newline translation, and interactive parameters.
-- **Real-Time Host System Monitor**: Live CPU load measurement, memory, disk,
-  and uptime monitor with continuous screen clearing, pause/resume, and
-  adjustable refresh rates (`top` / `sysinfo live`).
-- **Modern Document Viewer Pipeline**: Automatic text extraction and pagination
-  for modern file formats including PDF, Word (.docx), Excel (.xlsx / .csv),
-  plain text, Markdown, HTML, and web URLs.
+- **Retro Serial OS Runtime**: Full host-side operating system extension with an
+  interactive command prompt (`cli>` / `OS`), hot-reloadable module system, event bus
+  publish/subscribe architecture, multi-client session tracking, and programmable
+  keyboard bridge shortcut profiles.
+- **Accordion Main Menu & Custom Shortcuts**: Fast categorized accordion flyout menu
+  layout optimized for 40- and 80-column terminals, complete with a user-defined command
+  shortcut macro system with automatic flyout.
+- **Host Terminal & Quick Shell**: Bidirectional streaming console session to the host
+  OS (`cmd.exe`, `powershell`, or unix shells) with configurable local echo, newline
+  translation, and interactive parameters.
+- **Real-Time Host System Monitor**: Live CPU load measurement, memory, disk, and uptime
+  monitor with continuous screen clearing, pause/resume, and adjustable refresh rates
+  (`top` / `sysinfo live`).
+- **Modern Document Viewer Pipeline**: Automatic text extraction and pagination for
+  modern file formats including PDF, Word (.docx), Excel (.xlsx / .csv), plain text,
+  Markdown, HTML, and web URLs.
 - **Integrated Hub Mail & Internet Email**: Central inter-terminal hub mailbox
-  identifying senders by hardware/connection, along with full IMAP/SMTP internet
-  email support and host desktop configuration GUI.
-- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike),
-  and WarGames (W.O.P.R.) simulation.
-- **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news
-  feeds (NPR, Hacker News, BBC), and automated morning briefings (`briefing`).
-- **Background Task Scheduler**: Automated periodic task execution with
-  terminal broadcast notifications and cron-like intervals. Weather and news
-  commands can be scheduled directly (for example, `weather Austin` or
-  `news npr 6`) and are listed by `schedule modules`.
+  identifying senders by hardware/connection, along with full IMAP/SMTP internet email
+  support and host desktop configuration GUI.
+- **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), and
+  WarGames (W.O.P.R.) simulation.
+- **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds
+  (NPR, Hacker News, BBC), and automated morning briefings (`briefing`).
+- **Background Task Scheduler**: Automated periodic task execution with terminal
+  broadcast notifications and cron-like intervals. Weather and news commands can be
+  scheduled directly (for example, `weather Austin` or `news npr 6`) and are listed by
+  `schedule modules`.
 - **Terminal Hardware Settings & In-Hub Help**: Caps-Only mode for vintage
-  uppercase-only ROMs (Apple II Plus, Commodore PET, TRS-80 Model I), serial
-  character pacing delays (1-3ms), and 9 comprehensive in-hub help guide topics.
-- Incremented application version to v2.0.
+  uppercase-only ROMs (Apple II Plus, Commodore PET, TRS-80 Model I), serial character
+  pacing delays (1-3ms), and 9 comprehensive in-hub help guide topics.
+- **Release Version**: Incremented application version to v2.0.
 
 ### v1.5
 

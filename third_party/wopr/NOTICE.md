@@ -13,9 +13,7 @@ the film shows on the WOPR computer's terminal. They are the game list, log-on a
 notices and similar screen text. Those quotations remain the property of their copyright holders. They are
 not licensed under the MIT License. They are listed with a provenance tag in
 `internal/wopr/lines.go`, `internal/assets/`, `internal/movie/scenes/` and the games' packages under
-`internal/games/` (Global Thermonuclear War, tic-tac-toe and the ending). Movie mode (`wopr --movie`)
-replays the film's terminal scenes with that text, including the lines typed at the terminal. It contains no
-dialogue that is only spoken, no audio and no stills.
+`internal/games/` (Global Thermonuclear War, tic-tac-toe and the ending).
 
 This project is not affiliated with, endorsed by, or sponsored by Metro-Goldwyn-Mayer, United
 Artists, or anyone involved in making the film. *WarGames* is a trademark of its owner. It is used

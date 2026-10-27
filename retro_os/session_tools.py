@@ -97,6 +97,8 @@ class SessionTools:
             if value not in ('on','off'):
                 return 'notifications quiet <on|off>'
             service.quiet = value == 'on'
+            if not service.quiet:
+                service.announce_pending()
             return 'Quiet mode ' + value + '.'
         return service.deliver(force=True)
 

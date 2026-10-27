@@ -499,7 +499,9 @@ class ScreenClearingTests(unittest.TestCase):
         session = rsh_wargames.create_session(ser, use_ansi=False)
         ser.writes.clear()
         rsh_wargames.handle_input(session, "term", ser, use_ansi=False)
-        self.assertEqual(ser.writes[0], b"\x1bv")
+        # Command echo can finish its line before the submenu clears.
+        output = b''.join(ser.writes)
+        self.assertLess(output.index(b'\x1bv'), output.index(b'TERMINAL PROGRAM'))
 
     def test_default_main_menu_is_accordion_flyout(self):
         import RETRO_SERIAL_HUB

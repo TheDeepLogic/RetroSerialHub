@@ -65,10 +65,17 @@ The main menu uses an accordion flyout layout designed for vintage 40- and
 =========================
 Type 'CLI' or 'OS' at the main menu to enter the interactive command prompt:
 
-The host computer's Host> prompt accepts the same commands. Use terminals,
+The host console uses the current hub prompt directly. Use terminals,
 msg to <terminal> <text>, or broadcast <text> to interact with connected machines.
 Other terminals can send to Host. ATM opens menus; CLI returns to commands.
-On the host, PgUp/PgDn scroll output, Up/Down recall commands, and clear clears it.
+On the host, PgUp/PgDn browse output, Up/Down recall commands, and clear clears it.
+PgUp holds the view while output arrives. Scrollback shows the new-line count;
+End returns live. PgDn also returns live at the bottom. Submitting input or clear
+resumes live output.
+Host help lists console controls; HELP remains the hub's help.
+From a terminal, HOST <text> submits a line to the host session.
+Example: HOST theme Commodore. The first use requires local approval by IP or
+physical serial port: allow host <request #>, then retry the command.
 
   cli> help                      List all registered shell commands
   cli> apps                      List installed host PC applications
@@ -286,8 +293,10 @@ All games are fully playable on 40- and 80-column vintage displays:
   - Attack Klingons with 'phasers <energy>' or 'torpedo <course>'. Transfer power to shields with 'shield <energy>'.
   - Destroy every Klingon before the deadline. Dock next to a starbase to replenish supplies.
 
-* WarGames (W.O.P.R.):
-  - Launch from the CLI with 'WARGAMES'. The game is no longer on the Games menu.
+* WOPR (WarGames):
+  - Select WOPR from Communications [1], option H, or type 'WARGAMES' at the CLI.
+  - Explore its CP/M disk with DIR, TYPE README.TXT, and TYPE MODEM.DOC.
+  - A:/B:, REN, ERA, SAVE, STAT, PIP, DUMP, and CLS operate on session-local disks.
 """,
     ),
     (
@@ -301,11 +310,27 @@ All games are fully playable on 40- and 80-column vintage displays:
   - CLI: Open the interactive command shell.
   - HELP or ?: Open this Help & User Guide.
 
-* Incoming Telnet Approval (host console only):
+* Terminal Messages and Received Text Files:
+  - New messages announce themselves immediately, including at an idle prompt.
+  - Active file transfers defer notices until the transfer finishes.
+  - M at the main menu opens Messages. MESSAGES or MSGS also works at the menu/CLI.
+  - Received text files are in Messages, separate from Electronic Mail.
+  - Select a message to read it; read history stays available for this session.
+  - messages quiet on/off is an explicit opt-out; machine quiet on/off saves the default.
+
+* Incoming Telnet Approval:
   - Unknown source IPs wait for host approval before receiving a hub session.
-  - At the host computer keyboard: allow <request #> or deny <request #>, then Enter.
+  - At the host console: allow <request #> or deny <request #>, then Enter.
   - Approved IPs are saved in settings/local/telnet_allowlist.json; it can also be edited manually.
   - Serial connections are exempt. Telnet traffic remains unencrypted.
+
+* Host Console Forwarding:
+  - HOST <text> sends a line to the host session from a hub or tool prompt.
+  - First use needs approval at the physical host keyboard: allow host <request #>.
+  - Retry after approval; the first attempted command is not queued or executed.
+  - Permission is remembered per IP or physical serial port, separately from Telnet admission.
+  - deny host <request #> refuses a request. pending lists both kinds of approval.
+  - Forwarded commands cannot approve host-control requests. Raw bridges and transfers are unchanged.
 
 * Main Menu Hotkeys:
   - 0-7: Switch accordion section.

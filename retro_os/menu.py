@@ -145,7 +145,7 @@ class OSFlyoutMenu:
 
     def render(
         self, columns=80, translate_ansi=False, welcome_banner='Retro Serial Hub',
-        version=VERSION, is_remote=False, status='', rows=24,
+        version=VERSION, is_remote=False, status='', rows=24, messages_count=0,
     ):
         """Anchor the footer to the configured last row, without cursor addressing."""
         if not isinstance(rows,int) or not 16 <= rows <= 100:
@@ -205,9 +205,10 @@ class OSFlyoutMenu:
             prompt='A-H Item +/- Edit 0-7 Sec CLI/ATM: '
         if paged:
             prompt='A-H Item </> Page +/- Edit 0-7 Sec: ' if self.active_section == 'shortcuts' else 'A-H Item </> Page 0-7 Sec CLI/ATM: '
-        # All footer fields occupy exactly one row; incoming notices are queued by the session.
+        # All footer fields occupy exactly one row; expose messages without a menu entry.
         status_line=' '.join(status.splitlines())[:width]
-        footer=[status_line,'Type ATM to return to this menu.']
+        message_hint = f'M=Messages ({messages_count} unread) | ATM=Menu' if messages_count else 'Type ATM to return to this menu.'
+        footer=[status_line,message_hint[:width]]
         footer.append('')
         footer.append(prompt[:width])
         body_height=rows-len(footer)

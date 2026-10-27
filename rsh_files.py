@@ -20,6 +20,7 @@ Session is a dict containing at least 'files' (list) and 'transfer_mode'.
 
 from textwrap import shorten
 import os
+from contextlib import nullcontext
 import time
 import pathlib
 import textwrap
@@ -316,11 +317,13 @@ def ascii_send(ser, file_path):
     fname = os.path.basename(file_path)
     _write(ser, f"\r\nASCII SEND: {fname}\r\n")
     try:
-        with open(file_path, 'r', errors='ignore') as f:
-            for line in f:
-                # normalize newlines for remote terminal
-                ser.write(line.rstrip('\n').replace('\n', '\r\n').encode('ascii', errors='ignore'))
-                ser.write(b"\r\n")
+        service = getattr(ser, '_rsh_services', None)
+        with service.transfer() if service else nullcontext():
+            with open(file_path, 'r', errors='ignore') as f:
+                for line in f:
+                    # Keep asynchronous messages out of the captured text file.
+                    ser.write(line.rstrip('\n').replace('\n', '\r\n').encode('ascii', errors='ignore'))
+                    ser.write(b"\r\n")
         _write(ser, "\r\nASCII transfer complete.\r\n")
     except Exception as e:
         _write(ser, f"\r\nASCII send error: {e}\r\n")

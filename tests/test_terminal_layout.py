@@ -104,16 +104,14 @@ class UnicodeBorderTests(unittest.TestCase):
         dashboard.set_host_terminal(HostTerminal(dashboard.append_host_output))
         dashboard.append_host_output('Literal command: echo + - |\n')
         with patch('rsh_console.sys.stdout',EncodedOutput('utf-8')),patch.dict(os.environ,{'RSH_ASCII_BORDERS':'0'}):
-            for collapsed in (False,True):
-                dashboard._activity_collapsed=collapsed
-                for width in (40,80,118):
-                    rendered=dashboard.render_interface(inner_width=width,use_color=True)
-                    plain=[dashboard._strip_ansi(row) for row in rendered]
-                    self.assertTrue(plain[0].startswith('\u250c'))
-                    self.assertTrue(plain[-1].endswith('\u2518'))
-                    self.assertTrue(all(len(row)==width for row in plain))
-                frame='\n'.join(dashboard._frame(height=50,terminal_size=os.terminal_size((120,50))))
-                self.assertIn('Literal command: echo + - |',frame)
+            for width in (40,80,118):
+                rendered=dashboard.render_interface(inner_width=width,use_color=True)
+                plain=[dashboard._strip_ansi(row) for row in rendered]
+                self.assertTrue(plain[0].startswith('\u250c'))
+                self.assertTrue(plain[-1].endswith('\u2518'))
+                self.assertTrue(all(len(row)==width for row in plain))
+            frame='\n'.join(dashboard._frame(height=50,terminal_size=os.terminal_size((120,50))))
+            self.assertIn('Literal command: echo + - |',frame)
 
     def test_one_connections_heading_preserves_status_colors_and_unicode_divider(self):
         profiles={
@@ -133,9 +131,10 @@ class UnicodeBorderTests(unittest.TestCase):
         self.assertTrue(divider.startswith('\u251c\u2500\u2500 Connections '))
         self.assertTrue(divider.endswith('\u2524'))
         self.assertNotIn('-',divider)
-        for name,color in [('APPLE2','32'),('C64','33'),('IBM','31')]:
+        for name,color in [('APPLE2','green'),('C64','yellow'),('IBM','red')]:
             row=next(row for row,_ in rows if name in row)
-            self.assertIn('\x1b['+color+'m',row)
+            palette=dashboard._paint('',color,force_color=True).removesuffix('\x1b[0m')
+            self.assertIn(palette,row)
         self.assertTrue(all(len(row)==118 for row in plain))
 
     def test_ascii_fallback_and_explicit_override(self):
@@ -151,11 +150,11 @@ class UnicodeBorderTests(unittest.TestCase):
         dashboard=ConsoleDashboard({}); dashboard._tty=True; dashboard._running=True
         dashboard._color=True
         dashboard.set_host_terminal(HostTerminal(dashboard.append_host_output))
-        dashboard._activity_collapsed=True
+        dashboard.append_host_output('cli> ')
         for columns,height in ((40,24),(80,24),(120,50)):
             output=EncodedOutput('utf-8'); screen=VirtualScreen(columns,height)
             with patch('rsh_console.sys.stdout',output),patch('shutil.get_terminal_size',return_value=os.terminal_size((columns,height))),patch.object(dashboard,'host_input_available',return_value=True),patch.dict(os.environ,{'RSH_ASCII_BORDERS':'0'}):
                 dashboard._draw_frame()
             screen.feed(output.getvalue())
             self.assertEqual(screen.scrolls,0)
-            self.assertIn('Host>',screen.text())
+            self.assertIn('cli>',screen.text())

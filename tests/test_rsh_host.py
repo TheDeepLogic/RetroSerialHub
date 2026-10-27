@@ -90,6 +90,21 @@ class HostTerminalTests(unittest.TestCase):
             dashboard.handle_host_command("clear")
         self.assertEqual(list(dashboard._host_output), [])
 
+    def test_output_screen_clears_remove_old_text_even_across_writes(self):
+        for sequence in (b"\x1b[2J\x1b[H", b"\x0c", b"\x1bc"):
+            dashboard = ConsoleDashboard({})
+            dashboard.set_user_activity("remote", "calc", user_label="APPLE2")
+            dashboard.append_host_output(b"Old submenu\r\natm\r\npartial")
+            dashboard._host_output_offset = 12
+            for byte in sequence:
+                dashboard.append_host_output(bytes((byte,)))
+            dashboard.append_host_output(b"New menu\r\nSelect: ")
+            self.assertEqual(list(dashboard._host_output), ["New menu"])
+            self.assertEqual(dashboard._host_output_line, "Select: ")
+            self.assertEqual(dashboard._host_output_column, 8)
+            self.assertEqual(dashboard._host_output_offset, 0)
+            self.assertIn("remote", dashboard.get_user_activities())
+
 
 class HostHubIntegrationTests(unittest.TestCase):
     def setUp(self):
@@ -117,15 +132,150 @@ class HostHubIntegrationTests(unittest.TestCase):
         self.terminal = HostTerminal(collect)
         self.addCleanup(self.terminal.stop)
         self.terminal.start(hub.host_console_worker)
+        self.wait_for(lambda: b"Select [1-7]" in self.output)
+        self.startup_output = bytes(self.output)
+        self.terminal.submit("CLI")
         self.wait_for(lambda: b"cli> " in self.output)
 
-    def wait_for(self, predicate):
-        deadline = time.monotonic() + 4
+    def wait_for(self, predicate, output=None, timeout=4):
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if predicate():
                 return
             time.sleep(.01)
-        self.fail("Host session did not respond: " + self.output.decode(errors="replace")[-1500:])
+        output = self.output if output is None else output
+        self.fail("Host session did not respond: " + output.decode(errors="replace")[-1500:])
+
+    def test_host_starts_with_standard_menu(self):
+        self.assertIn(b"COMMUNICATIONS", self.startup_output)
+        self.assertIn(b"WORKSHOP", self.startup_output)
+        self.assertNotIn(b"cli> ", self.startup_output)
+
+    def test_file_message_alerts_idle_terminal_and_m_opens_received_contents(self):
+        file_path = self.root / 'files' / 'welcome.txt'
+        file_path.write_text('Received file content: hello Apple II!', encoding='utf-8')
+        remote_output = bytearray()
+        source = HostTerminal(lambda data: remote_output.extend(data))
+        source._rsh_host_console = False
+        source._profile_name = source._terminal_name = 'APPLE2'
+        source._client_id = 'message-receiver-test'
+        source.port = 'COM99'
+        self.addCleanup(self.hub.unregister_active_terminal, source)
+        self.addCleanup(source.stop)
+        source.start(lambda terminal: self.hub.bridge_loop('APPLE2', terminal, use_ansi=False))
+        self.wait_for(lambda: b'Select [1-7]' in remote_output, remote_output, timeout=15)
+        terminals = sorted(self.hub.ACTIVE_TERMINALS,
+                           key=lambda term: str(getattr(term, '_terminal_name', '')).casefold())
+        selection = str(terminals.index(source) + 1)
+        for command in ('ATM', '1', 'F', selection, 'F', 'welcome.txt'):
+            self.terminal.submit(command)
+        # No receiver input is needed for the banner.
+        self.wait_for(lambda: b'NEW MESSAGE' in remote_output)
+        self.assertIn(b'welcome.txt', remote_output)
+        self.assertNotIn(b'Received file content:', remote_output)
+        self.assertEqual(len(source._rsh_services.pending), 1)
+        source.submit('M')
+        self.wait_for(lambda: b'--- MESSAGES ---' in remote_output)
+        source.submit('1')
+        self.wait_for(lambda: b'Received file content: hello Apple II!' in remote_output)
+        self.assertEqual(len(source._rsh_services.pending), 0)
+        self.assertTrue(source._rsh_services.message_list()[0]['read'])
+        source.submit('')
+        source.submit('Q')
+
+    def test_remote_host_prefix_is_gated_and_works_in_menu_and_nested_prompt(self):
+        dashboard = ConsoleDashboard({})
+        dashboard.set_host_terminal(self.terminal)
+        dashboard._running = True
+        dashboard.host_input_available = lambda: True
+        self.stack.enter_context(patch.object(self.hub, "CONSOLE", dashboard))
+        remote_output = bytearray()
+        source = HostTerminal(lambda data: remote_output.extend(data))
+        source._rsh_host_console = False
+        source._profile_name = source._terminal_name = "APPLE2"
+        source._client_id = "source-test"
+        source.port = "COM99"
+        self.addCleanup(self.hub.unregister_active_terminal, source)
+        self.addCleanup(source.stop)
+        source.start(lambda terminal: self.hub.bridge_loop("APPLE2", terminal, use_ansi=False))
+        self.wait_for(lambda: b"Select [1-7]" in remote_output, remote_output, timeout=15)
+        source.submit("HOST theme Commodore")
+        self.wait_for(lambda: b"allow host 1" in remote_output)
+        self.assertEqual(dashboard._theme.name, "Ocean")
+        dashboard.handle_host_command("allow host 1")
+        source.submit("HOST theme Commodore")
+        self.wait_for(lambda: dashboard._theme.name == "Commodore")
+        source.submit("HOST calc 8 * 9")
+        self.wait_for(lambda: b"\r\n72\r\n" in self.output)
+        self.assertNotIn(b"\r\n72\r\n", remote_output)
+        for command in ("5", "E"):
+            source.submit(command)
+        self.wait_for(lambda: b"--- UNIT CONVERTER ---" in remote_output)
+        source.submit("HOST theme Green Monochrome")
+        self.wait_for(lambda: dashboard._theme.name == "Green Monochrome")
+        for command in ("1", "72", "F", "C"):
+            source.submit(command)
+        self.wait_for(lambda: b"22.2222222222" in remote_output)
+        self.assertNotIn(b"22.2222222222", self.output)
+
+    def test_tall_host_menu_fits_dashboard_without_paging_up(self):
+        import os
+        dashboard = ConsoleDashboard({name: {
+            "serial_port": "COM2", "serial_status": "OPEN",
+            "tcp_port": 6400, "tcp_status": "LISTENING"}
+            for name in ("APPLE2", "IBM", "C64", "TRS80")})
+        terminal = HostTerminal(dashboard.append_host_output)
+        terminal._rsh_rows = 40
+        dashboard.set_host_terminal(terminal)
+        dashboard.append_host_output("Old submenu\natm\n")
+        self.hub.show_main_menu(terminal, use_ansi=False)
+        captured = list(dashboard._host_output) + [dashboard._host_output_line]
+        self.assertNotIn("Old submenu", "\n".join(captured))
+        self.assertNotIn("atm", captured)
+        self.assertLessEqual(len(captured), 24)
+        system_row = next(index for index, line in enumerate(captured) if line.startswith("[7]"))
+        self.assertEqual(captured[system_row + 1], "")
+        self.assertTrue(captured[system_row + 2].startswith("Status:"))
+        frame = "\n".join(dashboard._strip_ansi(row) for row in
+                          dashboard._frame(height=40, terminal_size=os.terminal_size((150, 40))))
+        self.assertIn(self.hub.WELCOME_BANNER[:79], frame)
+        self.assertIn("[0]", frame)
+        self.assertIn("COMMUNICATIONS", frame)
+        self.assertIn("A] Bulletin Boards", frame)
+        self.assertIn("H] WOPR", frame)
+        self.assertIn("[7]", frame)
+        self.assertIn("Select [1-7]", frame)
+        self.assertEqual(dashboard._host_output_offset, 0)
+
+    def test_main_menu_footer_is_pinned_above_separated_console_controls(self):
+        import os
+        dashboard = ConsoleDashboard({})
+        terminal = HostTerminal(dashboard.append_host_output)
+        dashboard.set_host_terminal(terminal)
+        for caps in (False, True):
+            terminal._rsh_caps_only = caps
+            self.hub.show_main_menu(terminal, use_ansi=False)
+            for columns in (80, 150):
+                frame = [dashboard._strip_ansi(row) for row in dashboard._frame(
+                    height=40, terminal_size=os.terminal_size((columns, 40)))]
+                pane_width = 82 if columns >= 124 else columns - 1
+                contents = [row[1:pane_width-1].rstrip() for row in frame]
+                status = next(index for index, row in enumerate(contents) if row.upper().startswith('STATUS:'))
+                system = next(index for index, row in enumerate(contents) if row.startswith('[7]'))
+                host = next(index for index, row in enumerate(contents) if row.startswith('Host:'))
+                hub = next(index for index, row in enumerate(contents) if row.startswith('Hub:'))
+                prompt = next(index for index, row in enumerate(contents) if row.upper().startswith('SELECT [1-7]'))
+                self.assertGreater(status, system + 1)
+                self.assertTrue(contents[status + 1].upper().startswith('TYPE ATM'))
+                self.assertEqual(contents[status + 2], '')
+                self.assertEqual(host, status + 3)
+                self.assertEqual(contents[hub + 1], '')
+                self.assertEqual(prompt, hub + 2)
+                self.assertEqual(sum(row.upper().startswith('STATUS:') for row in contents), 1)
+        # Other prompts leave ordinary status-looking output in the history.
+        dashboard.append_host_output('\x1b[2J\x1b[HLog heading\nStatus: tool result\nFilename: ')
+        self.assertEqual(dashboard._main_menu_footer(), [])
+        self.assertEqual([row for row, _ in dashboard._host_body()], ['Log heading', 'Status: tool result'])
 
     def test_host_lists_terminals_sends_targeted_message_and_broadcasts(self):
         class OtherTerminal:
@@ -197,7 +347,7 @@ class HostHubIntegrationTests(unittest.TestCase):
         self.assertIn(b'Screen Size:     80 x 30',self.output)
         marker=b'--- TERMINAL HARDWARE SETTINGS ---'
         position=self.output.rfind(marker)
-        self.assertIn(b'\x1bv',self.output[max(0,position-20):position])
+        self.assertIn(b'\x1b[2J\x1b[H',self.output[max(0,position-20):position])
 
     def test_basic_listing_tool_has_separators_between_actions_help_and_prompt(self):
         for command in ('ATM','6','E'):

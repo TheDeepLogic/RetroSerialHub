@@ -77,7 +77,9 @@ def format_numbered_list(items, columns=80, left_pad=38):
 
 def clear_terminal_screen(ser, use_ansi=True):
     """Clear a terminal using its native or configured emulation sequence."""
-    if use_ansi:
+    if getattr(ser, "_rsh_host_console", False) is True:
+        ser._rsh_main_menu_footer = None
+    if use_ansi or getattr(ser, "_rsh_host_console", False) is True:
         ser.write(b"\x1b[2J\x1b[H")
     elif getattr(ser, "_rsh_translate_ansi", False):
         ser.write(getattr(ser, "_rsh_clear_sequence", b"\x0c"))

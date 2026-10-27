@@ -205,7 +205,7 @@ class HostApprovalConsoleTests(unittest.TestCase):
                 dashboard._host_key(key)
             access.allow.assert_called_once_with(7)
             frame = "\n".join(dashboard._frame())
-        self.assertIn("TELNET APPROVAL REQUIRED", frame)
+        self.assertIn("APPROVAL #7", frame)
         self.assertIn("192.168.7.13", frame)
         self.assertIn("Host>", frame)
         self.assertEqual(dashboard._host_command, "")

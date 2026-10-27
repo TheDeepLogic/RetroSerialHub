@@ -14,6 +14,7 @@ The IMSAI shell delegates the simulated WOPR terminal to rsh_joshua.
 """
 
 import re
+import rsh_cpm as cpm
 import rsh_joshua as joshua
 from rsh_terminal import clear_terminal_screen
 
@@ -29,6 +30,8 @@ def create_session(ser, use_ansi=True, **kwargs):
     clear_terminal_screen(ser, use_ansi)
     sess = {
         'submode': 'CPM',  # CPM, DIALER, TERM, TERM_SCHOOL, TERM_AIRLINE, TERM_BANK, TERM_PROTO
+        'cpm_drive': 'A',
+        'cpm_disks': cpm.new_disks(),
         'student_name': '',
         'joshua': joshua.new_state(),
         'dialed': [],
@@ -36,8 +39,8 @@ def create_session(ser, use_ansi=True, **kwargs):
     # Print header
     _write(ser, "IMSAI 8080 CP/M version 1.0\r\n")
     _write(ser, "(c) 1974 Digital Research Inc.\r\n")
-    _write(ser, "DIR lists programs. HELP lists commands. ATM returns to the hub.\r\n\r\n")
-    _write(ser, "A>")
+    _write(ser, "64K RAM SYSTEM   2 DISK DRIVES\r\nHELP for commands. ATM returns to the hub.\r\n\r\n")
+    cpm.prompt(sess, ser)
     return sess
 
 
@@ -54,39 +57,23 @@ def handle_input(sess, line_str, ser, use_ansi=True):
 
     # CPM prompt
     if sess['submode'] == 'CPM':
-        if cmd == '':
-            _write(ser, "A>")
-            return True, None
-        lower = cmd.lower()
-        if lower in ('help', '?'):
-            joshua.emit(ser, "\nDIR / DIALER / TERM / EXIT\nAll remote systems are local simulations.")
-            _write(ser, "A>")
-            return True, None
-        if lower in ('exit', 'quit'):
+        program = cpm.handle(sess, cmd, ser, use_ansi)
+        if program == 'MENU':
             return True, 'MENU'
-        if lower == 'dir':
-            _write(ser, "\r\nA: DIALER   COM\r\n")
-            _write(ser, "A: TERM     COM\r\n")
-            _write(ser, "\r\nA>")
-            return True, None
-        if lower in ('dialer', 'dialer.com', 'a:dialer', 'a:dialer.com'):
+        if program == 'DIALER':
             sess['submode'] = 'DIALER'
             _enter_dialer(ser, use_ansi)
-            return True, None
-        if lower in ('term', 'term.com', 'a:term', 'a:term.com'):
+        elif program == 'TERM':
             sess['submode'] = 'TERM'
             _enter_term(ser, use_ansi)
-            return True, None
-        # unknown
-        _write(ser, "\r\nBad command or file name\r\n")
-        _write(ser, "\r\nA>")
         return True, None
 
     # The dialer scans fictional records; no host modem or network is used.
     if sess['submode'] == 'DIALER':
         if upper in ('Q', 'QUIT', 'EXIT'):
             sess['submode'] = 'CPM'
-            _write(ser, "\r\nA>")
+            _write(ser, "\r\n")
+            cpm.prompt(sess, ser)
         elif cmd:
             digits = re.sub(r'[^0-9]', '', cmd)
             if len(digits) not in (3, 6, 7, 10):
@@ -98,10 +85,11 @@ def handle_input(sess, line_str, ser, use_ansi=True):
                 joshua.emit(ser, "\nSCANNING LOCAL SIMULATION RECORDS\n" + "\n".join(sess['dialed']) +
                             "\nSCAN COMPLETE. USE TERM TO CONNECT.")
                 sess['submode'] = 'CPM'
-                _write(ser, "A>")
+                cpm.prompt(sess, ser)
         else:
             sess['submode'] = 'CPM'
-            _write(ser, "\r\nA>")
+            _write(ser, "\r\n")
+            cpm.prompt(sess, ser)
         return True, None
 
     # Terminal menu handling
@@ -130,7 +118,7 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         sess['submode'] = 'CPM'
         _write(ser, "IMSAI 8080 CP/M version 1.0\r\n")
         _write(ser, "(c) 1974 Digital Research Inc.\r\n\r\n")
-        _write(ser, "A>")
+        cpm.prompt(sess, ser)
         return True, None
 
     # School: receive student name then show grades
@@ -156,7 +144,7 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         sess['submode'] = 'CPM'
         _write(ser, "IMSAI 8080 CP/M version 1.0\r\n")
         _write(ser, "(c) 1974 Digital Research Inc.\r\n\r\n")
-        _write(ser, "A>")
+        cpm.prompt(sess, ser)
         return True, None
 
     if sess['submode'] == 'TERM_BANK':
@@ -164,7 +152,7 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         sess['submode'] = 'CPM'
         _write(ser, "IMSAI 8080 CP/M version 1.0\r\n")
         _write(ser, "(c) 1974 Digital Research Inc.\r\n\r\n")
-        _write(ser, "A>")
+        cpm.prompt(sess, ser)
         return True, None
 
     # Keep Joshua state on hangup so reconnecting can resume the game.

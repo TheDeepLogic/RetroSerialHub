@@ -1,6 +1,9 @@
 """Colorized, live console dashboard for hub runtime status."""
 
 from collections import deque
+from rsh_host_screen import HostScreen
+from rsh_host_access import HostCommandAccess
+from rsh_console_theme import ConsoleTheme, THEMES, THEME_ALIASES
 import os
 import re
 import shutil
@@ -12,7 +15,7 @@ import unicodedata
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-VERSION = "2.5"
+VERSION = "2.6"
 
 from retro_os.menu_data import console_sections
 
@@ -152,7 +155,9 @@ def normalize_action(action):
 
 class ConsoleDashboard:
     normalize_action = staticmethod(normalize_action)
-    def __init__(self, profiles, refresh_interval=1.0):
+    def __init__(self, profiles, refresh_interval=1.0, theme_path=None, host_access_path=None):
+        self._theme = ConsoleTheme(theme_path)
+        self._host_access = HostCommandAccess(host_access_path)
         self.profiles = profiles
         self.refresh_interval = refresh_interval
         self._lock = threading.RLock()
@@ -166,18 +171,23 @@ class ConsoleDashboard:
         self._host_command = ""
         self._telnet_access = None
         self._host_terminal = None
-        self._host_output = deque(maxlen=500)
-        self._host_output_line = ""
-        self._host_output_column = 0
-        self._host_output_escape = ""
+        self._screen = HostScreen()
         self._host_output_offset = 0
         self._output_page_size = 8
-        self._activity_collapsed = False
-        self._activity_pinned = False
+        self._host_body_width = 80
+        self._scrollback = None
+        self._scrollback_top = (0, 0)
+        self._scrollback_started_lines = 0
+        self._console_message = []
+        self._frame_cursor = None
+        self._frame_input_rows = set()
         self._command_history = deque(maxlen=50)
         self._history_index = None
         self._history_draft = ""
         self._frame_lines = 0
+        self._painted_rows = []
+        self._painted_cursor = None
+        self._painted_context = None
         self._tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
         self._color = self._tty and "NO_COLOR" not in os.environ
         self._enable_windows_ansi()
@@ -202,19 +212,9 @@ class ConsoleDashboard:
     def _paint(self, text, color, force_color=False):
         if not self._color and not force_color:
             return text
-        colors = {
-            "info": "\x1b[36m",
-            "green": "\x1b[32m",
-            "yellow": "\x1b[33m",
-            "red": "\x1b[31m",
-            "cyan": "\x1b[36m",
-            "dim": "\x1b[2m",
-            "bold": "\x1b[1m",
-            "highlight": "\x1b[1;32m",
-            "active_header": "\x1b[1;33m",
-            "reset": "\x1b[0m",
-        }
-        return f"{colors.get(color, '')}{text}{colors['reset'] if color in colors else ''}"
+        if not self._theme.colors:
+            return text
+        return self._theme.ansi(color) + text + "\x1b[0m"
 
     def start(self):
         with self._lock:
@@ -225,7 +225,7 @@ class ConsoleDashboard:
                     print(line)
                 self._print_status_line()
                 return
-            self._draw_frame()
+            self._draw_frame(force=True)
             self._thread = threading.Thread(
                 target=self._refresh_loop,
                 name="console-dashboard",
@@ -245,8 +245,9 @@ class ConsoleDashboard:
             self._input_thread.join(timeout=1)
         with self._lock:
             if self._tty:
-                sys.stdout.write("\r\n")
+                sys.stdout.write("\x1b[0m\x1b[?25h\r\n")
                 sys.stdout.flush()
+                self._painted_context = None
 
     def host_input_available(self):
         return self._tty and bool(getattr(sys.stdin, "isatty", lambda: False)())
@@ -257,53 +258,131 @@ class ConsoleDashboard:
     def set_host_terminal(self, terminal):
         self._host_terminal = terminal
 
+    @property
+    def _host_output(self):
+        return [line.rstrip() for line in self._screen.lines[:self._screen.row]]
+
+    @property
+    def _host_output_line(self):
+        return self._screen.lines[self._screen.row]
+
+    @property
+    def _host_output_column(self):
+        return self._screen.column
+
     def append_host_output(self, data):
-        """Capture session output without letting it write over the live dashboard."""
+        """Interpret host screen controls inside an isolated, bounded screen."""
         text = data.decode("ascii", errors="replace") if isinstance(data, bytes) else str(data)
         with self._lock:
-            for character in text:
-                if self._host_output_escape:
-                    self._host_output_escape += character
-                    if self._host_output_escape == "\x1b[":
-                        continue
-                    if len(self._host_output_escape) == 2 or "@" <= character <= "~" or len(self._host_output_escape) > 64:
-                        self._host_output_escape = ""
-                    continue
-                if character == "\x1b":
-                    self._host_output_escape = character
-                elif character == "\r":
-                    self._host_output_column = 0
-                elif character == "\n":
-                    self._host_output.append(self._host_output_line.rstrip())
-                    self._host_output_line = ""
-                    self._host_output_column = 0
-                elif character == "\b":
-                    self._host_output_column = max(0, self._host_output_column - 1)
-                elif character.isprintable() or character == "\t":
-                    value = " " * (8 - self._host_output_column % 8) if character == "\t" else character
-                    column = self._host_output_column
-                    line = self._host_output_line.ljust(column)
-                    self._host_output_line = line[:column] + value + line[column + len(value):]
-                    self._host_output_column += len(value)
-                    if len(self._host_output_line) > 2048:
-                        self._host_output_line = self._host_output_line[-2048:]
-                        self._host_output_column = min(self._host_output_column, 2048)
+            rows = getattr(self._host_terminal, "_rsh_rows", None)
+            columns = getattr(self._host_terminal, "_rsh_columns", None)
+            if type(rows) is int and 16 <= rows <= 100:
+                self._screen.height = rows
+            if type(columns) is int and columns in (40, 80):
+                self._screen.columns = columns
+            generation = self._screen.generation
+            self._screen.feed(text)
+            if self._screen.generation != generation and self._scrollback is None:
+                self._host_output_offset = 0
+            if text:
+                self._console_message = []
+
+    def _reset_host_screen(self):
+        self._screen.clear()
+        self._resume_live()
+        self._console_message = []
+
+    def _resume_live(self):
+        self._scrollback = None
+        self._scrollback_top = (0, 0)
+        self._host_output_offset = 0
+
+    @property
+    def _scrollback_new_lines(self):
+        return max(0, self._screen.line_events - self._scrollback_started_lines) if self._scrollback is not None else 0
+
+    def _host_body(self):
+        if self._console_message:
+            return list(self._console_message)
+        if self._host_terminal is None:
+            return []
+        screen = self._screen
+        after = list(screen.lines[screen.row + 1:])
+        while after and not after[-1].strip():
+            after.pop()
+        body = [(line.rstrip(), None) for line in screen.lines[:screen.row] + after]
+        footer = self._main_menu_footer()
+        if footer:
+            for index in range(len(body) - 2, -1, -1):
+                if [body[index][0], body[index + 1][0]] == footer:
+                    del body[index:index + 2]
+                    break
+            while body and not body[-1][0].strip():
+                body.pop()
+        return body
+
+    def _main_menu_footer(self):
+        """Only the real main-menu prompt opts into a pinned session footer."""
+        footer = getattr(self._host_terminal, '_rsh_main_menu_footer', None)
+        if (isinstance(footer, tuple) and len(footer) == 3
+                and all(isinstance(line, str) for line in footer)
+                and self._host_output_line == footer[2]):
+            return [line.rstrip() for line in footer[:2]]
+        return []
+
+    @staticmethod
+    def _wrap_host_body(body, width):
+        wrapped, positions = [], []
+        for index, (line, color) in enumerate(body):
+            for column in range(0, max(1, len(line)), width):
+                wrapped.append((line[column:column + width], color))
+                positions.append((index, column))
+        return wrapped, positions
+
+    def _scrollback_index(self, positions):
+        # Anchor to the source line and column, so a resize reflows the same text.
+        return max((index for index, position in enumerate(positions)
+                    if position <= self._scrollback_top), default=0)
+
+    def _scroll_page(self, direction):
+        page = self._output_page_size
+        if self._scrollback is None:
+            if direction > 0:
+                return
+            body = self._host_body()
+            wrapped, positions = self._wrap_host_body(body, self._host_body_width)
+            if not wrapped:
+                return
+            # Freeze bounded screen history, including rows that later screen
+            # controls overwrite or evict. Live output and the prompt keep running.
+            self._scrollback = body
+            self._scrollback_started_lines = self._screen.line_events
+            top = max(0, len(wrapped) - page)
+        else:
+            wrapped, positions = self._wrap_host_body(self._scrollback, self._host_body_width)
+            top = self._scrollback_index(positions)
+        top = max(0, top + direction * page)
+        if direction > 0 and top >= max(0, len(wrapped) - page):
+            self._resume_live()
+            return
+        top = min(top, len(positions) - 1)
+        self._scrollback_top = positions[top]
+        self._host_output_offset = max(0, len(wrapped) - top - page)
 
     def clear_host_output(self):
         with self._lock:
-            self._activity_collapsed = self._activity_pinned
-            self._host_output.clear()
-            self._host_output_line = ""
-            self._host_output_column = self._host_output_offset = 0
-            self._host_output_escape = ""
+            prompt, column = self._host_output_line, self._host_output_column
+            self._reset_host_screen()
+            if self._host_terminal is not None:
+                self._screen.lines = [prompt]
+                self._screen.column = column
 
     def _host_special_key(self, action):
         with self._lock:
-            if self._host_terminal is not None:
-                self._activity_collapsed = True
-            if action in ("page_up", "page_down"):
-                change = self._output_page_size if action == "page_up" else -self._output_page_size
-                self._host_output_offset = max(0, self._host_output_offset + change)
+            if action == "end":
+                self._resume_live()
+            elif action in ("page_up", "page_down"):
+                self._scroll_page(-1 if action == "page_up" else 1)
             elif action in ("history_up", "history_down") and self._command_history:
                 if getattr(self._host_terminal, "secret_input", False) is True:
                     return
@@ -316,52 +395,133 @@ class ConsoleDashboard:
             if self._running and self._tty:
                 self._draw_frame()
 
-    def handle_host_command(self, command):
-        """Called only by the local console keyboard reader, never by a terminal."""
-        if self._telnet_access is None and self._host_terminal is None:
+    def _theme_command(self, arguments, remote=False):
+        if not self._can_input(remote):
+            raise ValueError("Theme controls require the local interactive console.")
+        names = list(THEMES)
+        if not arguments or arguments == ["list"]:
+            lines = ["Console color schemes (host only):"]
+            lines.extend(f"  {index}. {name}" for index, name in enumerate(names, 1))
+            lines.extend((f"Current: {self._theme.name}; backgrounds {'on' if self._theme.background else 'off'}; colors {'on' if self._theme.colors else 'off'}",
+                          "theme <name or number> | theme background on/off | theme colors on/off"))
+            self._console_message = [(line, None) for line in lines]
             return
-        parts = command.strip().lower().split()
+        previous = (self._theme.name, self._theme.background, self._theme.colors)
+        if arguments[0] in ("background", "backgrounds", "colors"):
+            if len(arguments) != 2 or arguments[1] not in ("on", "off"):
+                raise ValueError("Use theme background on/off or theme colors on/off.")
+            key = "colors" if arguments[0] == "colors" else "background"
+            setattr(self._theme, key, arguments[1] == "on")
+        else:
+            requested = " ".join(arguments)
+            requested = THEME_ALIASES.get(requested, requested).casefold()
+            name = next((name for name in names if name.casefold() == requested), None)
+            if requested.isdigit() and 1 <= int(requested) <= len(names):
+                name = names[int(requested) - 1]
+            if name is None:
+                raise ValueError("Unknown console scheme. Type theme to list available schemes.")
+            self._theme.name = name
         try:
+            self._theme.save()
+        except OSError:
+            self._theme.name, self._theme.background, self._theme.colors = previous
+            raise
+        self.log(f"Console theme: {self._theme.name}; backgrounds {'on' if self._theme.background else 'off'}; colors {'on' if self._theme.colors else 'off'}")
+
+    def _can_input(self, remote=False):
+        return (self._running and self._host_terminal is not None
+                and getattr(self._host_terminal, "closed", False) is not True) if remote else self.host_input_available()
+
+    def submit_remote_command(self, command, terminal):
+        """Submit a complete line from a connected terminal without replacing a local draft."""
+        with self._lock:
+            if not self._can_input(True):
+                return False, "Host console session is unavailable."
+            try:
+                allowed, message, new = self._host_access.request(terminal)
+            except (OSError, ValueError) as exc:
+                return False, f"Host control denied: {exc}"
+            if not allowed:
+                if new:
+                    self.log(message)
+                return False, message
+            if self._host_command:
+                return False, "Host input is being edited locally; try again after it is sent."
+            secret = getattr(self._host_terminal, "secret_input", False) is True
+            ok = self._dispatch_host_command(command, remote=True)
+            if ok and command and not secret and (not self._command_history or self._command_history[-1] != command):
+                self._command_history.append(command)
+            return ok, "Sent to Host." if ok else self._command_error
+
+    def handle_host_command(self, command):
+        with self._lock:
+            return self._dispatch_host_command(command)
+
+    def _dispatch_host_command(self, command, remote=False):
+        if self._telnet_access is None and self._host_terminal is None:
+            self._command_error = "Host console session is unavailable."
+            return False
+        parts = command.strip().lower().split()
+        self._resume_live()
+        self._console_message = []
+        try:
+            if not self._can_input(remote):
+                raise ValueError("Host commands require an available host console.")
             if getattr(self._host_terminal, "secret_input", False) is True:
-                if not self.host_input_available():
-                    raise ValueError("Host commands require the local interactive console.")
                 self._host_terminal.submit(command)
+            elif parts in (["host", "help"], ["console", "help"]):
+                self._console_message = [(line, None) for line in (
+                    "HOST CONSOLE CONTROLS",
+                    "Type directly at the active hub prompt; HELP is the hub's help.",
+                    "host help / console help  Show these console controls",
+                    "theme [name or number]    List or select console schemes",
+                    "theme background on/off  Toggle panel backgrounds",
+                    "theme colors on/off      Toggle all console colors",
+                    "allow <#> / deny <#>      Answer incoming Telnet requests",
+                    "allow host <#> / deny host <#>  Approve first HOST use by IP/port",
+                    "pending                  List requests waiting for approval",
+                    "clear                    Clear the host screen",
+                    "PgUp/PgDn                Browse fixed scrollback; End returns live",
+                    "Up/Down                  Recall previous input",
+                    "ATM                      Return the host session to the main menu",
+                    "From any hub terminal: HOST <text> submits a line to this session.")]
+            elif parts and parts[0] == "theme":
+                self._theme_command(parts[1:], remote=remote)
             elif parts == ["pending"]:
                 pending = self._telnet_access.pending() if self._telnet_access is not None else []
-                self.log("; ".join(f"#{row['id']} {row['ip']} -> {row['profile']}" for row in pending) or "No Telnet approvals pending.")
+                requests = [f"Telnet #{row['id']} {row['ip']} -> {row['profile']}" for row in pending]
+                requests += [f"Host-control #{row['id']} {row['source']}" for row in self._host_access.pending()]
+                self._console_message = [(line, None) for line in (requests or ["No approvals pending."])]
+            elif len(parts) >= 2 and parts[0] in ("allow", "deny") and parts[1] == "host":
+                if remote:
+                    raise ValueError("Host-control approval must be typed at the local console.")
+                if len(parts) != 3 or not parts[2].isdigit():
+                    raise ValueError("Use allow host <request #> or deny host <request #>.")
+                source = self._host_access.decide(int(parts[2]), parts[0] == "allow")
+                self.log(f"Host control {'approved' if parts[0] == 'allow' else 'denied'} for {source}.", "green")
             elif parts and parts[0] in ("allow", "deny"):
                 if self._telnet_access is None:
                     raise ValueError("Telnet listeners are disabled.")
                 if len(parts) != 2 or not parts[1].isdigit():
                     raise ValueError("Use allow <request #> or deny <request #>.")
-                if not self.host_input_available():
-                    raise ValueError("Local keyboard approval is unavailable. Edit settings/local/telnet_allowlist.json instead.")
                 getattr(self._telnet_access, parts[0])(int(parts[1]))
             elif parts and parts[0] == "monitor":
-                if len(parts) != 2 or parts[1] not in ("collapse", "auto", "expand"):
-                    raise ValueError("Use monitor collapse or monitor auto (expand also restores automatic mode).")
-                with self._lock:
-                    self._activity_pinned = parts[1] == "collapse"
-                    self._activity_collapsed = self._activity_pinned
-                self.log("Activity monitor pinned collapsed; clear keeps this layout."
-                         if self._activity_pinned else "Activity monitor expanded; automatic layout restored.")
+                self.log("The activity monitor always shows active selections. Use host help for console controls.")
             elif parts == ["clear"]:
                 self.clear_host_output()
             elif self._host_terminal is not None:
-                if not self.host_input_available():
-                    raise ValueError("Host commands require the local interactive console.")
-                self._activity_collapsed = True
                 self._host_output_offset = 0
                 self._host_terminal.submit(command)
-            elif parts:
-                self.log("Host commands: allow <request #>, deny <request #>, pending, clear, monitor collapse/auto (then Enter).", level="yellow")
+            else:
+                raise ValueError("No hub session is attached. Use host help for console controls.")
+            self._command_error = ""
+            return True
         except (OSError, ValueError) as exc:
+            self._command_error = str(exc)
             self.log(f"Host command failed: {exc}", level="red")
+            return False
 
     def _host_key(self, key):
-        if self._host_terminal is not None:
-            with self._lock:
-                self._activity_collapsed = True
         if key in ("\r", "\n"):
             with self._lock:
                 command, self._host_command = self._host_command, ""
@@ -394,7 +554,7 @@ class ConsoleDashboard:
                         continue
                     key = msvcrt.getwch()
                     if key in ("\x00", "\xe0"):
-                        action = {"H": "history_up", "P": "history_down", "I": "page_up", "Q": "page_down"}.get(msvcrt.getwch())
+                        action = {"H": "history_up", "P": "history_down", "I": "page_up", "Q": "page_down", "O": "end"}.get(msvcrt.getwch())
                         if action:
                             self._host_special_key(action)
                         continue
@@ -417,7 +577,7 @@ class ConsoleDashboard:
                                     key += os.read(descriptor, 1)
                                     if len(key) > 2 and (key[-1:] == b"~" or key[-1:].isalpha()):
                                         break
-                                action = {b"\x1b[A": "history_up", b"\x1b[B": "history_down", b"\x1b[5~": "page_up", b"\x1b[6~": "page_down"}.get(key)
+                                action = {b"\x1b[A": "history_up", b"\x1b[B": "history_down", b"\x1b[5~": "page_up", b"\x1b[6~": "page_down", b"\x1b[F": "end", b"\x1bOF": "end", b"\x1b[4~": "end", b"\x1b[8~": "end"}.get(key)
                                 if action:
                                     self._host_special_key(action)
                                     continue
@@ -627,42 +787,17 @@ class ConsoleDashboard:
                 prefix,_,suffix=row.rpartition('|')
                 row=(prefix+'┤'+suffix).replace('-','─')
             elif plain.startswith('|') and plain.endswith('|'):
-                row=row.replace('|','│')
+                row=row.replace('|','│',1)
+                prefix,_,suffix=row.rpartition('|')
+                row=prefix+'│'+suffix
             styled.append((row,color))
         return styled
-
-    def _compact_interface_rows(self, box_width, force_color=False):
-        inner_width=box_width-5
-        columns=4 if inner_width >= 100 else 3 if inner_width >= 70 else 2 if inner_width >= 46 else 1
-        cell_width=(inner_width-columns+1)//columns
-        rows=[(self._paint('+-- Activity Monitor '+'-'*(box_width-22)+'+','dim',force_color=force_color),'raw')]
-        def row(cells):
-            content=' '.join(cells)
-            return (self._paint('|  ','dim',force_color=force_color)+content+' '*max(0,inner_width-len(self._strip_ansi(content)))+self._paint(' |','dim',force_color=force_color),'raw')
-        for start in range(0,len(MENU_SECTIONS),columns):
-            group=MENU_SECTIONS[start:start+columns]
-            headers,selections=[],[]
-            for number,title,items in group:
-                headers.append(self._format_cell('',title,title,'',cell_width,True,number,force_color=force_color)[1])
-                selected=[item for item in items if self._users_for_action(item[3])]
-                if len(selected)==1:
-                    selections.append(self._format_cell(*selected[0],cell_width,force_color=force_color)[1])
-                elif selected:
-                    summary=' / '.join(item[2]+' '+','.join(self._users_for_action(item[3])) for item in selected)
-                    selections.append(self._paint(summary[:cell_width].ljust(cell_width),'highlight',force_color=force_color))
-                else:
-                    selections.append(' '*cell_width)
-            rows.extend((row(headers),row(selections)))
-        rows.append((self._paint('+'+'-'*(box_width-2)+'+','dim',force_color=force_color),'raw'))
-        return self._box_style(rows)
 
     def _interface_rows(self, width=None, force_color=False):
         if width is None:
             width = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns - 1)
         box_width = max(40, min(width, 118))
         inner_width = box_width - 5
-        if self._activity_collapsed:
-            return self._compact_interface_rows(box_width,force_color)
 
         rows = []
         title = " Connected Terminal Activity Monitor "
@@ -782,7 +917,7 @@ class ConsoleDashboard:
 
     def _status_panel_rows(self, width, force_color=False):
         """Render profile and live-count status in a box matching the menu."""
-        box_width = max(40, min(width, 118))
+        box_width = max(8, width)
         inner_width = box_width - 4
         title = " Serial & Network Status "
         top = "+--" + title + ("-" * max(0, box_width - len(title) - 4)) + "+"
@@ -863,77 +998,225 @@ class ConsoleDashboard:
             return "yellow"
         return self._status_color(profile.get("serial_status", "STARTING"))
 
-    def _frame(self, height=None, terminal_size=None):
-        now = time.strftime("%Y-%m-%d %H:%M:%S")
-        terminal_size = terminal_size or shutil.get_terminal_size(fallback=(120, 24))
-        width = max(40, min(terminal_size.columns - 1, 118))
-        rows = [(f"Retro Serial Hub v{VERSION}  |  {now}", "bold")]
-        rows.extend(self._status_panel_rows(width, force_color=self._color))
-        rows.extend(self._interface_rows(width=width, force_color=self._color))
-        footer_start = len(rows)
-        footer=[]
+    def _pane_rows(self, title, content, width):
+        """One border and padding implementation for every dashboard pane."""
+        inner = max(1, width - 2)
+        heading = ("-- " + title + " ")[:inner]
+        rows = [(self._paint("+" + heading.ljust(inner, "-") + "+", "dim"), "raw")]
+        for text, color in content:
+            clipped = self._clip_screen_row(text, inner)
+            cells = sum(0 if unicodedata.combining(c) else
+                        2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+                        for c in self._strip_ansi(clipped))
+            padded = clipped + " " * max(0, inner - cells)
+            value = self._paint(padded, color) if color and color != "raw" else padded
+            rows.append((self._paint("|", "dim") + value
+                         + self._paint("|", "dim"), "raw"))
+        rows.append((self._paint("+" + "-" * inner + "+", "dim"), "raw"))
+        return self._box_style(rows)
+
+    def _active_monitor_rows(self, width, height=None):
+        labels = {action: label for _, _, items in MENU_SECTIONS
+                  for _, _, label, action in items}
+        labels.update(menu="Main Menu", shortcuts="Shortcuts")
+        groups = []
+        for activity in self._user_activities.values():
+            action = normalize_action(activity["action"])
+            label = labels.get(action, action.replace("section:", "Section "))
+            groups.append(textwrap.wrap(f"{activity['user']}: {label}", max(1, width - 4)))
+        limit = max(1, height - 2) if height is not None else sum(map(len, groups)) + 1
+        content = []
+        truncated = sum(map(len, groups)) > limit
+        shown = 0
+        for group in groups:
+            if len(content) + len(group) > limit - int(truncated):
+                break
+            content.extend((" " + line, "highlight") for line in group)
+            shown += 1
+        if shown < len(groups):
+            content.append((f"+{len(groups) - shown} more active sessions", "yellow"))
+        if not groups:
+            content.append((" No active selections", "dim"))
+        return self._pane_rows("Activity Monitor", content, width)
+
+    def _priority_rows(self, width, budget):
+        """Approvals and errors are allocated space before ordinary panels."""
+        if budget <= 0:
+            return []
+        pending = self._telnet_access.pending() if self._telnet_access is not None else []
+        errors = [(message, level) for message, level in self._events if level in ("red", "yellow")]
+        requests = [(f"APPROVAL #{r['id']} {r['ip']} -> {r['profile']} ({r['seconds_left']}s)", "yellow", "approval")
+                    for r in pending]
+        host_requests = self._host_access.pending()
+        requests = [(f"HOST APPROVAL #{r['id']} {r['source']} | allow host {r['id']} ({r['seconds_left']}s)", "yellow", "approval")
+                    for r in host_requests] + requests
+        pending_count = len(requests)
+        failures = [(f"{'ERROR' if level == 'red' else 'NOTICE'}: {message}", level, "error")
+                    for message, level in reversed(errors)]
+        # Preserve the first request and the latest error before additional items.
+        entries = requests[:1] + failures[:1] + requests[1:] + failures[1:]
+        if len(entries) > budget:
+            if budget == 1:
+                entries = [(f"{pending_count} approvals | {len(errors)} errors/notices", "yellow", "summary")]
+            else:
+                shown = entries[:budget - 1]
+                shown_requests = sum(kind == "approval" for _, _, kind in shown)
+                shown_errors = sum(kind == "error" for _, _, kind in shown)
+                entries = shown + [(f"+{pending_count-shown_requests} approvals; +{len(errors)-shown_errors} errors/notices", "yellow", "summary")]
+        return [(self._paint(self._clip_screen_row(text, width), color), "raw", kind)
+                for text, color, kind in entries]
+
+    def _fit_status(self, width, height):
+        if height <= 0:
+            return []
+        if height < 3 or width < 30:
+            return [(self._paint(self._clip_screen_row(self._status_line(), width), "cyan"), "raw")]
+        rows = self._status_panel_rows(width, force_color=self._color)
+        if len(rows) > height:
+            omitted = len(rows) - height + 1
+            summary = self._pane_rows("", [(f"+{omitted} more status rows", "dim")], width)[1]
+            rows = rows[:height - 2] + [summary, rows[-1]]
+        return rows
+
+    def _dashboard_rows(self, width, height, include_status=True):
+        if height <= 0:
+            return []
+        priority = self._priority_rows(width, max(1, min(6, height - 5)))
+        rows = [(text, color) for text, color, kind in priority if kind == "approval"]
+        notices = [(text, color) for text, color, kind in priority if kind != "approval"]
+        available = height - len(priority)
+        if available >= 3:
+            desired_activity = len(self._active_monitor_rows(width))
+            activity_height = min(desired_activity, max(3, available // 3)) if include_status else available
+            status_height = available - activity_height if include_status else 0
+            if status_height and status_height < 3:
+                activity_height, status_height = 3, available - 3
+            rows += self._fit_status(width, status_height)
+            rows += self._active_monitor_rows(width, activity_height)
+        elif available:
+            rows += self._fit_status(width, available) if include_status else []
+        rows += notices
+        for message, level in reversed(self._events):
+            if len(rows) >= height:
+                break
+            if level not in ("red", "yellow"):
+                rows.append((self._paint(self._clip_screen_row("Event: " + message, width), level), "raw"))
+        return rows[:height]
+
+    def _host_hints(self):
+        hints = ["Host: allow host <#> / deny host <#> / pending"]
         if self._telnet_access is not None:
-            pending = self._telnet_access.pending()
-            if pending:
-                footer.append(("TELNET APPROVAL REQUIRED", "yellow"))
-                for request in pending[:3]:
-                    footer.append((f"#{request['id']} {request['ip']} -> {request['profile']} ({request['seconds_left']}s)", "yellow"))
-                if len(pending) > 3:
-                    footer.append((f"{len(pending) - 3} more approval requests waiting.", "yellow"))
-            if self.host_input_available():
-                footer.append(("Host: allow <#> / deny <#> / pending [Enter]", "dim"))
+            hints.append("Telnet: allow <#> / deny <#>")
+        hints.append("Hub: HELP | ATM | host help | theme | clear | PgUp/PgDn | End=Live | Up/Down")
+        return hints
+
+    def _host_pane(self, width, height):
+        """Draw history and place the line editor at the actual session cursor."""
+        bordered = width >= 4 and height >= 3
+        border = int(bordered)
+        inner = max(1, width - border * 2)
+        input_width = min(inner, self._screen.columns) if self._host_terminal is not None else inner
+        inner_height = max(1, height - border * 2)
         if self._host_terminal is not None:
-            footer.append(("Hub: help | ATM | clear | monitor collapse/auto | Up/Down=history", "dim"))
-        for message, level in self._events:
-            footer.append((f"Event: {message}", level))
-        if (self._telnet_access is not None or self._host_terminal is not None) and self.host_input_available():
-            command_width = max(1, terminal_size.columns - 7)
-            command = self._host_command
-            if getattr(self._host_terminal, "secret_input", False) is True:
-                command = "*" * len(command)
-            if len(command) > command_width:
-                command = "..." + command[-max(1, command_width - 3):]
-            footer.append(("Host> " + command, "bold"))
-        if self._host_terminal is not None:
-            output_lines = list(self._host_output)
-            if self._host_output_line:
-                output_lines.append(self._host_output_line)
-            wrapped = []
-            output_width = max(1, terminal_size.columns - 1)
-            for line in output_lines:
-                wrapped.extend(textwrap.wrap(line, width=output_width, replace_whitespace=False, drop_whitespace=False) or [""])
-            if self._activity_collapsed:
-                self._output_page_size=max(1,(height or terminal_size.lines)-len(rows)-len(footer)-1)
-            else:
-                self._output_page_size=min(10,max(3,(height or terminal_size.lines)//3))
-            self._host_output_offset = min(self._host_output_offset, max(0, len(wrapped) - self._output_page_size))
-            end = len(wrapped) - self._host_output_offset
-            visible_output = wrapped[max(0, end - self._output_page_size):end]
-            rows.append(("HOST SESSION OUTPUT (PgUp/PgDn to scroll)", "cyan"))
-            if self._activity_collapsed:
-                rows.extend(('',None) for _ in range(self._output_page_size-len(visible_output)))
-            rows.extend((line, None) for line in visible_output)
-        rows.extend(footer)
-        if height is not None and len(rows) > height:
-            if height <= 1:
-                rows = rows[:max(0, height)]
-            elif height == 2:
-                rows = rows[:1] + rows[-1:]
-            else:
-                # Keep the host input and approval/event footer visible. A frame
-                # taller than the viewport would otherwise scroll while drawing.
-                footer = rows[footer_start:][-(height - 2):]
-                body_limit = height - len(footer) - 1
-                rows = rows[:body_limit] + [("... enlarge window for more dashboard rows ...", "dim")] + footer
-        width = max(40, terminal_size.columns - 1)
-        final_rows = []
-        for row, color in rows:
-            if color == "raw":
-                final_rows.append(row)
-            else:
-                visible = row[:width]
-                final_rows.append(self._paint(visible, color) if color else visible)
-        return final_rows
+            screen = self._screen
+            prompt, position = screen.lines[screen.row], screen.column
+        else:
+            prompt, position = "Host> ", 6
+        draft = self._host_command
+        if getattr(self._host_terminal, "secret_input", False) is True:
+            draft = "*" * len(draft)
+        prompt = prompt.ljust(position)
+        edited = prompt[:position] + draft + prompt[position + len(draft):]
+        cursor = position + len(draft)
+        cursor_line, cursor_column = divmod(cursor, input_width)
+        prompt_lines = [edited[start:start + input_width] for start in range(0, len(edited), input_width)] or [""]
+        while len(prompt_lines) <= cursor_line:
+            prompt_lines.append("")
+        hints = []
+        for line in self._main_menu_footer():
+            hints.extend((part, None) for part in (textwrap.wrap(line, inner) or [""]))
+        if hints:
+            hints.append(("", None))
+        for hint in self._host_hints():
+            hints.extend((part, "dim") for part in textwrap.wrap(hint, inner))
+        # One blank row separates the control hints from the live input prompt.
+        available_hints = max(0, inner_height - 1)
+        if available_hints >= 2:
+            hints = hints[:available_hints - 1] + [("", "dim")]
+        else:
+            hints = hints[:available_hints]
+        if inner_height - len(hints) == 1 and cursor_line:
+            # A one-line input region scrolls horizontally rather than hiding
+            # most of a word on the previous wrapped line.
+            offset = max(0, cursor - input_width + 1)
+            prompt_lines = [edited[offset:offset + input_width]]
+            cursor_line, cursor_column = 0, cursor - offset
+        prompt_count = min(3, max(1, inner_height - len(hints)), cursor_line + 1)
+        start = max(0, cursor_line - prompt_count + 1)
+        visible_prompt = prompt_lines[start:cursor_line + 1]
+        body_height = max(0, inner_height - len(hints) - len(visible_prompt))
+        self._output_page_size = max(1, body_height)
+        self._host_body_width = inner
+        body = self._scrollback if self._scrollback is not None else self._host_body()
+        wrapped, positions = self._wrap_host_body(body, inner)
+        if self._scrollback is not None:
+            top = self._scrollback_index(positions)
+            self._host_output_offset = max(0, len(wrapped) - top - body_height)
+        else:
+            top = max(0, len(wrapped) - body_height)
+            self._host_output_offset = 0
+        visible = wrapped[top:top + body_height] if body_height else []
+        content = visible + [("", None)] * (body_height - len(visible))
+        content += hints
+        input_start = border + len(content)
+        content += [(line, "cyan") for line in visible_prompt]
+        local_cursor = (input_start + cursor_line - start, border + cursor_column)
+        input_rows = set(range(input_start, input_start + len(visible_prompt)))
+        if bordered:
+            count = self._scrollback_new_lines
+            title = f"Scrollback - {count} new {'line' if count == 1 else 'lines'}" if self._scrollback is not None else "Host Console / PgUp/PgDn"
+            rows = self._pane_rows(title, content, width)
+        else:
+            rows = [(self._paint(self._clip_screen_row(text, width), color) if color else
+                     self._clip_screen_row(text, width), "raw") for text, color in content]
+        return rows[:height], local_cursor, input_rows
+
+    def _frame(self, height=None, terminal_size=None):
+        size = terminal_size or shutil.get_terminal_size(fallback=(120, 24))
+        height = max(1, height if height is not None else size.lines)
+        width = max(1, size.columns - 1)
+        self._frame_cursor = None
+        self._frame_input_rows = set()
+        title = (f"Retro Serial Hub v{VERSION}  |  " + time.strftime("%Y-%m-%d %H:%M:%S"), "bold")
+        if height == 1:
+            return [self._paint(self._clip_screen_row(title[0], width), title[1])]
+        split = width >= 123 and height >= 8
+        top = [title]
+        if split:
+            full_status = self._status_panel_rows(width, force_color=self._color)
+            above = height >= len(full_status) + 31
+            if above:
+                top += full_status
+            body_height = height - len(top)
+            right = self._dashboard_rows(width - 83, body_height, include_status=not above)
+            left, cursor, inputs = self._host_pane(82, body_height)
+            rows = top + [(line + self._paint(" ", "desktop") + (right[index][0] if index < len(right) else ""), "raw")
+                          for index, (line, _) in enumerate(left)]
+        else:
+            available = height - 1
+            required_host = max(24, self._screen.height) + len(self._host_hints()) + 2
+            host_height = required_host if available >= required_host + 6 else max(1, available * 2 // 3)
+            dashboard_height = available - host_height
+            # On tiny screens keep the prompt and one urgent status row.
+            dashboard = self._dashboard_rows(width, dashboard_height)
+            top += dashboard
+            host_height = height - len(top)
+            left, cursor, inputs = self._host_pane(width, host_height)
+            rows = top + left
+        self._frame_cursor = (len(top) + cursor[0] + 1, min(width, cursor[1] + 1))
+        self._frame_input_rows = {len(top) + index for index in inputs}
+        return [text if color == "raw" else self._paint(self._clip_screen_row(text, width), color)
+                for text, color in rows[:height]]
 
     @staticmethod
     def _clip_screen_row(row, width):
@@ -959,20 +1242,51 @@ class ConsoleDashboard:
             output.append("\x1b[0m")
         return "".join(output)
 
-    def _draw_frame(self):
+    def _draw_frame(self, force=False):
         size = shutil.get_terminal_size(fallback=(120, 24))
         rows = self._frame(height=max(1, size.lines), terminal_size=size)
-        # Absolute positions recover after keyboard interaction, resizes, or a
-        # changed frame height. No trailing newline can scroll the last row.
-        output = ["\x1b[H"]
+        base = self._theme.ansi() if self._color else ""
+        desktop = self._theme.ansi("desktop") if self._color else ""
+        context = (sys.stdout, size.columns, size.lines, self._color,
+                   self._theme.name, self._theme.colors, self._theme.background)
+        repaint = force or context != self._painted_context
+        prepared = []
         for index, row in enumerate(rows):
-            if index:
-                output.append(f"\x1b[{index + 1};1H")
-            output.append("\x1b[2K" + self._clip_screen_row(row, max(0, size.columns - 1)))
-        output.append("\x1b[J")
-        sys.stdout.write("".join(output))
-        sys.stdout.flush()
-        self._frame_lines = len(rows)
+            if self._color:
+                if index == 0:
+                    title = self._strip_ansi(row)[:max(0, size.columns - 1)]
+                    row = self._paint(title.center(max(0, size.columns - 1)), "title")
+                row = row.replace("\x1b[0m", base)
+            prepared.append(self._clip_screen_row(row, max(0, size.columns - 1)))
+        changed = [index for index, row in enumerate(prepared)
+                   if repaint or index >= len(self._painted_rows) or row != self._painted_rows[index]]
+        stale = [] if repaint else list(range(len(prepared), len(self._painted_rows)))
+        self._frame_lines = len(prepared)
+        if not changed and not stale and self._frame_cursor == self._painted_cursor and not repaint:
+            return
+
+        output = ["\x1b[?25l"]
+        if repaint:
+            # A resized terminal can reflow old content anywhere in its viewport.
+            # Reset the background and paint once before trusting row comparisons.
+            output.append(desktop + "\x1b[H\x1b[2J")
+        for index in changed:
+            output.append(f"\x1b[{index + 1};1H" + desktop + "\x1b[2K" + base
+                          + prepared[index] + desktop)
+        for index in stale:
+            output.append(f"\x1b[{index + 1};1H" + desktop + "\x1b[2K")
+        if self._frame_cursor is not None:
+            row, column = self._frame_cursor
+            output.append(f"\x1b[{row};{column}H\x1b[?25h")
+        try:
+            sys.stdout.write("".join(output))
+            sys.stdout.flush()
+        except (OSError, ValueError):
+            self._painted_context = None
+            raise
+        self._painted_rows = prepared
+        self._painted_cursor = self._frame_cursor
+        self._painted_context = context
 
     def _refresh_loop(self):
         while self._running:

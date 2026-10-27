@@ -406,6 +406,32 @@ def wait_for_key(ser, quit_msg=False):
         time.sleep(0.05)
 
 
+def terminal_input_prompt(ser):
+    service = getattr(ser, "_rsh_services", None)
+    if service is None:
+        return ""
+    raw = service.last_tx.rsplit(b"\n", 1)[-1].decode("ascii", errors="ignore")
+    raw = re.sub(r"\x1b(?:\[[0-9;?]*[A-Za-z]|.)", "", raw)
+    return "".join(char for char in raw if char.isprintable())[-160:]
+
+
+def forward_host_input(ser, line, prompt=""):
+    """HOST is a hub command prefix, never a filter on binary/raw bridge data."""
+    if getattr(ser, "_rsh_host_console", False) is True or getattr(ser, "secret_input", False) is True:
+        return False
+    match = re.fullmatch(r"HOST(?:[ \t]+(.*))?", line.strip(), re.IGNORECASE)
+    if not match:
+        return False
+    if CONSOLE is None:
+        message = "Host console session is unavailable."
+    else:
+        _, message = CONSOLE.submit_remote_command(match[1] or "", ser)
+    write(ser, "\r\n" + message + "\r\n")
+    if prompt:
+        write(ser, prompt)
+    return True
+
+
 def read_input_line(ser):
     """Read a line of interactive terminal input with echo and backspace."""
     buf = b""
@@ -564,7 +590,7 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
     if service and reminder:
         service.notify(reminder)
     if service and service.pending:
-        status += f" | Msg {len(service.pending)}"
+        status += f" | Messages {len(service.pending)}"
     output = ser._rsh_flyout_menu.render(
         columns=columns,
         rows=terminal_rows(ser),
@@ -573,7 +599,23 @@ def show_main_menu(ser, use_ansi=True, auto_flyout=True):
         version=VERSION,
         is_remote=remote_client,
         status=status,
+        messages_count=len(service.pending) if service else 0,
     )
+    if getattr(ser, "_rsh_host_console", False) is True:
+        # Physical terminals anchor the footer to their configured last row.
+        # The dashboard already positions its own input footer; retaining that
+        # padding here can scroll the menu heading off an otherwise empty pane.
+        lines = output.split("\r\n")
+        footer_start = len(lines) - 4
+        while footer_start > 0 and not lines[footer_start - 1].strip():
+            del lines[footer_start - 1]
+            footer_start -= 1
+        # Keep the menu/status separator without restoring terminal-height padding.
+        lines.insert(footer_start, "")
+        ser._rsh_main_menu_footer = (lines[-4], lines[-3], lines[-1])
+        if getattr(ser, '_rsh_caps_only', False) is True:
+            ser._rsh_main_menu_footer = tuple(line.upper() for line in ser._rsh_main_menu_footer)
+        output = "\r\n".join(lines)
     write(ser, output)
     ser._rsh_reminder_notice = ""
 
@@ -668,9 +710,15 @@ def show_legacy_main_menu(ser, use_ansi=True):
             f"Serial ports: {serial_count} | Telnet clients: {remote_count}"
         )
     write(ser, "\r\n" + status + "\r\n")
-    write(ser, "Type ATM to return to this menu.\r\n")
+    service = getattr(ser, '_rsh_services', None)
+    hint = f"M=Messages ({len(service.pending)} unread) | ATM=Menu" if service and service.pending else "Type ATM to return to this menu."
+    write(ser, hint[:columns-1] + "\r\n")
     if columns == 80:
         write(ser, "\r\n")
+    if getattr(ser, "_rsh_host_console", False) is True:
+        ser._rsh_main_menu_footer = (status, hint[:columns-1], "Command: ")
+        if getattr(ser, '_rsh_caps_only', False) is True:
+            ser._rsh_main_menu_footer = tuple(line.upper() for line in ser._rsh_main_menu_footer)
     write(ser, "Command: ")
 
 
@@ -1085,6 +1133,14 @@ def bridge_loop(
 
     def read_session_line():
         nonlocal input_buffer
+        prompt = terminal_input_prompt(ser)
+        while True:
+            value = read_session_line_value()
+            if not forward_host_input(ser, value, prompt):
+                return value
+
+    def read_session_line_value():
+        nonlocal input_buffer
         if getattr(ser,'_rsh_reconnect_pending',False) or getattr(ser,'_rsh_return_to_menu',False):
             return 'Q'
         separators = [input_buffer.find(value) for value in (b'\r',b'\n') if value in input_buffer]
@@ -1137,7 +1193,7 @@ def bridge_loop(
     except (OSError, ValueError) as exc:
         console_log(f"{name}: machine preferences unavailable: {exc}", level="yellow")
     if getattr(ser, "_rsh_host_console", False) is True:
-        retro_shell.register_command("help", lambda _args: retro_shell.help() + "\nHost controls: allow <#>, deny <#>, pending, clear, monitor collapse/auto. Collapse keeps the activity monitor compact across clear; auto restores normal layout. ATM opens menus. PgUp/PgDn scroll output; Up/Down recall commands.")
+        retro_shell.register_command("help", lambda _args: retro_shell.help() + "\nHost controls: host help, theme, allow [host] <#>, deny [host] <#>, pending, clear. ATM opens menus; M opens Messages there. PgUp/PgDn browse fixed scrollback; End returns live; Up/Down recall commands.")
     if hasattr(host_env, "scheduler") and host_env.scheduler:
         host_env.scheduler.broadcaster = broadcast_scheduler_event
     from retro_os.toolkit import CalendarTool, start_calendar_reminders
@@ -2231,6 +2287,52 @@ def bridge_loop(
                         write(ser, f"Print error: {exc}\r\n")
                     wait_for_key(ser)
 
+    def run_messages_menu():
+        """Session messages and received text files, separate from email."""
+        service = getattr(ser, '_rsh_services', None)
+        page = 0
+        while True:
+            clear_screen(ser, use_ansi)
+            write(ser, "\r\n--- MESSAGES ---\r\n")
+            if service is None:
+                write(ser, "No messages for this session.\r\n")
+                wait_for_key(ser)
+                return
+            items = service.message_list()
+            pages = max(1, (len(items) + 7) // 8)
+            page = min(page, pages - 1)
+            visible = items[page * 8:page * 8 + 8]
+            write(ser, f"{len(service.pending)} unread | {len(items)} saved this session\r\n\r\n")
+            if not items:
+                write(ser, "No messages yet.\r\n")
+            for index, item in enumerate(visible, 1):
+                title = next((line.strip() for line in item['text'].splitlines() if line.strip()), 'Message')
+                title = ''.join(char for char in title if char.isprintable())
+                marker = '*' if not item['read'] else ' '
+                write(ser, f"{index}{marker} {title[:terminal_columns(ser)-5]}\r\n")
+            if pages > 1:
+                write(ser, f"\r\nPage {page+1}/{pages} N=Next P=Previous\r\n")
+            write(ser, "\r\n1-8=Read A=Read unread Q=Back: ")
+            choice = read_session_line().strip().upper()
+            if choice in ('Q', 'QUIT', 'EXIT') or getattr(ser, '_rsh_return_to_menu', False):
+                return
+            if choice in ('N', 'P'):
+                page = (page + (1 if choice == 'N' else -1)) % pages
+                continue
+            if choice == 'A':
+                content = service.deliver(force=True)
+            elif choice.isdigit() and 1 <= int(choice) <= len(visible):
+                content = service.read_message(visible[int(choice)-1]['id'])
+            else:
+                continue
+            clear_screen(ser, use_ansi)
+            write(ser, "\r\n--- MESSAGE ---\r\n")
+            render_shell_result(content)
+            write(ser, "\r\nEnter=Messages: ")
+            read_session_line()
+            if getattr(ser, '_rsh_return_to_menu', False):
+                return
+
     def run_connected_terminals_menu():
         clear_screen(ser,use_ansi)
         while True:
@@ -2255,14 +2357,14 @@ def bridge_loop(
                     if service.progress:
                         details += ' | transferring'
                 write(ser, f"[{index}] {label}{details}\r\n")
-            write(ser, "\r\nNumber=Terminal R=Refresh N=Notifications Q=Back: ")
+            write(ser, "\r\nNumber=Terminal R=Refresh M=Messages Q=Back: ")
             choice = read_session_line().strip().upper()
             if choice in ("Q", "QUIT", "EXIT"):
                 return
             if choice in ("", "R", "REFRESH"):
                 continue
-            if choice == "N":
-                run_tool_menu("notifications")
+            if choice in ("M", "N"):
+                run_messages_menu()
                 continue
             try:
                 index = int(choice) - 1
@@ -2283,8 +2385,8 @@ def bridge_loop(
                 if message and message.upper() != "Q":
                     try:
                         from rsh_session import notify
-                        notify(target, f"\r\n*** [MESSAGE from {sender_name}] {message} ***\r\n")
-                        write(ser, f"Message queued for {target_name}.\r\n")
+                        announced = notify(target, f"\r\n*** [MESSAGE from {sender_name}] {message} ***\r\n")
+                        write(ser, f"Message {'announced to' if announced else 'queued for'} {target_name}.\r\n")
                     except Exception as exc:
                         write(ser, f"Message failed: {exc}\r\n")
                 continue
@@ -2305,8 +2407,8 @@ def bridge_loop(
                     if file_path.stat().st_size > 1024 * 1024:
                         raise ValueError('Text delivery is limited to 1 MiB; use a file transfer for larger files.')
                     content = file_path.read_text(encoding='utf-8',errors='replace')
-                    notify(target, f"\nIncoming text from {sender_name}: {file_path.name}\n" + content)
-                    write(ser,f"Queued {file_path.name} for {target_name}.\r\n")
+                    announced = notify(target, f"\nIncoming text from {sender_name}: {file_path.name}\n" + content)
+                    write(ser,f"{'Announced' if announced else 'Queued'} {file_path.name} for {target_name} (Messages).\r\n")
                 except Exception as exc:
                     write(ser, f"File delivery failed: {exc}\r\n")
                 wait_for_key(ser)
@@ -3209,7 +3311,7 @@ def bridge_loop(
             mode = "MENU"
             show_main_menu(ser, use_ansi)
 
-    if getattr(ser, "_rsh_host_console", False) is True or getattr(ser,"_rsh_machine_settings",{}).get("start") == "cli":
+    if getattr(ser, "_rsh_host_console", False) is not True and getattr(ser,"_rsh_machine_settings",{}).get("start") == "cli":
         mode = "CLI"
         retro_session.active_module = "shell"
         set_terminal_activity(ser, "cli", user_label="Host")
@@ -3267,6 +3369,8 @@ def bridge_loop(
                 continue
 
             # Echo in command-mode only (i.e., not while transparent BBS session)
+            if not input_buffer:
+                ser._rsh_input_prompt = terminal_input_prompt(ser)
             suppress_ftp_password_echo = (
                 mode == "FTP"
                 and ftp_session is not None
@@ -3376,6 +3480,20 @@ def bridge_loop(
                 line_str = raw_line.decode(errors='ignore').strip()
                 upper = line_str.upper()
 
+                if forward_host_input(ser, line_str, getattr(ser, "_rsh_input_prompt", "")):
+                    continue
+
+                if (mode in ('MENU', 'CLI', 'SHELL') and not getattr(ser, 'secret_input', False)
+                        and (upper in ('MESSAGES', 'MSGS', 'NOTIFICATIONS') or (mode == 'MENU' and upper == 'M'))):
+                    run_messages_menu()
+                    if mode == 'MENU' or getattr(ser, '_rsh_return_to_menu', False):
+                        mode = 'MENU'
+                        retro_session.active_module = None
+                        show_main_menu(ser, use_ansi, auto_flyout=False)
+                    else:
+                        write(ser, '\r\ncli> ')
+                    continue
+
                 # Global ATM: return to menu, drop any BBS connection
                 if upper == "ATM":
                     if mode == "WARGAMES" and wargames_module:
@@ -3428,9 +3546,6 @@ def bridge_loop(
                     continue
 
                 if mode in ("SHELL", "CLI"):
-                    service = getattr(ser,'_rsh_services',None)
-                    if service and service.pending and not service.quiet:
-                        render_shell_result(service.deliver())
                     write(ser, "\r\n")
                     if upper in ("EXIT", "QUIT", "MENU"):
                         mode = "MENU"
@@ -5029,7 +5144,8 @@ def main():
             "endpoint": endpoint,
         }
 
-    CONSOLE = ConsoleDashboard(profiles)
+    CONSOLE = ConsoleDashboard(profiles, theme_path=settings_path("console_theme.json", BASE_DIR),
+                               host_access_path=settings_path("host_command_allowlist.json", BASE_DIR))
     host_terminal = None
     if CONSOLE.host_input_available():
         host_terminal = HostTerminal(CONSOLE.append_host_output)

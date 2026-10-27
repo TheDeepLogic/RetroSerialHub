@@ -214,7 +214,7 @@ def handle(sess, cmd, ser, use_ansi=True):
         stop_speech(sess)
         state["events"].clear()
         sess["submode"] = "CPM"
-        emit(ser, "\nNO CARRIER\n\nA>", prompt=True)
+        emit(ser, "\nNO CARRIER\n\n" + sess.get("cpm_drive", "A") + ">", prompt=True)
         return
     if text in ("SPEECH", "SPEECH ON", "SPEECH OFF"):
         if text != "SPEECH":
