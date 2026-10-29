@@ -1022,6 +1022,12 @@ Release Notes
 
 v2.7a (alpha)
 
+* Scheduler Review: Fixed enable/disable state, quoted command chains, URL
+  semicolons, schedule validation, and overlapping runs. Added schedule details
+  <id> for next/last run and status. See docs/scheduler-reliability.md.
+* Reader Recovery: A failed reading-position save displays a notice and keeps
+  the document readable. Later pages retry saving automatically.
+
 * JSON Hub Configuration: Removed config.py and moved serial/Telnet profiles,
   welcome text, serial inactivity defaults, and WOPR speech to validated
   settings/local/hub_config.json. Preserved the current local hardware settings;
@@ -1216,24 +1222,9 @@ v2.3
 
 v2.2
 
-* Task Scheduler Command Chaining: Scheduled tasks can now chain multiple
-  commands in a single scheduled event using  :  (or ;), executing them
-  sequentially and compiling the outputs cleanly (for example: news : weather
-  Austin : broadcast Morning briefing complete).
-* Resilient Chained Task Execution: If an individual command in a chain
-  encounters an error or is unrecognized, subsequent chained commands continue
-  to run and report output without halting the sequence.
-* Dynamic Scheduler CLI Command Discovery: schedule modules now dynamically
-  enumerates all shell commands available in the active runtime rather than a
-  static list, and schedule info <cmd> provides detailed syntax and chaining
-  guidance for any registered command.
-* Scheduler Alert & Broadcast Integration: Added explicit scheduler
-  documentation and module usage info for real-time messaging commands
-  (broadcast, notify, msg, alert), enabling scheduled tasks to push instant
-  notifications to all connected terminals.
-* Enhanced Scheduler Menu & URL Handling: Updated the interactive menu ([2]
-  Add New Scheduled Task) with command chaining support, helpful chaining
-  prompts, and automatic URL detection and wrapping for web endpoints.
+* Scheduler Commands: Added resilient command chaining, dynamic command
+  discovery, broadcast guidance, and URL tasks. Current syntax and examples
+  are maintained in docs/scheduler-reliability.md.
 * Release Version: Incremented application version to v2.2.
 
 v2.1
@@ -1247,7 +1238,7 @@ v2.1
   number directly to read the complete summary and download full web article
   contents (F / news <num> full).
 * Dedicated News Task Scheduler Option: Added news and weather command
-  scheduling to the background task scheduler (schedule add <interval> news
+  scheduling to the background task scheduler (schedule add <name> <minutes> news
   ...), listing them under schedule modules.
 * Console Pseudo Interface & Connected User Highlighting: Enhanced the live
   host console dashboard with an interactive pseudo interface layout

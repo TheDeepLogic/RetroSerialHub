@@ -88,6 +88,14 @@ class ModuleContext:
     activate_module: Callable[[str], Any] | None = None
 
 
+class ShellArguments(list):
+    """Parsed arguments with original input for commands that store shell text."""
+
+    def __init__(self, values, source):
+        super().__init__(values)
+        self.source = source
+
+
 class Shell:
     """Small shell whose command handlers receive a list of arguments."""
 
@@ -119,7 +127,7 @@ class Shell:
         handler = self._commands.get(parts[0].lower())
         if handler is None:
             return f"Unknown command: {parts[0]}. Type 'help' for commands."
-        result = handler(parts[1:])
+        result = handler(ShellArguments(parts[1:], line))
         return "" if result is None else str(result)
 
     def help(self):

@@ -1,12 +1,10 @@
 """Task scheduler module for Retro Serial OS."""
 
 from __future__ import annotations
-from rsh_storage import settings_dir, settings_path
+from rsh_storage import settings_path
 
 import re
-from typing import Any
-
-from retro_os.scheduler import MODULE_USAGE_INFO, TaskScheduler
+from retro_os.scheduler import MODULE_USAGE_INFO, TaskScheduler, split_commands
 
 _context = None
 _scheduler: TaskScheduler | None = None
@@ -26,11 +24,7 @@ def init(context):
     # Check if a scheduler is already created on host_env or create one
     if not hasattr(context.host_env, "scheduler") or context.host_env.scheduler is None:
         def execute_scheduled_command(command: str) -> str:
-            commands = [
-                item.strip()
-                for item in re.split(r"\s+:\s+|\s*;\s*", command)
-                if item.strip()
-            ]
+            commands = split_commands(command)
             outputs = []
             for item in commands:
                 try:
@@ -72,10 +66,12 @@ def register_commands(registry):
             for t in tasks:
                 st = t.get("schedule_type", "")
                 p = t.get("params", {})
+                if not isinstance(p, dict):
+                    p = {}
                 if st == "interval":
                     sched_str = f"every {p.get('every', 1)}m"
                 elif st == "hourly":
-                    sched_str = f"hourly at :{p.get('minute', 0):02d}"
+                    sched_str = f"hourly at :{str(p.get('minute', 0)).zfill(2)}"
                 elif st == "daily":
                     sched_str = f"daily {p.get('time', '00:00')}"
                 elif st == "weekly":
@@ -91,6 +87,21 @@ def register_commands(registry):
             return "\n".join(lines)
 
         sub = args[0].lower()
+        if sub == "details" and len(args) > 1:
+            task = scheduler.get_task(args[1])
+            if task is None:
+                return f"Task ID {args[1]} not found."
+            return "\n".join([
+                f"Task {task['id']}: {task.get('name', '')}",
+                f"Command: {task.get('command', '')}",
+                f"Enabled: {'Yes' if task.get('enabled', True) else 'No'}",
+                f"Schedule: {task.get('schedule_type', '')} {task.get('params', {})}",
+                f"Next run: {task.get('next_run') or 'Not scheduled'}",
+                f"Last run: {task.get('last_run') or 'Never'}",
+                f"Last status: {task.get('last_status', 'Unknown')}",
+                f"Broadcast: {'Yes' if task.get('broadcast', True) else 'No'}",
+                f"Show output: {'Yes' if task.get('show_output', True) else 'No'}",
+            ])
         if sub in ("modules", "mods"):
             lines = ["Available CLI Commands for Scheduling:"]
             for command_name in context.host_env.shell.command_names():
@@ -125,11 +136,17 @@ def register_commands(registry):
 
         if sub in ("run", "exec") and len(args) > 1:
             task_id = args[1]
-            return scheduler.run_task_now(task_id)
+            try:
+                return scheduler.run_task_now(task_id)
+            except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
+                return f"Cannot run task {task_id}: {exc}"
 
         if sub in ("toggle", "enable", "disable") and len(args) > 1:
             task_id = args[1]
-            res = scheduler.toggle_task(task_id)
+            try:
+                res = scheduler.toggle_task(task_id, None if sub == 'toggle' else sub == 'enable')
+            except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
+                return f"Cannot enable task {task_id}: {exc}"
             if res is None:
                 return f"Task ID {task_id} not found."
             return f"Task {task_id} is now {'enabled' if res else 'disabled'}."
@@ -152,7 +169,14 @@ def register_commands(registry):
                 every = int(args[2])
             except ValueError:
                 return "Interval minutes must be a number."
+            if every < 1:
+                return "Interval minutes must be positive."
             cmd = " ".join(args[3:])
+            if hasattr(args, 'source'):
+                # Keep quotes in the stored command: rejoining parsed arguments
+                # would turn literal delimiters and spaced paths into syntax.
+                tokens = list(re.finditer(r'''(?:[^\s"']+|"[^"]*"|'[^']*')+''', args.source))
+                cmd = args.source[tokens[3].end():].strip()
             task = scheduler.add_task(
                 name=name,
                 command=cmd,
@@ -165,7 +189,8 @@ def register_commands(registry):
 
         return (
             "Usage: schedule [list] | schedule modules | schedule info <mod> | "
-            "schedule run <id> | schedule toggle <id> | schedule delete <id> | "
+            "schedule details <id> | schedule run <id> | schedule toggle <id> | "
+            "schedule enable <id> | schedule disable <id> | schedule delete <id> | "
             "schedule add <name> <minutes> <command...>\n"
             "Chain scheduled commands with ' : '."
         )

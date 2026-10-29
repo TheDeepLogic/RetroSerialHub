@@ -10,10 +10,38 @@ import os
 import pathlib
 import threading
 import tempfile
-import time
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("retro_os.scheduler")
+
+
+def split_commands(command: str) -> List[str]:
+    """Split chains outside quotes; preserve Windows paths and URL punctuation."""
+    commands, start, quote = [], 0, None
+    token_start = 0
+    for index, char in enumerate(command):
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+            continue
+        if char.isspace():
+            token_start = index + 1
+        colon = (char == ":" and index > 0 and index + 1 < len(command)
+                 and command[index - 1].isspace() and command[index + 1].isspace())
+        url = command[token_start:index].lower().startswith(("http://", "https://"))
+        if colon or (char == ";" and not url):
+            if command[start:index].strip():
+                commands.append(command[start:index].strip())
+            start = token_start = index + 1
+    if quote:
+        raise ValueError("Unclosed quote in scheduled command")
+    if command[start:].strip():
+        commands.append(command[start:].strip())
+    return commands
+
 
 MODULE_USAGE_INFO: Dict[str, Dict[str, Any]] = {
     "weather": {
@@ -155,33 +183,40 @@ def calculate_next_run(
     """Calculate the next execution timestamp based on schedule type and parameters."""
     base = from_time or datetime.datetime.now()
     st = schedule_type.lower()
+    if not isinstance(params, dict):
+        raise ValueError("Schedule parameters must be an object")
+    if st not in ("interval", "hourly", "daily", "weekly", "monthly"):
+        raise ValueError(f"Unknown schedule type: {schedule_type}")
+    if st in ("daily", "weekly", "monthly"):
+        parts = str(params.get("time", "00:00")).split(":")
+        if len(parts) != 2 or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
+            raise ValueError("Run time must be HH:MM in 24-hour time")
+        hh, mm = map(int, parts)
     if st == "interval":
-        minutes = max(1, int(params.get("every", 1)))
+        minutes = int(params.get("every", 1))
+        if minutes < 1:
+            raise ValueError("Interval minutes must be positive")
         return base + datetime.timedelta(minutes=minutes)
     elif st == "hourly":
-        target_min = int(params.get("minute", 0)) % 60
+        target_min = int(params.get("minute", 0))
+        if not 0 <= target_min <= 59:
+            raise ValueError("Hourly minute must be between 0 and 59")
         candidate = base.replace(minute=target_min, second=0, microsecond=0)
         if candidate <= base:
             candidate += datetime.timedelta(hours=1)
         return candidate
     elif st == "daily":
-        time_str = params.get("time", "00:00")
-        parts = time_str.split(":")
-        hh = int(parts[0]) % 24
-        mm = int(parts[1]) % 60 if len(parts) > 1 else 0
         candidate = base.replace(hour=hh, minute=mm, second=0, microsecond=0)
         if candidate <= base:
             candidate += datetime.timedelta(days=1)
         return candidate
     elif st == "weekly":
-        time_str = params.get("time", "00:00")
-        parts = time_str.split(":")
-        hh = int(parts[0]) % 24
-        mm = int(parts[1]) % 60 if len(parts) > 1 else 0
         target_day = params.get("weekday", 0)
         if isinstance(target_day, str):
             day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-            target_day = next((i for i, d in enumerate(day_names) if d in target_day.lower()), 0)
+            target_day = day_names.index(target_day.lower()[:3])
+        if not isinstance(target_day, int) or not 0 <= target_day <= 6:
+            raise ValueError("Weekday must be Monday (0) through Sunday (6)")
         days_ahead = (target_day - base.weekday()) % 7
         candidate = (base + datetime.timedelta(days=days_ahead)).replace(
             hour=hh, minute=mm, second=0, microsecond=0
@@ -190,11 +225,9 @@ def calculate_next_run(
             candidate += datetime.timedelta(days=7)
         return candidate
     elif st == "monthly":
-        time_str = params.get("time", "00:00")
-        parts = time_str.split(":")
-        hh = int(parts[0]) % 24
-        mm = int(parts[1]) % 60 if len(parts) > 1 else 0
-        target_day = max(1, min(31, int(params.get("day", 1))))
+        target_day = int(params.get("day", 1))
+        if not 1 <= target_day <= 31:
+            raise ValueError("Monthly day must be between 1 and 31")
         year = base.year
         month = base.month
         max_day = calendar.monthrange(year, month)[1]
@@ -208,9 +241,8 @@ def calculate_next_run(
                 month += 1
             max_day = calendar.monthrange(year, month)[1]
             day = min(target_day, max_day)
-            candidate = datetime.datetime(year, month, day, hh, mm, 0)
+            candidate = base.replace(year=year, month=month, day=day, hour=hh, minute=mm, second=0, microsecond=0)
         return candidate
-    return base + datetime.timedelta(minutes=60)
 
 
 class TaskScheduler:
@@ -230,6 +262,8 @@ class TaskScheduler:
         self._lock = threading.RLock()
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._running = False
+        self._stop_event = threading.Event()
+        self._executing = set()
         self._thread: Optional[threading.Thread] = None
         self.load()
 
@@ -314,15 +348,12 @@ class TaskScheduler:
                 freq_lower = str(frequency).lower()
                 if freq_lower in ("minute", "minutes", "interval"):
                     schedule_type = "interval"
-                    params = {"every": interval_minutes or 15}
+                    params = {"every": 15 if interval_minutes is None else interval_minutes}
                 elif freq_lower == "hourly":
                     schedule_type = "hourly"
                     minute = 0
                     if run_time and ":" in run_time:
-                        try:
-                            minute = int(run_time.split(":")[1])
-                        except ValueError:
-                            pass
+                        minute = int(run_time.split(":")[1])
                     params = {"minute": minute}
                 elif freq_lower == "daily":
                     schedule_type = "daily"
@@ -332,10 +363,9 @@ class TaskScheduler:
                     params = {"time": run_time or "08:00", "weekday": day_of_week or "mon"}
                 elif freq_lower == "monthly":
                     schedule_type = "monthly"
-                    params = {"time": run_time or "08:00", "day": day_of_month or 1}
+                    params = {"time": run_time or "08:00", "day": 1 if day_of_month is None else day_of_month}
                 else:
-                    schedule_type = "interval"
-                    params = {"every": interval_minutes or 15}
+                    raise ValueError(f"Unknown frequency: {frequency}")
 
             schedule_type = schedule_type or "interval"
             params = params or {}
@@ -347,6 +377,8 @@ class TaskScheduler:
             task_id = str(next_id)
 
             next_run_dt = calculate_next_run(schedule_type, params)
+            if not command.strip() or not split_commands(command):
+                raise ValueError("A scheduled command is required")
             task = {
                 "id": task_id,
                 "name": name,
@@ -373,21 +405,42 @@ class TaskScheduler:
                 return True
             return False
 
-    def toggle_task(self, task_id: str) -> Optional[bool]:
+    def toggle_task(self, task_id: str, enabled: Optional[bool] = None) -> Optional[bool]:
         with self._lock:
             s_id = str(task_id)
             task = self._tasks.get(s_id)
             if task is not None:
-                task["enabled"] = not task.get("enabled", True)
-                if task["enabled"]:
-                    task["next_run"] = calculate_next_run(
+                new_enabled = not task.get("enabled", True) if enabled is None else enabled
+                if new_enabled and not task.get("enabled", True):
+                    next_run = calculate_next_run(
                         task["schedule_type"], task.get("params", {})
                     ).isoformat()
+                    task["next_run"] = next_run
+                task["enabled"] = new_enabled
                 self.save()
                 return task["enabled"]
             return None
 
-    def execute_task(self, task: Dict[str, Any]) -> str:
+    def execute_task(self, task: Dict[str, Any], *, scheduled: bool = False) -> str:
+        task_id = str(task.get("id"))
+        with self._lock:
+            if scheduled:
+                if not self._running or self._tasks.get(task_id) is not task or not task.get('enabled', True):
+                    return ''
+                if datetime.datetime.fromisoformat(task['next_run']) > datetime.datetime.now():
+                    return ''
+            if task_id in self._executing:
+                return f"Task {task_id} is already running."
+            # Validate before executing, including manually triggered saved tasks.
+            calculate_next_run(task["schedule_type"], task.get("params", {}))
+            self._executing.add(task_id)
+        try:
+            return self._execute_task(task)
+        finally:
+            with self._lock:
+                self._executing.discard(task_id)
+
+    def _execute_task(self, task: Dict[str, Any]) -> str:
         command = task.get("command", "")
         output = ""
         status = "OK"
@@ -431,9 +484,10 @@ class TaskScheduler:
 
     def start(self):
         with self._lock:
-            if self._running:
+            if self._thread is not None and self._thread.is_alive():
                 return
             self._running = True
+            self._stop_event.clear()
             self._thread = threading.Thread(
                 target=self._worker_loop, name="retro-os-scheduler", daemon=True
             )
@@ -442,6 +496,10 @@ class TaskScheduler:
     def stop(self):
         with self._lock:
             self._running = False
+            self._stop_event.set()
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2)
 
     def _worker_loop(self):
         while self._running:
@@ -480,8 +538,8 @@ class TaskScheduler:
 
             for task in due_tasks:
                 try:
-                    self.execute_task(task)
+                    self.execute_task(task, scheduled=True)
                 except Exception as exc:
                     logger.error("Error executing task %s: %s", task.get("id"), exc)
 
-            time.sleep(1.0)
+            self._stop_event.wait(1.0)

@@ -32,7 +32,7 @@ transfer, browser, and other retro-computing services through the hub's menu.
 - **Terminal Messages**: Immediate message notices, M=Messages session inboxes for messages and received text files, and broadcasts to connected screens
 - **Dedicated Retro Games**: Native text-mode Minesweeper, Solitaire (Klondike), Hunt the Wumpus, Lunar Lander, Blackjack, Mastermind, Word Guess, Star Trek, and the WarGames (W.O.P.R.) CLI simulation
 - **Ambient Desk Companion**: Live ASCII weather forecasts (`wttr.in`), RSS news feeds (NPR, Hacker News, BBC), automated morning briefings (`briefing`), and interactive article reader (`news <num>`)
-- **Background Task Scheduler**: Automated periodic task execution with broadcast notifications, cron-like intervals, and multi-command chaining (e.g. `news : weather Austin : broadcast Morning briefing complete`)
+- **Background Task Scheduler**: Persistent interval, hourly, daily, weekly, and monthly tasks with broadcast notifications and command chaining. See the [scheduler guide](docs/scheduler-reliability.md) for commands, quoting, and recovery behavior.
 - **LOGO Programming**: A line-oriented terminal Logo interpreter with repeat loops, variables, procedures, detailed turtle status, and optional host-side turtle graphics
 - **Terminal Hardware Settings**: Saved screen width (40/80 cols) and height (24 rows by default), Caps-Only mode for vintage uppercase-only ROMs (Apple II Plus, PET, TRS-80 Model I), and serial character pacing delays
 - **In-Hub Help & User Guide**: 9 built-in guide topics accessible directly from the menu (`HELP` or `?`)
@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Scheduler Review**: Enable/disable commands now set the requested state,
+  quoted command chains and URL semicolons are preserved, invalid schedules are
+  rejected, and concurrent runs of the same task are prevented. Added
+  `schedule details <id>` for next/last run and status diagnostics.
+- **Reader Recovery**: A failed reading-position save now displays a notice and
+  keeps the document readable. Later pages retry saving automatically.
 - **Notepad Rename and Export Recovery**: Rename/export prompts now accept
   filenames such as N, B, and O without triggering menu navigation. Export reads
   the source before creating its destination, removes incomplete exports after
@@ -1309,24 +1315,9 @@ serial timing from hardware measurements.
 
 ### v2.2
 
-- **Task Scheduler Command Chaining**: Scheduled tasks can now chain multiple commands
-  in a single scheduled event using ` : ` (or `;`), executing them sequentially and
-  compiling the outputs cleanly (for example: `news : weather Austin : broadcast Morning
-  briefing complete`).
-- **Resilient Chained Task Execution**: If an individual command in a chain encounters
-  an error or is unrecognized, subsequent chained commands continue to run and report
-  output without halting the sequence.
-- **Dynamic Scheduler CLI Command Discovery**: `schedule modules` now dynamically
-  enumerates all shell commands available in the active runtime rather than a static
-  list, and `schedule info <cmd>` provides detailed syntax and chaining guidance for any
-  registered command.
-- **Scheduler Alert & Broadcast Integration**: Added explicit scheduler documentation
-  and module usage info for real-time messaging commands (`broadcast`, `notify`, `msg`,
-  `alert`), enabling scheduled tasks to push instant notifications to all connected
-  terminals.
-- **Enhanced Scheduler Menu & URL Handling**: Updated the interactive menu (`[2] Add New
-  Scheduled Task`) with command chaining support, helpful chaining prompts, and
-  automatic URL detection and wrapping for web endpoints.
+- **Scheduler Commands**: Added resilient command chaining, dynamic command discovery,
+  broadcast command guidance, and menu support for URL tasks. Current syntax and
+  examples are maintained in the [scheduler guide](docs/scheduler-reliability.md).
 - **Release Version**: Incremented application version to v2.2.
 
 ### v2.1
@@ -1339,7 +1330,7 @@ serial timing from hardware measurements.
   Weather & News, allowing vintage terminals to type an article number directly to read
   the complete summary and download full web article contents (`F` / `news <num> full`).
 - **Dedicated News Task Scheduler Option**: Added news and weather command scheduling to
-  the background task scheduler (`schedule add <interval> news ...`), listing them under
+  the background task scheduler (`schedule add <name> <minutes> news ...`), listing them under
   `schedule modules`.
 - **Console Pseudo Interface & Connected User Highlighting**: Enhanced the live host
   console dashboard with an interactive pseudo interface layout displaying connected

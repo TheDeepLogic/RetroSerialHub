@@ -293,6 +293,28 @@ class IntegratedToolTests(unittest.TestCase):
         output.clear(); choices=iter(['Q'])
         run_reader(str(path),store,lambda:next(choices),output.append,lambda:None,rows=12)
         self.assertIn('Line 40',''.join(output))
+    def test_reader_remains_usable_when_position_save_fails_then_retries(self):
+        from retro_os.reader import run_reader
+        from retro_os.toolkit import JsonRecords
+        path = self.root / 'document.txt'
+        path.write_text('\n'.join(f'Line {i}' for i in range(20)))
+        store = self.root / 'positions.json'
+        choices = iter(['', 'Q'])
+        output = []
+        original_save = JsonRecords.save
+        calls = []
+        def save(records, rows):
+            calls.append(rows)
+            if len(calls) == 1:
+                raise PermissionError('locked settings file')
+            return original_save(records, rows)
+        with patch.object(JsonRecords, 'save', save), self.assertLogs('retro_os.reader', level='WARNING'):
+            run_reader(path, store, lambda: next(choices), output.append, lambda: None, rows=12)
+        self.assertIn('Line 0', ''.join(output))
+        self.assertIn('Line 4', ''.join(output))
+        self.assertIn('Reading position not saved.', ''.join(output))
+        self.assertEqual(json.loads(store.read_text())[0]['page'], 1)
+
     def test_notes_editor_search_rename_and_export(self):
         import rsh_notes
         path=self.root/'note.txt'; path.write_text('Original\n')

@@ -2505,14 +2505,6 @@ def bridge_loop(
                     t_cmd = read_session_line().strip()
                     if not t_cmd or t_cmd.upper() == "Q":
                         continue
-                raw_segments = [c.strip() for c in re.split(r"\s+:\s+|\s*;\s*", t_cmd) if c.strip()]
-                norm_segments = []
-                for seg in raw_segments:
-                    if seg.startswith(("http://", "https://")):
-                        norm_segments.append(f"view {seg}")
-                    else:
-                        norm_segments.append(seg)
-                t_cmd = " : ".join(norm_segments)
                 write(ser, "Schedule Frequency:\r\n")
                 write(ser, "  [1] Interval (every X minutes)\r\n")
                 write(ser, "  [2] Hourly (every hour at specified minute)\r\n")
