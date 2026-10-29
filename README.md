@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Notepad Rename and Export Recovery**: Rename/export prompts now accept
+  filenames such as N, B, and O without triggering menu navigation. Export reads
+  the source before creating its destination, removes incomplete exports after
+  write failures when possible, and preserves existing destination files. Added
+  regression coverage for recovery and retry; see
+  [Notepad recovery notes](docs/notepad-edit-recovery.md).
 - **Scheduler Reliability**: Task saves now use a unique temporary file and atomic
   replacement to preserve the last saved tasks on write failure. Malformed task
   entries no longer prevent valid tasks from loading, invalid recurrences are

@@ -127,19 +127,6 @@ def handle_input(sess, line_str, ser, use_ansi=True):
         except (ValueError,IndexError,OSError) as exc:
             _write(ser,str(exc) + '\r\nEdit: ')
         return True,None
-    if sess.pop('more',False):
-        if upper == 'Q':
-            _render_menu(ser,sess); return True,None
-        if upper == 'A':
-            upper = 'ALL'
-    if upper == 'O':
-        clear_terminal_screen(ser,sess.get('use_ansi',True))
-        sess['more'] = True
-        _write(ser,'\r\nE#=Edit R#=Rename X#=Export\r\nF text=Search A=All notes Q=Back\r\nCommand: ')
-        return True,None
-    if upper in ('N','B'):
-        sess['page'] = max(0,min(sess.get('page',0)+(1 if upper == 'N' else -1),max(0,(len(sess.get('notes',[]))-1)//sess.get('page_size',8))))
-        _render_menu(ser,sess); return True,None
     if sess.get('note_operation'):
         operation, name = sess.pop('note_operation')
         try:
@@ -156,12 +143,37 @@ def handle_input(sess, line_str, ser, use_ansi=True):
                         raise ValueError('Destination already exists.')
                     path.rename(destination)
                 else:
-                    with pathlib.Path(txt).expanduser().open('xb') as output:
-                        output.write(path.read_bytes())
+                    # Read first: a missing source must not create an empty export.
+                    contents = path.read_bytes()
+                    destination = pathlib.Path(txt).expanduser()
+                    output = destination.open('xb')
+                    try:
+                        with output as export_file:
+                            export_file.write(contents)
+                    except OSError:
+                        # Only remove the file we exclusively created, after closing it.
+                        try:
+                            destination.unlink()
+                        except OSError:
+                            pass
+                        raise
                 sess['notes'] = sorted(p.name for p in base.glob('*.txt'))
                 sess['notice'] = 'Note ' + ('renamed.' if operation == 'rename' else 'exported.')
         except (OSError,ValueError) as exc:
             sess['notice'] = str(exc)
+        _render_menu(ser,sess); return True,None
+    if sess.pop('more',False):
+        if upper == 'Q':
+            _render_menu(ser,sess); return True,None
+        if upper == 'A':
+            upper = 'ALL'
+    if upper == 'O':
+        clear_terminal_screen(ser,sess.get('use_ansi',True))
+        sess['more'] = True
+        _write(ser,'\r\nE#=Edit R#=Rename X#=Export\r\nF text=Search A=All notes Q=Back\r\nCommand: ')
+        return True,None
+    if upper in ('N','B'):
+        sess['page'] = max(0,min(sess.get('page',0)+(1 if upper == 'N' else -1),max(0,(len(sess.get('notes',[]))-1)//sess.get('page_size',8))))
         _render_menu(ser,sess); return True,None
     if upper.startswith('F '):
         query = txt[2:].casefold()

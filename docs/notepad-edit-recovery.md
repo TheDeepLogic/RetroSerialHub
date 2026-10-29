@@ -62,3 +62,23 @@ The reusable lesson is concrete: when initialization depends on external data,
 obtain and validate that data before publishing the state that routes future
 input. Testing a retry after failure is especially useful; an error message by
 itself does not prove the application remains usable.
+
+## Rename and export recovery
+
+Pending rename/export input is now handled before menu navigation. Names such as
+`N`, `B`, and `O` are treated as filenames at those prompts. `Q` still cancels,
+and an empty reply returns to the menu. Rename adds `.txt` when needed.
+
+Export reads the complete source before exclusively creating the destination.
+An unreadable or missing source therefore leaves no empty destination, and an
+existing destination is never overwritten. If writing or closing the new export
+fails, the hub attempts to remove the incomplete output after closing it. If
+filesystem permissions also prevent cleanup, that incomplete file may remain;
+choose another output path or remove it before retrying. The source is unchanged.
+After a reported failure, select `X<number>` again to retry the export.
+
+Run `python -m unittest tests.test_rsh_notes -v` for temporary-file regression
+coverage of command-letter rename targets, source-read failure followed by a
+successful retry, preservation of an existing export, and a partial write failure
+that leaves the menu usable. Filesystem errors are injected; these checks do not
+require serial hardware.
