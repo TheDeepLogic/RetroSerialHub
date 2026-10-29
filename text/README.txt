@@ -182,6 +182,15 @@ The reader supports Enter=next, B=back, F=find, N=next match, M=bookmark,
 R=recall bookmark, G=page, and Q=back. Position and bookmark are saved by file
 and terminal width. The Text Library and note selections open this reader.
 Files selected for viewing use the host's existing extraction support.
+Unreadable or corrupt saved positions no longer prevent reading. The reader starts
+at the beginning and shows a notice if it cannot save. Invalid offsets are reset
+or clamped to the document; corrupt settings files are preserved for repair.
+Search matches ignore case and wrap to the beginning, using constant extra memory
+for line-number traversal.
+
+If ZIP extraction fails, the incomplete member is removed when possible. Completed
+members remain available; retry the failed member by number after resolving the
+error. See docs/tool-data-reliability.md for recovery and validation details.
 
 In Notepad, O opens edit, rename, export, and search operations. E<number> edits
 an existing note. The line editor accepts replace <line> <text>, append <text>,
@@ -1022,11 +1031,18 @@ Release Notes
 
 v2.7a (alpha)
 
+* Shared Tool Data: Record stores now use unique, synced temporary files,
+  atomic replacement, and failure cleanup to preserve previously saved data.
+* ZIP Retry Recovery: Failed member reads, copies, or output closes remove the
+  incomplete member when possible. Completed members and existing files remain.
+  See docs/tool-data-reliability.md for recovery and regression coverage.
 * Scheduler Review: Fixed enable/disable state, quoted command chains, URL
   semicolons, schedule validation, and overlapping runs. Added schedule details
   <id> for next/last run and status. See docs/scheduler-reliability.md.
-* Reader Recovery: A failed reading-position save displays a notice and keeps
-  the document readable. Later pages retry saving automatically.
+* Reader Recovery and Search: Unreadable/corrupt position files and invalid
+  offsets no longer block reading. Failed saves display a notice and retry.
+  Search avoids allocating a full line-number list; a 100,001-line benchmark
+  reduced temporary allocation from 4,393,192 to 676 bytes.
 
 * JSON Hub Configuration: Removed config.py and moved serial/Telnet profiles,
   welcome text, serial inactivity defaults, and WOPR speech to validated

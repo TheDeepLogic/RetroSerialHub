@@ -7,6 +7,7 @@ is new in v2.7a.
 
 | Note | What it explains |
 |---|---|
+| [Tool data and recovery](tool-data-reliability.md) | Atomic record saves, reader-state recovery, measured search memory, and retrying failed ZIP members. |
 | [Scheduler guide and reliability](scheduler-reliability.md) | Commands, quoting, recurrence rules, diagnostics, atomic saves, and worker recovery. |
 | [Settings failure recovery](settings-recovery.md) | Partial starter-copy cleanup, retryable machine-preference saves, unique temporary files, and persistence limits. |
 | [Telnet and input reliability](telnet-input-reliability.md) | Recoverable bookmark saves, bounded protocol polling, buffered input latency, and Python 3.9 test compatibility. |
@@ -27,6 +28,7 @@ From the repository root, using the project's Python environment:
 ```text
 python -m tests.measure_technical_behaviors
 python -m tests.benchmark_console_redraw
+python docs/measure_reader_search.py
 python -m unittest discover -s tests -v
 ```
 

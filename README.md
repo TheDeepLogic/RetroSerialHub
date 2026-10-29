@@ -265,6 +265,10 @@ Appointments and contacts are shared by terminals and saved in `settings/local/`
 
 File tools can browse the full host filesystem accessible to the hub process, including drives and paths outside `files/`. Host-to-host copying does not pass the file through the vintage computer. ZIP contents can be extracted individually or together; existing output files are not replaced. Each session keeps its own browsing location.
 
+If ZIP extraction fails, the incomplete member is removed when possible. Completed
+members remain available; retry the failed member by number after resolving the
+error. See [tool data and recovery](docs/tool-data-reliability.md).
+
 Audio plays through the host speakers with one shared playback queue. Select audio from any accessible host folder; saved M3U playlists go in `files/playlists/`. Windows provides native local playback. Installing FFmpeg with `ffplay` on PATH enables internet radio, additional formats, and playback on other platforms. Playback errors appear in `audio info`.
 
 ### Menu map
@@ -341,6 +345,11 @@ The reader supports Enter=next, B=back, F=find, N=next match, M=bookmark,
 R=recall bookmark, G=page, and Q=back. Position and bookmark are saved by file
 and terminal width. The Text Library and note selections open this reader.
 Files selected for viewing use the host's existing extraction support.
+Unreadable or corrupt saved positions no longer prevent reading. The reader starts
+at the beginning and shows a notice if it cannot save. Invalid offsets are reset
+or clamped to the document; corrupt settings files are preserved for repair.
+Search matches ignore case and wrap to the beginning, using constant extra memory
+for line-number traversal.
 
 In Notepad, O opens edit, rename, export, and search operations. E<number> edits
 an existing note. The line editor accepts `replace <line> <text>`, `append <text>`,
@@ -1085,12 +1094,21 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Shared Tool Data**: Contacts, calendar entries, folder preferences, launch presets,
+  and other record stores now use unique, synced temporary files with atomic
+  replacement and failure cleanup. Existing saved data survives failed saves.
+- **ZIP Retry Recovery**: Failed member reads, copies, or output closes remove the
+  incomplete member when possible; completed members and existing files are kept.
+  See [tool data and recovery](docs/tool-data-reliability.md) for retry steps and
+  regression coverage.
 - **Scheduler Review**: Enable/disable commands now set the requested state,
   quoted command chains and URL semicolons are preserved, invalid schedules are
   rejected, and concurrent runs of the same task are prevented. Added
   `schedule details <id>` for next/last run and status diagnostics.
-- **Reader Recovery**: A failed reading-position save now displays a notice and
-  keeps the document readable. Later pages retry saving automatically.
+- **Reader Recovery and Search**: Unreadable/corrupt position files and invalid
+  saved offsets no longer block reading. Failed saves display a notice and retry
+  on later pages. Search avoids allocating a full list of line numbers; a
+  100,001-line benchmark reduced temporary allocation from 4,393,192 to 676 bytes.
 - **Notepad Rename and Export Recovery**: Rename/export prompts now accept
   filenames such as N, B, and O without triggering menu navigation. Export reads
   the source before creating its destination, removes incomplete exports after

@@ -8,17 +8,21 @@ import fnmatch
 import copy
 import datetime as dt
 import json
+import logging
 import math
+import os
 import pathlib
 import shlex
 import shutil
 import stat
 import threading
+import tempfile
 import uuid
 import zipfile
 
 _DATA_LOCK = threading.RLock()
 _REMINDER_SERVICES = {}
+logger = logging.getLogger(__name__)
 
 
 def start_calendar_reminders(calendar_tool, notify):
@@ -55,10 +59,26 @@ class JsonRecords:
         return data
 
     def save(self, rows):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(self.path)
+        with _DATA_LOCK:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode='w', encoding='utf-8', dir=self.path.parent,
+                    prefix=self.path.name + '.', suffix='.tmp', delete=False,
+                ) as output:
+                    temporary = pathlib.Path(output.name)
+                    json.dump(rows, output, indent=2)
+                    output.write('\n')
+                    output.flush()
+                    os.fsync(output.fileno())
+                temporary.replace(self.path)
+            finally:
+                if temporary is not None:
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.warning('Could not remove temporary records file %s: %s', temporary, exc)
 
     def change(self, operation):
         with _DATA_LOCK:
@@ -499,7 +519,17 @@ class FileTools:
                         target.mkdir(parents=True, exist_ok=True)
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        with archive.open(item) as source, target.open('xb') as output:
-                            shutil.copyfileobj(source, output)
+                        # Only remove a file this extraction created. Opening
+                        # exclusively also preserves files created after preflight.
+                        output = target.open('xb')
+                        try:
+                            with output, archive.open(item) as source:
+                                shutil.copyfileobj(source, output)
+                        except Exception:
+                            try:
+                                target.unlink()
+                            except OSError as exc:
+                                logger.warning('Could not remove incomplete ZIP member %s: %s', target, exc)
+                            raise
                 return f"Extracted {len(selected)} entries into {destination}."
         return self.ARCHIVE_HELP

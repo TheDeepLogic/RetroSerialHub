@@ -1,11 +1,33 @@
 """Searchable, resumable document reader for text extracted on the host."""
 from pathlib import Path
+from itertools import chain
 import logging
 import textwrap
 from .toolkit import JsonRecords
 from .viewer import extract_text, extract_text_from_url
 
 logger = logging.getLogger(__name__)
+
+
+def find_next_match(lines, query, start=0):
+    """Return the next matching line, wrapping once without copying indices."""
+    start = max(0, min(start, len(lines)))
+    folded_query = query.casefold()
+    return next((i for i in chain(range(start, len(lines)), range(0, start))
+                 if folded_query in lines[i].casefold()), None)
+
+
+def _position_line(record, key, legacy_key, page_size):
+    """Accept nonnegative saved offsets, including legacy page-based records."""
+    value = record.get(key)
+    if value is None:
+        value = record.get(legacy_key, 0)
+        scale = page_size
+    else:
+        scale = 1
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(0, value) * scale
 
 
 def run_reader(target, store_path, read, write, clear, columns=80, rows=24):
@@ -17,20 +39,26 @@ def run_reader(target, store_path, read, write, clear, columns=80, rows=24):
         lines.extend(textwrap.wrap(line, max(1, columns-1), replace_whitespace=False) or [''])
     page_size = max(1, rows-8)
     store = JsonRecords(store_path)
-    saved = next((r for r in store.load() if r['path'] == key and r.get('columns') == columns), {})
-    page = min(saved.get('line', saved.get('page',0)*page_size)//page_size, max(0,(len(lines)-1)//page_size))
-    bookmark = saved.get('bookmark_line', saved.get('bookmark',0)*page_size)//page_size
+    try:
+        records = store.load()
+    except (OSError, ValueError) as exc:
+        logger.warning('Could not load reading positions from %s: %s', store.path, exc)
+        records = []
+    saved = next((r for r in records if r.get('path') == key and r.get('columns') == columns), {})
+    last_page = max(0, (len(lines)-1)//page_size)
+    page = min(_position_line(saved, 'line', 'page', page_size)//page_size, last_page)
+    bookmark = min(_position_line(saved, 'bookmark_line', 'bookmark', page_size)//page_size, last_page)
     match_line = -1
     query, notice = '', ''
     def save_position():
         def save(records):
-            records[:] = [r for r in records if not (r['path'] == key and r.get('columns') == columns)]
+            records[:] = [r for r in records if not (r.get('path') == key and r.get('columns') == columns)]
             records.append({'path':key,'columns':columns,'page':page,'bookmark':bookmark,
                             'line':page*page_size,'bookmark_line':bookmark*page_size})
         try:
             store.change(save)
             return True
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             logger.warning('Could not save reading position to %s: %s', store.path, exc)
             return False
 
@@ -58,7 +86,7 @@ def run_reader(target, store_path, read, write, clear, columns=80, rows=24):
                 query = read().strip()
             if query:
                 start = (match_line+1) if upper == 'N' and match_line >= 0 else page*page_size
-                found = next((i for i in list(range(start,len(lines))) + list(range(0,start)) if query.casefold() in lines[i].casefold()), None)
+                found = find_next_match(lines, query, start)
                 if found is None:
                     notice = 'Not found.'
                 else:
