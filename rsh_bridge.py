@@ -293,8 +293,7 @@ def handle_raw_input(sess, data):
     if not bs:
         return False
     try:
-        out = data.replace(b"\r\n", b"\r\n").replace(b"\n", b"\r\n").replace(b"\r", b"\r\n")
-        bs.write(out)
+        bs.write(data)
         return True
     except Exception:
         try:
@@ -375,7 +374,7 @@ def handle_input_runtime(sess, line_str, ser, use_ansi=True, raw_line=None):
     # otherwise encode the textual line.
     try:
         if raw_line is not None:
-            out_line = raw_line.replace(b"\r\n", b"\r\n").replace(b"\n", b"\r\n").replace(b"\r", b"\r\n")
+            out_line = raw_line.replace(b"\r\n", b"\n").replace(b"\r", b"\n").replace(b"\n", b"\r\n")
             bs.write(out_line + b"\r\n")
         else:
             bs.write(line_str.encode('utf-8', errors='ignore') + b"\r\n")

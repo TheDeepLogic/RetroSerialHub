@@ -39,3 +39,26 @@ Python 3.11 or newer; the remaining error involves a subprocess mock during
 Windows platform detection. The failure is a host-menu integration timeout.
 These existing test issues remain unresolved; physical serial testing was not
 performed.
+
+## Destination copy recovery (v2.7a)
+
+The receiver first writes a uniquely named `.part` file next to the requested
+destination. Previously, a failed final copy (for example, a full disk) left a
+truncated destination that blocked retrying with the same filename.
+
+The receiver now removes the destination it created if copying or closing that
+file fails. The original error is preserved and the `.part` file remains for
+diagnosis. Exclusive creation still prevents overwriting an existing file,
+including one created by another writer while the transfer was in progress.
+If the operating system also refuses cleanup, the incomplete destination may
+remain and must be inspected or removed manually before retrying. This is
+exception recovery, not an atomic publication or power-loss durability guarantee.
+
+The regression tests inject a copy failure after seven bytes, verify that all
+128 received bytes remain in the partial file, and retry successfully using the
+same destination. A separate test creates a competing destination after a block
+acknowledgment and verifies it survives unchanged. The copy-failure regression
+failed against the previous implementation.
+
+Validation on 2026-10-27, Windows Python 3.9.13: all five focused transfer tests
+and the full 389-test suite passed after these changes (baseline: 383 passed).

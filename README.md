@@ -1091,7 +1091,20 @@ serial timing from hardware measurements.
   disabled without stopping other tasks, and broken next-run timestamps are
   repaired. See [scheduler reliability notes](docs/scheduler-reliability.md)
   for recovery behavior and regression tests.
-
+- **Settings Failure Recovery**: Failed starter-settings copies now remove partial
+  live files so the next attempt can seed them again; unreadable templates no
+  longer create empty live settings. Machine-preference saves use unique temporary
+  files, clean up failed writes/replacements, and preserve the last saved settings.
+  Regression tests cover partial writes, permission errors, and successful retries;
+  see [settings recovery notes](docs/settings-recovery.md).
+- **Receive and COM Bridge Recovery**: Failed XMODEM destination copies now
+  remove the incomplete destination so a retry can use the same filename, while
+  retaining the diagnostic `.part` file and preserving files created by other
+  writers. COM bridge raw forwarding preserves bytes exactly, including CR/LF
+  split across reads; line-oriented forwarding converts each newline only once.
+  Added fault-injection and byte-preservation regressions; see the
+  [transfer reliability notes](docs/transfer-reliability.md) and
+  [COM bridge reliability notes](docs/com-bridge-reliability.md).
 - **Telnet and Input Reliability**: Failed Telnet bookmark saves/deletions now
   preserve the current list and offer a retry; Q cancels deletion, and N connects
   without saving after an add failure. Saves use unique temporary files. Inbound
