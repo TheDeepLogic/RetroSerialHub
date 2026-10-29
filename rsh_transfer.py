@@ -170,8 +170,20 @@ def xreceive(ser, destination, exact_size=None):
                 errors = 0
                 progress(ser, 'receive', done, exact_size)
                 ser.write(bytes([ACK]))
-        with path.open('xb') as output, partial.open('rb') as source:
-            shutil.copyfileobj(source, output)
+        with partial.open('rb') as source:
+            # Only clean up a destination we successfully created. A concurrent
+            # writer winning the exclusive open must keep its own file.
+            output = path.open('xb')
+            try:
+                with output:
+                    shutil.copyfileobj(source, output)
+            except BaseException:
+                try:
+                    path.unlink()
+                except OSError:
+                    # Preserve the original copy/close error if cleanup fails.
+                    pass
+                raise
         partial.unlink()
         ser.write(bytes([ACK]))
         return path.stat().st_size
