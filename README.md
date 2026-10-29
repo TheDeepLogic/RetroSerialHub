@@ -1085,6 +1085,13 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Scheduler Reliability**: Task saves now use a unique temporary file and atomic
+  replacement to preserve the last saved tasks on write failure. Malformed task
+  entries no longer prevent valid tasks from loading, invalid recurrences are
+  disabled without stopping other tasks, and broken next-run timestamps are
+  repaired. See [scheduler reliability notes](docs/scheduler-reliability.md)
+  for recovery behavior and regression tests.
+
 - **Telnet and Input Reliability**: Failed Telnet bookmark saves/deletions now
   preserve the current list and offer a retry; Q cancels deletion, and N connects
   without saving after an add failure. Saves use unique temporary files. Inbound
