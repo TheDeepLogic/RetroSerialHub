@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import pathlib
+import tempfile
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -238,9 +239,27 @@ class TaskScheduler:
                 try:
                     data = json.loads(self.filepath.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
-                        self._tasks = data
+                        entries = data.items()
                     elif isinstance(data, list):
-                        self._tasks = {str(item.get("id", idx)): item for idx, item in enumerate(data, 1)}
+                        entries = ((str(idx), item) for idx, item in enumerate(data, 1))
+                    else:
+                        raise ValueError("Tasks must be a JSON object or list.")
+                    self._tasks = {}
+                    for key, item in entries:
+                        try:
+                            if not isinstance(item, dict):
+                                raise ValueError("Task must be an object.")
+                            if not isinstance(item.get("command"), str):
+                                raise ValueError("Task command must be text.")
+                            # Validate each schedule independently so one damaged
+                            # entry cannot stop every background job.
+                            calculate_next_run(item["schedule_type"], item.get("params", {}))
+                            task_id = str(item.get("id", key))
+                            if task_id in self._tasks:
+                                raise ValueError("Duplicate task ID.")
+                            self._tasks[task_id] = dict(item, id=task_id)
+                        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
+                            logger.warning("Skipping invalid task %s in %s: %s", key, self.filepath, exc)
                 except Exception as exc:
                     logger.warning("Failed to load tasks from %s: %s", self.filepath, exc)
                     self._tasks = {}
@@ -249,11 +268,27 @@ class TaskScheduler:
 
     def save(self):
         with self._lock:
+            temporary_path = None
             try:
                 self.filepath.parent.mkdir(parents=True, exist_ok=True)
-                self.filepath.write_text(json.dumps(self._tasks, indent=2), encoding="utf-8")
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=self.filepath.parent,
+                    prefix=self.filepath.name + ".", suffix=".tmp", delete=False,
+                ) as output:
+                    temporary_path = pathlib.Path(output.name)
+                    json.dump(self._tasks, output, indent=2)
+                    output.write("\n")
+                    output.flush()
+                    os.fsync(output.fileno())
+                temporary_path.replace(self.filepath)
             except Exception as exc:
                 logger.error("Failed to save tasks to %s: %s", self.filepath, exc)
+            finally:
+                if temporary_path is not None:
+                    try:
+                        temporary_path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.warning("Failed to remove temporary task file %s: %s", temporary_path, exc)
 
     def list_tasks(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -428,7 +463,11 @@ class TaskScheduler:
                         continue
                     try:
                         next_dt = datetime.datetime.fromisoformat(next_run_str)
-                    except Exception:
+                        # Persisted times use the host's local, naive clock.
+                        # An edited offset-aware value cannot be compared to it.
+                        if next_dt.tzinfo is not None:
+                            next_dt = next_dt.astimezone().replace(tzinfo=None)
+                    except (TypeError, ValueError, OverflowError):
                         next_dt = calculate_next_run(task["schedule_type"], task.get("params", {}))
                         task["next_run"] = next_dt.isoformat()
                     if now >= next_dt:

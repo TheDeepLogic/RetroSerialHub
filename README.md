@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Scheduler Reliability**: Task saves now use a flushed temporary file and
+  atomic replacement so failed writes preserve the previous saved schedule.
+  Invalid saved task entries are logged and skipped individually, allowing valid
+  jobs to continue. Edited timestamps recover without terminating the worker,
+  including timestamps with UTC offsets. Added failure-injection and worker
+  regression tests; see [scheduler recovery notes](docs/scheduler-reliability.md).
 - **Telnet and Input Reliability**: Failed Telnet bookmark saves/deletions now
   preserve the current list and offer a retry; Q cancels deletion, and N connects
   without saving after an add failure. Saves use unique temporary files. Inbound
