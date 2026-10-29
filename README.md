@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Settings Failure Recovery**: Failed starter-settings copies now remove partial
+  live files so the next attempt can seed them again; unreadable templates no
+  longer create empty live settings. Machine-preference saves use unique temporary
+  files, clean up failed writes/replacements, and preserve the last saved settings.
+  Regression tests cover partial writes, permission errors, and successful retries;
+  see [settings recovery notes](docs/settings-recovery.md).
 - **Telnet and Input Reliability**: Failed Telnet bookmark saves/deletions now
   preserve the current list and offer a retry; Q cancels deletion, and N connects
   without saving after an add failure. Saves use unique temporary files. Inbound

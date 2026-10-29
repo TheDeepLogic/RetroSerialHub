@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from rsh_storage import settings_dir, settings_path
 
@@ -65,3 +66,33 @@ class StorageTests(unittest.TestCase):
         for name in ('../secret.json', 'mail/config.json', 'not-json.txt'):
             with self.assertRaises(ValueError):
                 settings_path(name, self.root)
+
+    def test_failed_default_copy_is_removed_and_can_be_retried(self):
+        template = self.write('settings/defaults/ai_config.json', '{"key":"starter"}')
+        live = self.root / 'settings/local/ai_config.json'
+
+        def fail_after_partial_copy(source, output):
+            output.write(b'{"key":')
+            raise OSError('Disk full')
+
+        with patch('rsh_storage.shutil.copyfileobj', side_effect=fail_after_partial_copy):
+            with self.assertRaisesRegex(OSError, 'Disk full'):
+                settings_dir(self.root)
+        self.assertFalse(live.exists())
+        self.assertEqual(template.read_bytes(), b'{"key":"starter"}')
+        self.assertEqual(settings_path('ai_config.json', self.root).read_bytes(),
+                         template.read_bytes())
+
+    def test_unreadable_default_does_not_create_empty_live_file(self):
+        self.write('settings/defaults/ai_config.json', '{}')
+        original_open = Path.open
+
+        def guarded_open(path, *args, **kwargs):
+            if path.parent.name == 'defaults':
+                raise PermissionError('Cannot read template')
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'open', guarded_open):
+            with self.assertRaises(PermissionError):
+                settings_dir(self.root)
+        self.assertFalse((self.root / 'settings/local/ai_config.json').exists())
