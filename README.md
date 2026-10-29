@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Scheduler Reliability**: Task saves now use a unique temporary file and atomic
+  replacement to preserve the last saved tasks on write failure. Malformed task
+  entries no longer prevent valid tasks from loading, invalid recurrences are
+  disabled without stopping other tasks, and broken next-run timestamps are
+  repaired. See [scheduler reliability notes](docs/scheduler-reliability.md)
+  for recovery behavior and regression tests.
 - **Settings Failure Recovery**: Failed starter-settings copies now remove partial
   live files so the next attempt can seed them again; unreadable templates no
   longer create empty live settings. Machine-preference saves use unique temporary
