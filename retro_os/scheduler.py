@@ -9,6 +9,7 @@ import logging
 import os
 import pathlib
 import threading
+import tempfile
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -238,9 +239,21 @@ class TaskScheduler:
                 try:
                     data = json.loads(self.filepath.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
-                        self._tasks = data
+                        entries = data.items()
                     elif isinstance(data, list):
-                        self._tasks = {str(item.get("id", idx)): item for idx, item in enumerate(data, 1)}
+                        entries = ((str(item.get("id", idx)), item)
+                                   for idx, item in enumerate(data, 1)
+                                   if isinstance(item, dict))
+                    else:
+                        raise ValueError("Tasks must be a JSON object or list")
+                    self._tasks = {}
+                    for key, item in entries:
+                        if not isinstance(item, dict):
+                            logger.warning("Ignoring invalid task %s: expected an object", key)
+                            continue
+                        item = dict(item)
+                        item["id"] = str(key)
+                        self._tasks[str(key)] = item
                 except Exception as exc:
                     logger.warning("Failed to load tasks from %s: %s", self.filepath, exc)
                     self._tasks = {}
@@ -249,11 +262,28 @@ class TaskScheduler:
 
     def save(self):
         with self._lock:
+            temporary_path = None
             try:
                 self.filepath.parent.mkdir(parents=True, exist_ok=True)
-                self.filepath.write_text(json.dumps(self._tasks, indent=2), encoding="utf-8")
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=self.filepath.parent,
+                    prefix=self.filepath.name + ".", suffix=".tmp", delete=False,
+                ) as output:
+                    temporary_path = pathlib.Path(output.name)
+                    json.dump(self._tasks, output, indent=2)
+                    output.flush()
+                    os.fsync(output.fileno())
+                temporary_path.replace(self.filepath)
+                return True
             except Exception as exc:
                 logger.error("Failed to save tasks to %s: %s", self.filepath, exc)
+                return False
+            finally:
+                if temporary_path is not None:
+                    try:
+                        temporary_path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.warning("Failed to remove temporary task file %s: %s", temporary_path, exc)
 
     def list_tasks(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -417,22 +447,36 @@ class TaskScheduler:
         while self._running:
             now = datetime.datetime.now()
             due_tasks = []
+            repaired = False
             with self._lock:
                 for task in self._tasks.values():
                     if not task.get("enabled", True):
                         continue
-                    next_run_str = task.get("next_run")
-                    if not next_run_str:
-                        next_dt = calculate_next_run(task["schedule_type"], task.get("params", {}))
-                        task["next_run"] = next_dt.isoformat()
-                        continue
                     try:
-                        next_dt = datetime.datetime.fromisoformat(next_run_str)
-                    except Exception:
-                        next_dt = calculate_next_run(task["schedule_type"], task.get("params", {}))
-                        task["next_run"] = next_dt.isoformat()
-                    if now >= next_dt:
-                        due_tasks.append(task)
+                        # Validate the recurrence even when next_run is present:
+                        # execution must also be able to schedule the next run.
+                        fallback = calculate_next_run(
+                            task["schedule_type"], task.get("params", {}), now
+                        )
+                        next_run_str = task.get("next_run")
+                        try:
+                            next_dt = datetime.datetime.fromisoformat(next_run_str)
+                            if next_dt.tzinfo is not None:
+                                raise ValueError("Task timestamps must use local time without a timezone")
+                        except (TypeError, ValueError):
+                            next_dt = fallback
+                            task["next_run"] = next_dt.isoformat()
+                            repaired = True
+                        if now >= next_dt:
+                            due_tasks.append(task)
+                    except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
+                        repaired = True
+                        task["enabled"] = False
+                        task["last_status"] = f"Invalid schedule: {exc}"
+                        logger.warning("Disabled invalid task %s: %s", task.get("id"), exc)
+
+                if repaired:
+                    self.save()
 
             for task in due_tasks:
                 try:

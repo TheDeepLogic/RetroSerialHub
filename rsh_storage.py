@@ -50,11 +50,18 @@ def settings_dir(base=None):
             target = local / default.name
             if not target.exists():
                 # Exclusive creation also protects against another hub process.
-                try:
-                    with target.open('xb') as output, default.open('rb') as source:
-                        shutil.copyfileobj(source, output)
-                except FileExistsError:
-                    pass
+                with default.open('rb') as source:
+                    try:
+                        output = target.open('xb')
+                    except FileExistsError:
+                        continue
+                    try:
+                        with output:
+                            shutil.copyfileobj(source, output)
+                    except BaseException:
+                        # The output is closed before unlinking on Windows.
+                        target.unlink()
+                        raise
     return local
 
 
