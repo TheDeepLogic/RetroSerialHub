@@ -53,7 +53,7 @@ are not replayed individually.
 
 ## Persistence and malformed tasks
 
-The v2.7a scheduler previously wrote directly over its saved JSON file. A disk
+The scheduler previously wrote directly over its saved JSON file. A disk
 error or failed serialization could leave that file incomplete. It now writes to
 an independently named temporary file in the same directory, flushes and syncs
 the contents, closes it, and replaces the saved file atomically. Failed saves

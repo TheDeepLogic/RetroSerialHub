@@ -1,6 +1,6 @@
 Image: Retro Serial Hub
 
-Retro Serial Hub v2.7a
+Retro Serial Hub v2.7
 
 * Anchored host scrollback, a new-line counter, and End to return to live output.
 * Immediate message notices, safe deferral during transfers, and M=Messages at
@@ -153,6 +153,9 @@ filesystem access remains available.
 
 - A number opens a directory or a file's action menu.
 - D lists drives/root, B opens the parent, H opens the shared folder, G accepts a path.
+- P returns to the previous folder; repeat it to switch between two folders.
+  The CLI equivalents are fileman previous and fileman cd -. History belongs
+  to the current session; a failed directory change preserves the current folder.
 - F changes the filename filter; * clears it. The current filter is displayed.
 - V manages folder favorites, M manages marked items, O opens other operations.
 - A selected file offers relevant view/play/image/ZIP actions, plus copy, move,
@@ -181,7 +184,11 @@ main menu. Reader/game-specific controls are shown on their own screens.
 Reading and notes
 
 The reader supports Enter=next, B=back, F=find, N=next match, M=bookmark,
-R=recall bookmark, G=page, and Q=back. Position and bookmark are saved by file
+R=recall bookmark, G=page, H=first page, L=last page, and Q=back. Type a page
+number directly to jump without an extra prompt. HOME/FIRST and END/LAST are
+also accepted as typed commands. Out-of-range numbers leave the current page
+unchanged and show the valid range; Enter or Q cancels the G prompt.
+Position and bookmark are saved by file
 and terminal width. The Text Library and note selections open this reader.
 Files selected for viewing use the host's existing extraction support.
 Unreadable or corrupt saved positions no longer prevent reading. The reader starts
@@ -1031,17 +1038,21 @@ the index includes reproduction commands and recorded measurements.
 
 Release Notes
 
-v2.7a (alpha)
+v2.7
 
-* Failure Prevention Review (October 28, 2026):
-  - fetch streams downloads in 64 KiB chunks, checks a supplied content length,
-    and replaces the destination only after completion. Failed transfers
-    preserve the previous file and clean up temporary files when possible.
-  - Individual event listener and module-hook failures are logged; later
-    listeners still receive events, including asynchronous listeners.
-  - Batch copy/move rejects duplicate destination names before changing files.
-  See docs/failure-prevention.md for change notes and validation details.
-
+* Previous Folder: Added P to the shared file browser and fileman previous /
+  fileman cd - to switch between current and previous folders. History stays
+  within each session; failed directory changes keep the current folder.
+* Reader Navigation: Added H/L for first/last page and direct page-number
+  entry. Invalid pages show the valid range without moving; Enter or Q cancels
+  the G prompt. Existing bookmarks and saved positions still work.
+* Download Integrity: fetch streams downloads in 64 KiB chunks, checks a supplied
+  content length, and replaces the destination only after completion. Failed
+  transfers preserve the previous file.
+* Event Delivery Recovery: Individual listener and module-hook failures are
+  logged; later listeners still receive events, including async listeners.
+* Batch Destination Checks: Copy/move rejects duplicate destination names before
+  changing files. See docs/failure-prevention.md for validation details.
 * Shared Tool Data: Record stores now use unique, synced temporary files,
   atomic replacement, and failure cleanup to preserve previously saved data.
 * ZIP Retry Recovery: Failed member reads, copies, or output closes remove the
@@ -1104,8 +1115,9 @@ v2.7a (alpha)
   host-control approval boundaries, XMODEM wire costs, and Notepad recovery.
   Includes a repeatable assertion-based measurement harness and recorded results.
   See docs/README.md for the technical documentation index.
-* Development Version: Updated the displayed application version, bundled guide,
-  and web-viewer user agent to 2.7a (alpha). The v2.6 notes remain the release record.
+* Release Version: Updated the displayed version, bundled guide, and web-viewer
+  user agent to 2.7. Terminal banners and HTTP requests share one version constant.
+  All 450 tests passed.
 
 v2.6
 

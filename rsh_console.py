@@ -4,6 +4,7 @@ from collections import deque
 from rsh_host_screen import HostScreen
 from rsh_host_access import HostCommandAccess
 from rsh_console_theme import ConsoleTheme, THEMES, THEME_ALIASES
+from rsh_version import VERSION
 import os
 import re
 import shutil
@@ -14,8 +15,6 @@ import time
 import unicodedata
 
 _ANSI_REGEX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
-
-VERSION = "2.7a"
 
 from retro_os.menu_data import console_sections
 

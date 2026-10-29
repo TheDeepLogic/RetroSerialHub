@@ -1,6 +1,6 @@
 # Settings failure recovery
 
-The v2.7a storage review found two failure paths that normal successful-save
+The v2.7 storage review found two failure paths that normal successful-save
 tests did not exercise.
 
 ## Starter settings

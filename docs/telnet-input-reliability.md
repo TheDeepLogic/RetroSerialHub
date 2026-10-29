@@ -1,6 +1,6 @@
 # Telnet and interactive input reliability
 
-The v2.7a stability review found three reproducible problems:
+The v2.7 stability review found three reproducible problems:
 
 - Telnet bookmark additions and deletions changed the session list before saving.
   A disk error could leave memory inconsistent with disk and disconnect the menu.

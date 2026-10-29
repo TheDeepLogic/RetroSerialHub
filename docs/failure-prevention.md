@@ -1,8 +1,6 @@
 # Failure prevention change notes
 
-Reviewed October 28, 2026, during v2.7a alpha development. These changes address
-three failure paths found by code inspection, rather than reported production
-incidents.
+These v2.7 changes address three failure paths found by code inspection.
 
 ## Download integrity and memory use
 

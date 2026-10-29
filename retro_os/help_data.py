@@ -176,7 +176,14 @@ Hub bridges this with a real-time extraction pipeline:
 
 * File Manager (A):
   Browse directories, inspect dates and sizes, create folders, rename, copy,
-  move, view, and transfer files. Host paths are supported. D=drives/root, B=parent, H=shared files.
+  move, view, and transfer files. Host paths are supported.
+  D=drives/root, B=parent, H=shared files, P=previous folder.
+  CLI: fileman previous or fileman cd - switches between the last two folders.
+
+* Document Reader:
+  Enter/B=next/back, F/N=find/next match, M/R=set/recall bookmark.
+  H/L=first/last page; type a page number directly or G to enter one.
+  Enter or Q cancels the G prompt; Q at the reader returns to the menu.
 
 * Archive Browser (C):
   Open ZIP archives and extract a selected member or all contents. Extraction

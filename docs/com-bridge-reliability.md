@@ -1,4 +1,4 @@
-# COM bridge byte preservation (v2.7a)
+# COM bridge byte preservation (v2.7)
 
 The bridge exposes both raw forwarding and a line-oriented input handler.
 Previously, both used chained replacements that expanded LF into CR/LF and

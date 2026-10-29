@@ -71,7 +71,7 @@ def run_reader(target, store_path, read, write, clear, columns=80, rows=24):
         write(status[:columns-1]+'\r\n\r\n')
         if not position_saved:
             write('Reading position not saved.\r\n')
-        write('Enter=Next B=Back F=Find N=Next match\r\nM=Bookmark R=Recall G=Page Q=Back\r\n\r\nReader: ')
+        write('Enter/B=Next/Back F/N=Find/Next match\r\nM/R=Mark G/#=Page H/L=First/Last Q=Back\r\n\r\nReader: ')
         choice = read().strip()
         upper = choice.upper()
         notice = ''
@@ -80,6 +80,10 @@ def run_reader(target, store_path, read, write, clear, columns=80, rows=24):
             return
         if upper == 'B':
             page = max(0,page-1)
+        elif upper in ('H', 'HOME', 'FIRST'):
+            page = 0
+        elif upper in ('L', 'END', 'LAST'):
+            page = last_page
         elif upper in ('F','N'):
             if upper == 'F':
                 write('Find text (Enter cancels): ')
@@ -97,11 +101,20 @@ def run_reader(target, store_path, read, write, clear, columns=80, rows=24):
             bookmark = page; notice = 'Bookmark set.'
         elif upper == 'R':
             page = min(bookmark,max(0,(len(lines)-1)//page_size))
-        elif upper == 'G':
-            write('Page number: ')
-            value = read().strip()
-            if value.isdigit():
-                page = max(0,min(int(value)-1,max(0,(len(lines)-1)//page_size)))
+        elif upper == 'G' or choice.isdecimal():
+            value = choice
+            if upper == 'G':
+                write(f'Page number (1-{last_page + 1}, Enter cancels): ')
+                value = read().strip()
+            if value and value.upper() not in ('Q', 'ATM'):
+                try:
+                    requested_page = int(value)
+                except ValueError:
+                    requested_page = 0
+                if 1 <= requested_page <= last_page + 1:
+                    page = requested_page - 1
+                else:
+                    notice = f'Page must be 1-{last_page + 1}.'
         elif not choice:
             if (page+1)*page_size >= len(lines):
                 notice = 'End of document. Q returns.'

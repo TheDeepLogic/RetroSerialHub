@@ -26,14 +26,14 @@ def run_file_browser(files, execute, read, write, render, clear, dispatch, purpo
         body=str(result) + ('\n\n'+str(notice) if notice else '')
         notice=''
         render(body,page_lines=max(1,rows-11))
-        write('\r\nNumber=Open D=Drives B=Parent H=Shared\r\nG=Path F=Filter V=Favorites M=Marked\r\nO=Other operations Q=Back\r\n\r\nChoice (or command): ')
+        write('\r\nNumber=Open D=Drives B=Parent H=Shared\r\nG=Path F=Filter V=Favorites M=Marked\r\nO=Other operations P=Previous Q=Back\r\n\r\nChoice (or command): ')
         choice = read().strip(); upper = choice.upper()
         if upper in ('Q','ATM','EXIT'):
             return False
         if not choice:
             result = safe(lambda: files.command(['ls'])); continue
-        if upper in ('D','B','H'):
-            result = safe(lambda: files.command([{'D':'drives','B':'parent','H':'home'}[upper]])); continue
+        if upper in ('D','B','H','P'):
+            result = safe(lambda: files.command([{'D':'drives','B':'parent','H':'home','P':'previous'}[upper]])); continue
         if upper in ('G','F'):
             value = ask('Folder path' if upper == 'G' else 'Filename filter (* clears)')
             if value:

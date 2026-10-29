@@ -1,6 +1,6 @@
 ![Retro Serial Hub](images/retroserialhub_banner.jpg)
 
-# Retro Serial Hub v2.7a
+# Retro Serial Hub v2.7
 
 A multi-port serial hub that connects vintage computers to modern TCP/IP
 networks and accepts incoming Telnet-compatible connections. Systems using
@@ -316,6 +316,9 @@ filesystem access remains available.
 
 - A number opens a directory or a file's action menu.
 - D lists drives/root, B opens the parent, H opens the shared folder, G accepts a path.
+- P returns to the previous folder; repeat it to switch between two folders.
+  The CLI equivalents are `fileman previous` and `fileman cd -`. History belongs
+  to the current session; a failed directory change preserves the current folder.
 - F changes the filename filter; `*` clears it. The current filter is displayed.
 - V manages folder favorites, M manages marked items, O opens other operations.
 - A selected file offers relevant view/play/image/ZIP actions, plus copy, move,
@@ -344,7 +347,11 @@ main menu. Reader/game-specific controls are shown on their own screens.
 ### Reading and notes
 
 The reader supports Enter=next, B=back, F=find, N=next match, M=bookmark,
-R=recall bookmark, G=page, and Q=back. Position and bookmark are saved by file
+R=recall bookmark, G=page, H=first page, L=last page, and Q=back. Type a page
+number directly to jump without an extra prompt. HOME/FIRST and END/LAST are
+also accepted as typed commands. Out-of-range numbers leave the current page
+unchanged and show the valid range; Enter or Q cancels the G prompt.
+Position and bookmark are saved by file
 and terminal width. The Text Library and note selections open this reader.
 Files selected for viewing use the host's existing extraction support.
 Unreadable or corrupt saved positions no longer prevent reading. The reader starts
@@ -1094,18 +1101,22 @@ serial timing from hardware measurements.
 
 ## Release Notes
 
-### v2.7a (alpha)
+### v2.7
 
-- **Failure Prevention Review (October 28, 2026)**:
-  - `fetch` now streams downloads in 64 KiB chunks to unique temporary files,
-    verifies a supplied content length, and replaces the destination only after
-    completion. Failed transfers preserve the previous file.
-  - Event listeners and module event hooks now log individual failures and
-    continue delivery to later listeners, including asynchronous listeners.
-  - Batch copy/move checks duplicate destination names before making changes,
-    preventing partially completed batches caused by same-named marked items.
-  See [failure prevention change notes](docs/failure-prevention.md) for behavior,
-  limits, and regression checks.
+- **Previous Folder**: Added P to the shared file browser and `fileman previous`
+  / `fileman cd -` to switch between the current and previous folders. History
+  stays within each session, and failed directory changes keep the current folder.
+- **Reader Navigation**: Added H/L for first/last page and direct page-number
+  entry. Invalid pages report the valid range without moving; G prompts can be
+  cancelled with Enter or Q. Existing bookmarks and saved positions still work.
+- **Download Integrity**: `fetch` now streams downloads in 64 KiB chunks to unique
+  temporary files, verifies a supplied content length, and replaces the
+  destination only after completion. Failed transfers preserve the previous file.
+- **Event Delivery Recovery**: Event listeners and module hooks now log individual
+  failures and continue delivery to later listeners, including async listeners.
+- **Batch Destination Checks**: Copy/move checks duplicate destination names before
+  making changes, preventing partial batches caused by same-named marked items.
+  See [failure prevention notes](docs/failure-prevention.md) for validation details.
 - **Shared Tool Data**: Contacts, calendar entries, folder preferences, launch presets,
   and other record stores now use unique, synced temporary files with atomic
   replacement and failure cleanup. Existing saved data survives failed saves.
@@ -1209,8 +1220,9 @@ serial timing from hardware measurements.
   host-control approval boundaries, XMODEM wire costs, and Notepad recovery. Includes
   a repeatable assertion-based measurement harness and recorded results. See the
   [technical documentation index](docs/README.md).
-- **Development Version**: Updated the displayed application version, bundled guide,
-  and web-viewer user agent to 2.7a (alpha). The v2.6 release notes remain the release record.
+- **Release Version**: Updated the displayed application version, bundled guide,
+  and web-viewer user agent to 2.7. Terminal banners and HTTP requests now share
+  one version constant. All 450 tests passed.
 
 ### v2.6
 

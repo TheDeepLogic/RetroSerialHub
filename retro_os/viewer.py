@@ -13,9 +13,11 @@ import textwrap
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
+from rsh_version import VERSION
 
 logger = logging.getLogger(__name__)
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
+USER_AGENT = f"RetroSerialHub/{VERSION} (Vintage Terminal Host)"
 
 class SimpleHTMLTextExtractor(HTMLParser):
     """Strip HTML markup and return clean, readable text formatted for retro terminals."""
@@ -68,7 +70,7 @@ def fetch_url(url, dest_dir=None, dest_name=None, timeout=15):
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "RetroSerialHub/2.7a (Vintage Terminal Host)"},
+        headers={"User-Agent": USER_AGENT},
     )
     ctx = ssl.create_default_context()
     temporary = None
@@ -135,7 +137,7 @@ def extract_text_from_url(url, timeout=15):
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "RetroSerialHub/2.7a (Vintage Terminal Host)"},
+        headers={"User-Agent": USER_AGENT},
     )
     ctx = ssl.create_default_context()
     with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:

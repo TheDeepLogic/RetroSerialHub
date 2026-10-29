@@ -284,10 +284,10 @@ class ContactsTool:
 
 
 class FileTools:
-    HELP = ("fileman [ls | d/drives | b/parent | h/home | cd <folder/#> | info <file/#> | mkdir <folder> | "
+    HELP = ("fileman [ls | d/drives | b/parent | h/home | p/previous | cd <folder/#/-> | info <file/#> | mkdir <folder> | "
             "rename <file/#> <name> | copy <file/#> <destination> | move <file/#> <destination> | "
             "view <file/#> | send <file/#> [x|y|ascii] | filter <pattern> | favorites | "
-            "favorite add/go/delete <name> | mark <file/#> | unmark | copy/move marked <folder>]\nHost paths supported. D=drives/root, B=parent, H=shared files.")
+            "favorite add/go/delete <name> | mark <file/#> | unmark | copy/move marked <folder>]\nHost paths supported. D=drives/root, B=parent, H=shared files, P=previous folder.")
     ARCHIVE_HELP = ("archive [list | open <ZIP file> | members | extract <member #|all> [folder]]\n"
                     "Extraction creates files without replacing existing files.")
 
@@ -295,6 +295,7 @@ class FileTools:
         self.allow_host = allow_host
         self.root = pathlib.Path(root).resolve()
         self.cwd, self.context = self.root, context
+        self.previous_cwd = None
         self.entries = []
         self.archive = None
         self.filter_pattern = '*'
@@ -408,6 +409,10 @@ class FileTools:
             return self.command(["cd", ".."])
         if action in ("h", "home"):
             return self.command(["cd", str(self.root)])
+        if action in ('p', 'previous') or (action == 'cd' and len(args) == 2 and args[1] == '-'):
+            if self.previous_cwd is None:
+                raise ValueError('No previous folder yet. Open another folder first.')
+            return self.command(['cd', str(self.previous_cwd)])
         if action in ("ls", "list"):
             return self.listing()
         if action == "help":
@@ -418,8 +423,16 @@ class FileTools:
         if action == "cd":
             if not target.is_dir():
                 raise ValueError("Choose a directory.")
+            previous = self.cwd
             self.cwd = target
-            return self.listing()
+            try:
+                result = self.listing()
+            except OSError:
+                self.cwd = previous
+                raise
+            if target != previous:
+                self.previous_cwd = previous
+            return result
         if action == "mkdir":
             target.mkdir(parents=True, exist_ok=False)
             return self.listing()

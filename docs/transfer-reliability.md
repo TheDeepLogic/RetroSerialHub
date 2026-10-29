@@ -1,6 +1,6 @@
 # Transfer deadlines and error recovery
 
-During the v2.7a stability review, two failure paths were identified in the shared
+During the v2.7 stability review, two failure paths were identified in the shared
 XMODEM/YMODEM engine:
 
 - Fragmented reads checked the deadline only after an empty read. A continuous
@@ -40,7 +40,7 @@ Windows platform detection. The failure is a host-menu integration timeout.
 These existing test issues remain unresolved; physical serial testing was not
 performed.
 
-## Destination copy recovery (v2.7a)
+## Destination copy recovery (v2.7)
 
 The receiver first writes a uniquely named `.part` file next to the requested
 destination. Previously, a failed final copy (for example, a full disk) left a
