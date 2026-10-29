@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import threading
+from tempfile import NamedTemporaryFile
 
 _LOCK = threading.RLock()
 DEFAULTS = {'pace_ms': 0, 'caps': False, 'protocol': 'XMODEM', 'start': 'menu',
@@ -57,7 +58,16 @@ class MachinePreferences:
             data = self._load()
             data.setdefault(name, {})[key] = value
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix('.tmp')
-            temporary.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
-            temporary.replace(self.path)
+            temporary = None
+            try:
+                with NamedTemporaryFile(mode='w', encoding='utf-8',
+                                        dir=self.path.parent,
+                                        prefix=self.path.name + '.', suffix='.tmp',
+                                        delete=False) as output:
+                    temporary = Path(output.name)
+                    output.write(json.dumps(data, indent=2) + '\n')
+                temporary.replace(self.path)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
         return value

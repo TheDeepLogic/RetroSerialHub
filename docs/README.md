@@ -7,6 +7,7 @@ is new in v2.7a.
 
 | Note | What it explains |
 |---|---|
+| [Settings failure recovery](settings-recovery.md) | Partial starter-copy cleanup, retryable machine-preference saves, unique temporary files, and persistence limits. |
 | [Telnet and input reliability](telnet-input-reliability.md) | Recoverable bookmark saves, bounded protocol polling, buffered input latency, and Python 3.9 test compatibility. |
 | [Transfer reliability](transfer-reliability.md) | Overall fragmented-read deadlines, disconnected cancellation recovery, and deterministic regression tests. |
 | [COM bridge reliability](com-bridge-reliability.md) | Transparent raw bytes, split CR/LF reads, and line-oriented newline conversion. |
