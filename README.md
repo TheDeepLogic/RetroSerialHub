@@ -1085,6 +1085,12 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Notepad Rename and Export Recovery**: Rename/export prompts now accept
+  filenames such as N, B, and O without triggering menu navigation. Export reads
+  the source before creating its destination, removes incomplete exports after
+  write failures when possible, and preserves existing destination files. Added
+  regression coverage for recovery and retry; see
+  [Notepad recovery notes](docs/notepad-edit-recovery.md).
 - **Telnet and Input Reliability**: Failed Telnet bookmark saves/deletions now
   preserve the current list and offer a retry; Q cancels deletion, and N connects
   without saving after an add failure. Saves use unique temporary files. Inbound

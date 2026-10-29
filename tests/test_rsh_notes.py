@@ -18,6 +18,77 @@ class Terminal:
 
 
 class NotesEditTests(unittest.TestCase):
+    def test_rename_accepts_menu_command_filenames(self):
+        for name in ('N', 'B', 'O'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                base = Path(folder)
+                note = base / 'note.txt'
+                note.write_bytes(b'Original\n')
+                terminal = Terminal()
+                session = rsh_notes.create_session(terminal, False, [note.name], base)
+                rsh_notes.handle_input(session, 'R1', terminal, False)
+                rsh_notes.handle_input(session, name, terminal, False)
+                self.assertEqual((base / (name + '.txt')).read_bytes(), b'Original\n')
+                self.assertFalse(note.exists())
+                self.assertNotIn('note_operation', session)
+
+    def test_export_read_failure_creates_no_destination_and_allows_retry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            note = base / 'note.txt'
+            destination = base / 'export.txt'
+            note.write_bytes(b'Original\n')
+            terminal = Terminal()
+            session = rsh_notes.create_session(terminal, False, [note.name], base)
+            rsh_notes.handle_input(session, 'X1', terminal, False)
+            with patch.object(Path, 'read_bytes', side_effect=PermissionError('Source busy')):
+                rsh_notes.handle_input(session, str(destination), terminal, False)
+            self.assertFalse(destination.exists())
+            self.assertIn('Source busy', session['notice'])
+            rsh_notes.handle_input(session, 'X1', terminal, False)
+            rsh_notes.handle_input(session, str(destination), terminal, False)
+            self.assertEqual(destination.read_bytes(), note.read_bytes())
+            # Exclusive creation must preserve an existing export.
+            destination.write_bytes(b'Keep existing')
+            rsh_notes.handle_input(session, 'X1', terminal, False)
+            rsh_notes.handle_input(session, str(destination), terminal, False)
+            self.assertEqual(destination.read_bytes(), b'Keep existing')
+
+    def test_failed_export_removes_partial_destination(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            note = base / 'note.txt'
+            destination = base / 'export.txt'
+            note.write_bytes(b'Original\n')
+            terminal = Terminal()
+            session = rsh_notes.create_session(terminal, False, [note.name], base)
+            real_open = Path.open
+
+            @contextmanager
+            def failed_output():
+                with real_open(destination, 'xb') as output:
+                    real_write = output.write
+
+                    def fail_write(data):
+                        real_write(data[:3])
+                        raise OSError('Disk full')
+
+                    with patch.object(output, 'write', side_effect=fail_write):
+                        yield output
+
+            def open_export(path, *args, **kwargs):
+                if path == destination:
+                    return failed_output()
+                return real_open(path, *args, **kwargs)
+
+            rsh_notes.handle_input(session, 'X1', terminal, False)
+            with patch.object(Path, 'open', open_export):
+                rsh_notes.handle_input(session, str(destination), terminal, False)
+            self.assertFalse(destination.exists())
+            self.assertEqual(note.read_bytes(), b'Original\n')
+            self.assertIn('Disk full', session['notice'])
+            self.assertTrue(terminal.output.endswith(b'Command: '))
+
     def test_search_skips_io_failures_and_preserves_filename_matches(self):
         for failure in ('stat', 'read_text'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as folder:
