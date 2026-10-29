@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pathlib
+import logging
+import os
 import shutil
 import ssl
 import subprocess
@@ -12,6 +14,8 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
+logger = logging.getLogger(__name__)
+DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
 class SimpleHTMLTextExtractor(HTMLParser):
     """Strip HTML markup and return clean, readable text formatted for retro terminals."""
@@ -52,7 +56,8 @@ class SimpleHTMLTextExtractor(HTMLParser):
 def fetch_url(url, dest_dir=None, dest_name=None, timeout=15):
     """Download a file from an HTTP/HTTPS URL and save it to disk.
 
-    Returns (dest_path, byte_count).
+    Stream to a temporary file and replace the destination only on completion.
+    Returns (dest_path, byte_count). An existing file survives failed downloads.
     """
     url = str(url).strip()
     if "://" not in url:
@@ -66,32 +71,57 @@ def fetch_url(url, dest_dir=None, dest_name=None, timeout=15):
         headers={"User-Agent": "RetroSerialHub/2.7a (Vintage Terminal Host)"},
     )
     ctx = ssl.create_default_context()
-    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-        data = resp.read()
-        ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    temporary = None
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+            if not dest_name:
+                url_path = parsed.path.rstrip("/")
+                dest_name = pathlib.Path(url_path).name if url_path else ""
+                if not dest_name or "." not in dest_name:
+                    ext_map = {
+                        "text/plain": ".txt",
+                        "text/html": ".html",
+                        "application/pdf": ".pdf",
+                        "application/json": ".json",
+                        "text/csv": ".csv",
+                        "text/markdown": ".md",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+                    }
+                    ext = ext_map.get(ctype, ".txt")
+                    dest_name = (dest_name or "download") + ext
 
-    if not dest_name:
-        url_path = parsed.path.rstrip("/")
-        dest_name = pathlib.Path(url_path).name if url_path else ""
-        if not dest_name or "." not in dest_name:
-            ext_map = {
-                "text/plain": ".txt",
-                "text/html": ".html",
-                "application/pdf": ".pdf",
-                "application/json": ".json",
-                "text/csv": ".csv",
-                "text/markdown": ".md",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-            }
-            ext = ext_map.get(ctype, ".txt")
-            dest_name = (dest_name or "download") + ext
-
-    target_folder = pathlib.Path(dest_dir) if dest_dir else pathlib.Path.cwd()
-    target_folder.mkdir(parents=True, exist_ok=True)
-    dest_path = target_folder / dest_name
-    dest_path.write_bytes(data)
-    return dest_path, len(data)
+            target_folder = pathlib.Path(dest_dir) if dest_dir else pathlib.Path.cwd()
+            target_folder.mkdir(parents=True, exist_ok=True)
+            dest_path = target_folder / dest_name
+            try:
+                expected_size = int(resp.headers.get('Content-Length', ''))
+            except (TypeError, ValueError):
+                expected_size = -1
+            with tempfile.NamedTemporaryFile(mode='wb', dir=dest_path.parent,
+                                            prefix=dest_path.name + '.', suffix='.tmp',
+                                            delete=False) as output:
+                temporary = pathlib.Path(output.name)
+                size = 0
+                while True:
+                    chunk = resp.read(DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    size += len(chunk)
+                if expected_size >= 0 and size != expected_size:
+                    raise OSError(f'Incomplete download: expected {expected_size} bytes, received {size}.')
+                output.flush()
+                os.fsync(output.fileno())
+        temporary.replace(dest_path)
+        return dest_path, size
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning('Could not remove incomplete download %s: %s', temporary, exc)
 
 
 def extract_text_from_url(url, timeout=15):

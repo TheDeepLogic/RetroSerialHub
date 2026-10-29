@@ -7,6 +7,7 @@ is new in v2.7a.
 
 | Note | What it explains |
 |---|---|
+| [Failure prevention change notes](failure-prevention.md) | Streamed download integrity, event-listener isolation, and batch destination preflight. |
 | [Tool data and recovery](tool-data-reliability.md) | Atomic record saves, reader-state recovery, measured search memory, and retrying failed ZIP members. |
 | [Scheduler guide and reliability](scheduler-reliability.md) | Commands, quoting, recurrence rules, diagnostics, atomic saves, and worker recovery. |
 | [Settings failure recovery](settings-recovery.md) | Partial starter-copy cleanup, retryable machine-preference saves, unique temporary files, and persistence limits. |

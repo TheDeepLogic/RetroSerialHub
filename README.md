@@ -322,6 +322,8 @@ filesystem access remains available.
   rename, transfer, and marking.
 - Copy/move accepts `=` to reuse the remembered destination. Mark multiple items
   to copy/move a batch; conflicting destinations are rejected before starting.
+  This includes identically named items marked in different folders; rename an
+  item or copy/move those items separately. Rejected batches retain their marks.
 - Other operations include folder creation, upload, protocol selection, search,
   opening a web URL, and reading notifications.
 
@@ -1094,6 +1096,16 @@ serial timing from hardware measurements.
 
 ### v2.7a (alpha)
 
+- **Failure Prevention Review (October 28, 2026)**:
+  - `fetch` now streams downloads in 64 KiB chunks to unique temporary files,
+    verifies a supplied content length, and replaces the destination only after
+    completion. Failed transfers preserve the previous file.
+  - Event listeners and module event hooks now log individual failures and
+    continue delivery to later listeners, including asynchronous listeners.
+  - Batch copy/move checks duplicate destination names before making changes,
+    preventing partially completed batches caused by same-named marked items.
+  See [failure prevention change notes](docs/failure-prevention.md) for behavior,
+  limits, and regression checks.
 - **Shared Tool Data**: Contacts, calendar entries, folder preferences, launch presets,
   and other record stores now use unique, synced temporary files with atomic
   replacement and failure cleanup. Existing saved data survives failed saves.

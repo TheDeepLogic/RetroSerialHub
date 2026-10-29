@@ -380,7 +380,12 @@ class FileTools:
                 raise ValueError('Choose a destination directory.')
             folder = self.path(destination, numbered=False)
             paths = sorted(self.marked)
+            destinations = set()
             for path in paths:
+                output_path = folder / path.name
+                if output_path in destinations:
+                    raise ValueError('Marked items have the same destination name; copy or move them separately.')
+                destinations.add(output_path)
                 if not path.exists():
                     raise ValueError("A marked item no longer exists; refresh and mark it again.")
                 if action == "copy" and path.is_dir() and any(p.is_symlink() or (hasattr(p,"is_junction") and p.is_junction()) for p in path.rglob("*")):

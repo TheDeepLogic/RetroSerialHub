@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import logging
 import shlex
 import threading
 import uuid
@@ -13,10 +14,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 _MODULE_INITIALIZATION_LOCK = threading.RLock()
+logger = logging.getLogger(__name__)
 
 
 class EventBus:
-    """Thread-safe topic-based event delivery."""
+    """Thread-safe, best-effort topic delivery with isolated listener errors."""
 
     def __init__(self):
         self._subscribers: dict[str, list[Callable[[Any], Any]]] = {}
@@ -36,21 +38,33 @@ class EventBus:
 
         return unsubscribe
 
+    async def _await_result(self, topic, handler, result):
+        try:
+            return await result
+        except Exception:
+            logger.exception('Event listener %r failed for topic %s', handler, topic)
+            return None
+
     def publish(self, topic: str, event: Any = None):
         with self._lock:
             handlers = tuple(self._subscribers.get(topic, ()))
         results = []
         for handler in handlers:
-            result = handler(event)
-            if inspect.isawaitable(result):
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    asyncio.run(result)
+            try:
+                result = handler(event)
+                if inspect.isawaitable(result):
+                    pending = self._await_result(topic, handler, result)
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        results.append(asyncio.run(pending))
+                    else:
+                        results.append(loop.create_task(pending))
                 else:
-                    results.append(loop.create_task(result))
-            else:
-                results.append(result)
+                    results.append(result)
+            except Exception:
+                logger.exception('Event listener %r failed for topic %s', handler, topic)
+                results.append(None)
         return results
 
     async def publish_async(self, topic: str, event: Any = None):
@@ -58,8 +72,13 @@ class EventBus:
             handlers = tuple(self._subscribers.get(topic, ()))
         results = []
         for handler in handlers:
-            result = handler(event)
-            results.append(await result if inspect.isawaitable(result) else result)
+            try:
+                result = handler(event)
+                results.append(await self._await_result(topic, handler, result)
+                               if inspect.isawaitable(result) else result)
+            except Exception:
+                logger.exception('Event listener %r failed for topic %s', handler, topic)
+                results.append(None)
         return results
 
 
@@ -171,4 +190,7 @@ class ModuleLoader:
 
     def dispatch_event(self, event):
         for module in tuple(self.modules.values()):
-            module.handle_event(event)
+            try:
+                module.handle_event(event)
+            except Exception:
+                logger.exception('Module event handler failed: %s', getattr(module, '__name__', repr(module)))
